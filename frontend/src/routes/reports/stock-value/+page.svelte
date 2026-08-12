@@ -18,7 +18,7 @@
 		build: 'Build order',
 		build_partial: 'Build order (partly estimated)',
 		po_no_price: 'Purchase order (no price)',
-		estimate: 'Estimate (latest PO)',
+		estimate: 'Part price estimate',
 		virtual: 'Virtual component (labour)',
 		none: 'No price known'
 	};
