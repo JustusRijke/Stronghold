@@ -10,7 +10,8 @@ _PAGE = 100
 
 
 def _get(url: str, headers: dict[str, str]) -> dict:
-    request = urllib.request.Request(url, headers=headers)
+    # S310: url is the operator's own InvenTree host from settings.toml, not user input
+    request = urllib.request.Request(url, headers=headers)  # noqa: S310
     # generous: a large page of build lines is slow to compute server-side
     with urllib.request.urlopen(request, timeout=120) as response:  # noqa: S310
         return json.loads(response.read())
@@ -97,7 +98,7 @@ def _pack_qty(value) -> int:
     # InvenTree. Take the leading number; default 1 if unparseable.
     try:
         return int(float(str(value).split()[0]))
-    except (ValueError, IndexError):
+    except ValueError, IndexError:
         return 1
 
 

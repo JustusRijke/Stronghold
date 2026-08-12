@@ -12,15 +12,13 @@ import logging
 from datetime import date
 from pathlib import Path
 
-from sqlalchemy import create_engine, event, func, select
-from sqlalchemy.orm import Session
-from sqlalchemy.schema import CreateTable
-
 from models import (
+    STOCK_AVAILABLE,
+    STOCK_CONSUMED,
     Activity,
     Base,
-    Booking,
     BomLine,
+    Booking,
     BuildLine,
     BuildOrder,
     BuildStatus,
@@ -30,12 +28,13 @@ from models import (
     PriceBasis,
     PurchaseOrder,
     Setting,
-    STOCK_AVAILABLE,
-    STOCK_CONSUMED,
     StockItem,
     Supplier,
     SupplierPart,
 )
+from sqlalchemy import create_engine, event, func, select
+from sqlalchemy.orm import Session
+from sqlalchemy.schema import CreateTable
 
 _log = logging.getLogger(__name__)
 
@@ -97,11 +96,13 @@ def export() -> None:
             ddl = str(CreateTable(table, if_not_exists=True).compile(_engine)).strip()
             lines.append(f"{ddl};")
             columns = ", ".join(column.name for column in table.columns)
+            # S608: table/column names come from our own model metadata, never
+            # from user input -- there is no injection vector here.
             for row in conn.exec_driver_sql(
-                f'SELECT * FROM "{table.name}" ORDER BY rowid'
+                f'SELECT * FROM "{table.name}" ORDER BY rowid'  # noqa: S608
             ):
                 values = ", ".join(_literal(value) for value in row)
-                lines.append(f"INSERT INTO {table.name} ({columns}) VALUES ({values});")
+                lines.append(f"INSERT INTO {table.name} ({columns}) VALUES ({values});")  # noqa: S608
     _export_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -190,9 +191,7 @@ def create_part(
     if s.get(Part, part_id) is not None:
         raise InventoryError(f"part id {part_id} already exists")
     s.add(Part(id=part_id, sku=sku, description=description, virtual=virtual))
-    _activity(
-        s, "create_part", f"Created part {description}", [("part", part_id, sku)]
-    )
+    _activity(s, "create_part", f"Created part {description}", [("part", part_id, sku)])
 
 
 @_write
@@ -211,7 +210,10 @@ def set_part_active(s: Session, part_id: int, active: bool) -> None:
     part.active = active
     verb = "Activated" if active else "Deactivated"
     _activity(
-        s, "set_part_active", f"{verb} part {part.description}", [("part", part_id, part.sku)]
+        s,
+        "set_part_active",
+        f"{verb} part {part.description}",
+        [("part", part_id, part.sku)],
     )
 
 
@@ -233,7 +235,12 @@ def latest_po_price_source(s: Session, part_id: int) -> tuple[float, int, str] |
     that priced this part, or None. Ordered by order date (ids do not follow
     date order); a line's price is per pack, so divide by pack_qty."""
     row = s.execute(
-        select(POLine.price, SupplierPart.pack_qty, PurchaseOrder.id, PurchaseOrder.reference)
+        select(
+            POLine.price,
+            SupplierPart.pack_qty,
+            PurchaseOrder.id,
+            PurchaseOrder.reference,
+        )
         .join(SupplierPart, POLine.supplier_part_id == SupplierPart.id)
         .join(PurchaseOrder, POLine.po_id == PurchaseOrder.id)
         .where(
@@ -242,7 +249,9 @@ def latest_po_price_source(s: Session, part_id: int) -> tuple[float, int, str] |
             SupplierPart.pack_qty > 0,
             PurchaseOrder.status != POStatus.CANCELLED,
         )
-        .order_by(PurchaseOrder.start_date.desc(), PurchaseOrder.id.desc(), POLine.id.desc())
+        .order_by(
+            PurchaseOrder.start_date.desc(), PurchaseOrder.id.desc(), POLine.id.desc()
+        )
         .limit(1)
     ).first()
     return (row[0] / row[1], row[2], row[3]) if row else None
@@ -253,7 +262,9 @@ def latest_po_unit_price(s: Session, part_id: int) -> float | None:
     return source[0] if source else None
 
 
-def _compute_price(s: Session, part_id: int, seen: set[int]) -> tuple[float | None, bool]:
+def _compute_price(
+    s: Session, part_id: int, seen: set[int]
+) -> tuple[float | None, bool]:
     """(unit price, partial) for one part. An assembly sums its components'
     prices * quantity; `partial` means at least one component had no price, so
     the sum is a floor. A part revisited within one walk is a BOM cycle: it
@@ -321,7 +332,9 @@ def refresh_part_price(s: Session, part_id: int) -> None:
         refresh_stock_prices_for_part(s, touched)
 
 
-def _po_unit_price_for(s: Session, po_id: int, item_id: int, part_id: int) -> float | None:
+def _po_unit_price_for(
+    s: Session, po_id: int, item_id: int, part_id: int
+) -> float | None:
     """What the order this stock came from paid per item, or None if that order
     has no price for it. Prefers the booked line (the exact line received into
     this item); migrated stock has no Booking, so fall back to that order's
@@ -470,7 +483,9 @@ def refresh_all_prices(s: Session) -> None:
     # consumed rows first: build-produced stock is costed from their prices
     for consumed_first in (STOCK_CONSUMED, STOCK_AVAILABLE):
         for item in s.scalars(
-            select(StockItem).where(StockItem.status == consumed_first).order_by(StockItem.id)
+            select(StockItem)
+            .where(StockItem.status == consumed_first)
+            .order_by(StockItem.id)
         ):
             refresh_stock_price(s, item)
 
@@ -768,7 +783,10 @@ def set_count(s: Session, item_id: int, count: float) -> None:
             s,
             "set_count",
             f"Adjusted stock of {part.description} from {old:g} to {count:g}",
-            [("stock", item_id, f"{count:g}x {part.description}"), ("part", item.part_id, part.sku)],
+            [
+                ("stock", item_id, f"{count:g}x {part.description}"),
+                ("part", item.part_id, part.sku),
+            ],
         )
 
 
@@ -840,7 +858,10 @@ def create_supplier(s: Session, supplier_id: int, name: str) -> None:
         raise InventoryError(f"supplier {supplier_id} already exists")
     s.add(Supplier(id=supplier_id, name=name))
     _activity(
-        s, "create_supplier", f"Created supplier {name}", [("supplier", supplier_id, name)]
+        s,
+        "create_supplier",
+        f"Created supplier {name}",
+        [("supplier", supplier_id, name)],
     )
 
 
@@ -984,9 +1005,13 @@ def edit_po(
     # Cancelled additionally requires nothing has been received yet, since
     # receipts already created real stock that cancelling can't undo.
     if po.status in (POStatus.COMPLETE, POStatus.CANCELLED) and status != po.status:
-        raise InventoryError(f"purchase order {po_id} is {po.status}, cannot change status")
+        raise InventoryError(
+            f"purchase order {po_id} is {po.status}, cannot change status"
+        )
     if status == POStatus.CANCELLED and _po_has_receipts(s, po_id):
-        raise InventoryError(f"purchase order {po_id} has received lines, cannot cancel")
+        raise InventoryError(
+            f"purchase order {po_id} has received lines, cannot cancel"
+        )
     if start_date is None:
         raise InventoryError("purchase order start date is required")
     if not reference.strip():
@@ -1078,9 +1103,9 @@ def edit_po_line(
         # line was valued at the old one
         refresh_part_price(s, get_supplier_part(s, line.supplier_part_id).part_id)
         for item in s.scalars(
-            select(StockItem).join(Booking, Booking.stock_item_id == StockItem.id).where(
-                Booking.po_line_id == line_id
-            )
+            select(StockItem)
+            .join(Booking, Booking.stock_item_id == StockItem.id)
+            .where(Booking.po_line_id == line_id)
         ):
             refresh_stock_price(s, item)
 
@@ -1101,7 +1126,9 @@ def remove_po_line(s: Session, line_id: int) -> None:
 def _check_po_line_editable(s: Session, line: POLine) -> None:
     po = get_po(s, line.po_id)
     if po.status in (POStatus.COMPLETE, POStatus.CANCELLED):
-        raise InventoryError(f"purchase order {po.id} is {po.status}, cannot edit lines")
+        raise InventoryError(
+            f"purchase order {po.id} is {po.status}, cannot edit lines"
+        )
 
 
 @_write
