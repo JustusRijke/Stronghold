@@ -36,3 +36,8 @@ backend/inventory.sql
 
 # Secrets
 SECRETS.md
+# Local dev launcher: carries the InvenTree host and password on its migrate line
+go.sh
+
+# Personal scratch list, not a public roadmap
+TODO.md
