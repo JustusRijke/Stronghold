@@ -12,7 +12,7 @@ export const PO_STATUS_OPTIONS = [
 	'Returned'
 ];
 
-export const BUILD_STATUS_OPTIONS = ['Pending', 'Production', 'On Hold', 'Cancelled', 'Complete'];
+export const BUILD_STATUS_OPTIONS = ['Draft', 'Pending', 'Production', 'Cancelled', 'Complete'];
 
 // Where a stock row came from: the PO it was received on, else the build that
 // produced it, else (shortfall debt rows have neither) the build that owes it.

@@ -30,6 +30,7 @@ from models import (
 )
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.orm import aliased
 
 router = APIRouter(prefix="/api")
 
@@ -63,6 +64,10 @@ class PartOut(BaseModel):
     purchasable: bool
     estimated_price: float | None  # cached unit price; None when nothing prices it
     price_partial: bool  # an assembly whose BOM has unpriced components
+    in_stock: float  # Available stock on hand (debt rows net out)
+    needed: float  # units builds in production still have to consume
+    incoming: float  # units still to be received on open POs
+    suggested_order: float  # max(0, needed - in_stock - incoming)
 
 
 class PartIn(BaseModel):
@@ -128,6 +133,7 @@ class StockItemOut(BaseModel):
     build_id: int | None  # the build that produced this stock
     consumed_by_build_id: int | None  # the build that consumed it
     build_reference: str  # label of build_id, else consumed_by_build_id; "" if neither
+    consumed_by_reference: str  # label of consumed_by_build_id; "" when it is null
     status: StockStatus
     unit_price: float | None  # what THIS stock is worth per item
     price_basis: PriceBasisOut
@@ -201,6 +207,11 @@ class PurchaseOrderOut(BaseModel):
     end_date: date | None
     delivery_cost: float
     supplier_reference: str
+
+
+class PartPurchaseOrderOut(PurchaseOrderOut):
+    quantity: float  # items of this part ordered (packs * pack_qty)
+    unit_price: float | None = None
 
 
 class PurchaseOrderIn(BaseModel):
@@ -277,7 +288,7 @@ class BuildOrderIn(BaseModel):
     part_id: int
     quantity: int = Field(gt=0)
     reference: str = ""
-    status: BuildStatus = BuildStatus.PENDING
+    status: BuildStatus = BuildStatus.DRAFT
     start_date: date | None = None
     end_date: date | None = None
 
@@ -324,7 +335,22 @@ class ActivityOut(BaseModel):
 # -- parts ------------------------------------------------------------------
 
 
-def _part_out(p: Part) -> PartOut:
+def _on_hand(s) -> dict[int, float]:
+    return {
+        part_id: total
+        for part_id, total in s.execute(
+            select(StockItem.part_id, func.sum(StockItem.count))
+            .where(StockItem.status == STOCK_AVAILABLE)
+            .group_by(StockItem.part_id)
+        )
+    }
+
+
+def _part_out(
+    p: Part, on_hand: dict[int, float], demand: dict[int, tuple[float, float]]
+) -> PartOut:
+    stock = on_hand.get(p.id, 0.0)
+    needed, incoming = demand.get(p.id, (0.0, 0.0))
     return PartOut(
         id=p.id,
         sku=p.sku,
@@ -335,22 +361,30 @@ def _part_out(p: Part) -> PartOut:
         purchasable=p.purchasable,
         estimated_price=p.estimated_price,
         price_partial=p.price_partial,
+        in_stock=stock,
+        needed=needed,
+        incoming=incoming,
+        suggested_order=max(0.0, needed - stock - incoming),
     )
 
 
 @router.get("/parts", response_model=list[PartOut])
 def list_parts() -> list[PartOut]:
     with db.session() as s:
-        return [_part_out(p) for p in s.scalars(select(Part).order_by(Part.id))]
+        on_hand, demand = _on_hand(s), db.part_demand(s)
+        return [
+            _part_out(p, on_hand, demand)
+            for p in s.scalars(select(Part).order_by(Part.id))
+        ]
 
 
 @router.get("/parts/{part_id}", response_model=PartOut)
 def get_part(part_id: int) -> PartOut:
     with db.session() as s:
         part = s.get(Part, part_id)
-    if part is None:
-        raise HTTPException(status_code=404, detail=f"no part {part_id}")
-    return _part_out(part)
+        if part is None:
+            raise HTTPException(status_code=404, detail=f"no part {part_id}")
+        return _part_out(part, _on_hand(s), db.part_demand(s))
 
 
 @router.post("/parts", response_model=PartOut, status_code=201)
@@ -379,21 +413,33 @@ def patch_part(part_id: int, body: PartPatch) -> PartOut:
     return get_part(part_id)
 
 
-@router.get("/parts/{part_id}/purchase-orders", response_model=list[PurchaseOrderOut])
-def list_part_pos(part_id: int) -> list[PurchaseOrderOut]:
-    """POs that ordered this part (through any of its supplier parts)."""
+def _pos_with_qty(where) -> list[PartPurchaseOrderOut]:
+    """POs whose lines match `where`, newest first, with the units ordered and
+    the price paid per unit on each."""
     with db.session() as s:
-        return [
-            _po_out(po)
-            for po in s.scalars(
-                select(PurchaseOrder)
-                .join(POLine, POLine.po_id == PurchaseOrder.id)
-                .join(SupplierPart, POLine.supplier_part_id == SupplierPart.id)
-                .where(SupplierPart.part_id == part_id)
-                .distinct()
-                .order_by(PurchaseOrder.id)
+        rows: dict[int, PartPurchaseOrderOut] = {}
+        for po, line, pack_qty in s.execute(
+            select(PurchaseOrder, POLine, SupplierPart.pack_qty)
+            .join(POLine, POLine.po_id == PurchaseOrder.id)
+            .join(SupplierPart, POLine.supplier_part_id == SupplierPart.id)
+            .where(where)
+            .order_by(PurchaseOrder.start_date.desc(), PurchaseOrder.id.desc())
+        ):
+            # a part can sit on several lines of one PO: sum the units, keep the last price
+            row = rows.setdefault(
+                po.id, PartPurchaseOrderOut(**_po_out(po).model_dump(), quantity=0.0)
             )
-        ]
+            row.quantity += line.quantity * pack_qty
+            row.unit_price = line.price / pack_qty if line.price else row.unit_price
+        return list(rows.values())
+
+
+@router.get(
+    "/parts/{part_id}/purchase-orders", response_model=list[PartPurchaseOrderOut]
+)
+def list_part_pos(part_id: int) -> list[PartPurchaseOrderOut]:
+    """POs that ordered this part, with what this part cost on each."""
+    return _pos_with_qty(SupplierPart.part_id == part_id)
 
 
 @router.get("/parts/{part_id}/used-in", response_model=list[BomUsageOut])
@@ -493,48 +539,56 @@ def remove_bom_line(line_id: int) -> OkOut:
 # the build a stock row belongs to: its producer, else the build that owes it
 # (a shortfall debt row and its consumed placeholder have no producing build)
 _src_build = func.coalesce(StockItem.build_id, StockItem.consumed_by_build_id)
+# the consuming build needs its own join: when a row has both a producer and a
+# consumer, _src_build names the producer, so nothing else carries this label
+_eater = aliased(BuildOrder)
+
+
+_STOCK_SELECT = (
+    select(
+        StockItem,
+        Part.sku,
+        Part.description,
+        PurchaseOrder.reference,
+        _src_build,
+        BuildOrder.reference,
+        _eater.reference,
+    )
+    .join(Part, StockItem.part_id == Part.id)
+    .join(PurchaseOrder, StockItem.po_id == PurchaseOrder.id, isouter=True)
+    # the build this stock came from: the one that produced it, or
+    # (debt/consumed rows have no producer) the one that owes it
+    .join(BuildOrder, _src_build == BuildOrder.id, isouter=True)
+    .join(_eater, StockItem.consumed_by_build_id == _eater.id, isouter=True)
+    .order_by(StockItem.id)
+)
+
+
+def _stock_out(row) -> StockItemOut:
+    i, sku, desc, po_ref, src_build, build_ref, eater_ref = row
+    return StockItemOut(
+        id=i.id,
+        part_id=i.part_id,
+        sku=sku,
+        description=desc,
+        count=i.count,
+        po_id=i.po_id,
+        po_reference=po_ref or "",
+        build_id=i.build_id,
+        consumed_by_build_id=i.consumed_by_build_id,
+        build_reference=build_ref
+        or (f"BO-{src_build}" if src_build is not None else ""),
+        consumed_by_reference=eater_ref
+        or (f"BO-{i.consumed_by_build_id}" if i.consumed_by_build_id else ""),
+        status=i.status,
+        unit_price=i.unit_price,
+        price_basis=i.price_basis,
+    )
 
 
 def _stock_rows() -> list[StockItemOut]:
     with db.session() as s:
-        return [
-            StockItemOut(
-                id=i.id,
-                part_id=i.part_id,
-                sku=sku,
-                description=desc,
-                count=i.count,
-                po_id=i.po_id,
-                po_reference=po_ref or "",
-                build_id=i.build_id,
-                consumed_by_build_id=i.consumed_by_build_id,
-                build_reference=build_ref
-                or (f"BO-{src_build}" if src_build is not None else ""),
-                status=i.status,
-                unit_price=i.unit_price,
-                price_basis=i.price_basis,
-            )
-            for i, sku, desc, po_ref, src_build, build_ref in s.execute(
-                select(
-                    StockItem,
-                    Part.sku,
-                    Part.description,
-                    PurchaseOrder.reference,
-                    _src_build,
-                    BuildOrder.reference,
-                )
-                .join(Part, StockItem.part_id == Part.id)
-                .join(
-                    PurchaseOrder,
-                    StockItem.po_id == PurchaseOrder.id,
-                    isouter=True,
-                )
-                # the build this stock came from: the one that produced it, or
-                # (debt/consumed rows have no producer) the one that owes it
-                .join(BuildOrder, _src_build == BuildOrder.id, isouter=True)
-                .order_by(StockItem.id)
-            )
-        ]
+        return [_stock_out(r) for r in s.execute(_STOCK_SELECT)]
 
 
 @router.get("/stock", response_model=list[StockItemOut])
@@ -731,21 +785,11 @@ def patch_supplier_part(sp_id: int, body: SupplierPartPatch) -> SupplierPartOut:
 
 
 @router.get(
-    "/supplier-parts/{sp_id}/purchase-orders", response_model=list[PurchaseOrderOut]
+    "/supplier-parts/{sp_id}/purchase-orders", response_model=list[PartPurchaseOrderOut]
 )
-def list_supplier_part_pos(sp_id: int) -> list[PurchaseOrderOut]:
+def list_supplier_part_pos(sp_id: int) -> list[PartPurchaseOrderOut]:
     """POs that have at least one line for this supplier part."""
-    with db.session() as s:
-        return [
-            _po_out(po)
-            for po in s.scalars(
-                select(PurchaseOrder)
-                .join(POLine, POLine.po_id == PurchaseOrder.id)
-                .where(POLine.supplier_part_id == sp_id)
-                .distinct()
-                .order_by(PurchaseOrder.id)
-            )
-        ]
+    return _pos_with_qty(POLine.supplier_part_id == sp_id)
 
 
 # -- purchase orders --------------------------------------------------------
@@ -1033,45 +1077,14 @@ def list_build_stock(build_id: int) -> list[StockItemOut]:
     separate columns; status tells consumed rows from available ones."""
     with db.session() as s:
         return [
-            StockItemOut(
-                id=i.id,
-                part_id=i.part_id,
-                sku=sku,
-                description=desc,
-                count=i.count,
-                po_id=i.po_id,
-                po_reference=po_ref or "",
-                build_id=i.build_id,
-                consumed_by_build_id=i.consumed_by_build_id,
-                build_reference=build_ref
-                or (f"BO-{src_build}" if src_build is not None else ""),
-                status=i.status,
-                unit_price=i.unit_price,
-                price_basis=i.price_basis,
-            )
-            for i, sku, desc, po_ref, src_build, build_ref in s.execute(
-                select(
-                    StockItem,
-                    Part.sku,
-                    Part.description,
-                    PurchaseOrder.reference,
-                    _src_build,
-                    BuildOrder.reference,
-                )
-                .join(Part, StockItem.part_id == Part.id)
-                .join(
-                    PurchaseOrder,
-                    StockItem.po_id == PurchaseOrder.id,
-                    isouter=True,
-                )
-                .join(BuildOrder, _src_build == BuildOrder.id, isouter=True)
-                .where(
+            _stock_out(r)
+            for r in s.execute(
+                _STOCK_SELECT.where(
                     or_(
                         StockItem.build_id == build_id,
                         StockItem.consumed_by_build_id == build_id,
                     )
                 )
-                .order_by(StockItem.id)
             )
         ]
 

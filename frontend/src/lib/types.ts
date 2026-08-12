@@ -13,6 +13,7 @@ export type StockItem = S['StockItemOut'];
 export type Supplier = S['SupplierOut'];
 export type SupplierPart = S['SupplierPartOut'];
 export type PurchaseOrder = S['PurchaseOrderOut'];
+export type PartPurchaseOrder = S['PartPurchaseOrderOut'];
 export type POLine = S['POLineOut'];
 export type BuildOrder = S['BuildOrderOut'];
 export type BuildLine = S['BuildLineOut'];

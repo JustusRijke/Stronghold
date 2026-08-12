@@ -39,8 +39,9 @@ function makeTabs(section: string) {
 			persist();
 			return tabs[i]?.id ?? tabs[i - 1]?.id ?? null;
 		},
-		closeAll() {
-			tabs.splice(0, tabs.length);
+		// keep is undefined for "close all", or the one tab to keep open
+		closeAll(keep?: number) {
+			tabs.splice(0, tabs.length, ...tabs.filter((t) => t.id === keep));
 			persist();
 		}
 	};

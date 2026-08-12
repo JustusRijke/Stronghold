@@ -1393,17 +1393,17 @@ def edit_build(
             f"build {build_id}: quantity {quantity} below {already} already produced"
         )
     # status transition rules: Complete only when fully produced; once anything
-    # is produced the order can only be Production, On Hold, or Complete (no
-    # reverting to Pending/Cancelled). On Hold is kept for later stock planning.
+    # is produced the order can only be Production or Complete (no reverting to
+    # Draft/Pending/Cancelled).
     if status == BuildStatus.COMPLETE and already != quantity:
         raise InventoryError(
             f"build {build_id}: cannot complete, produced {already} of {quantity}"
         )
-    started_states = (BuildStatus.PRODUCTION, BuildStatus.ON_HOLD, BuildStatus.COMPLETE)
+    started_states = (BuildStatus.PRODUCTION, BuildStatus.COMPLETE)
     if already > 0 and status not in started_states:
         raise InventoryError(
             f"build {build_id}: {already} already produced; status must be "
-            "Production, On Hold or Complete"
+            "Production or Complete"
         )
     build.quantity = quantity
     build.reference = reference
@@ -1583,3 +1583,65 @@ def produce_build(s: Session, build_id: int, quantity: int) -> None:
     )
     if quantity >= remaining:
         build.status = BuildStatus.COMPLETE
+
+
+# -- demand -----------------------------------------------------------------
+
+
+def part_demand(s: Session) -> dict[int, tuple[float, float]]:
+    """Per part: (units still needed by planned builds, units still to be
+    received on open POs). Two grouped queries, not one per part.
+
+    A build counts once it is Pending -- planned is what you buy against; Draft
+    is the scratchpad status and asks for nothing. Its need is its snapshot's
+    per-unit quantity times the units it has left to produce; a PO line's is the
+    packs still outstanding times pack_qty. Virtual components hold no stock, so
+    they are never needed."""
+    needed: dict[int, float] = {}
+    for build_id, part_id, per_unit, qty in s.execute(
+        select(
+            BuildLine.build_id,
+            BuildLine.component_part_id,
+            BuildLine.quantity,
+            BuildOrder.quantity,
+        )
+        .join(BuildOrder, BuildLine.build_id == BuildOrder.id)
+        .join(Part, BuildLine.component_part_id == Part.id)
+        .where(
+            BuildOrder.status.in_((BuildStatus.PENDING, BuildStatus.PRODUCTION)),
+            Part.virtual.is_(False),
+        )
+    ):
+        # ponytail: produced_qty per build inside the loop; open builds are few.
+        # Group stock by build_id if that stops being true.
+        remaining = qty - produced_qty(s, build_id)
+        if remaining > 0:
+            needed[part_id] = needed.get(part_id, 0.0) + per_unit * remaining
+
+    incoming: dict[int, float] = {}
+    for part_id, units in s.execute(
+        select(
+            SupplierPart.part_id,
+            func.sum((POLine.quantity - POLine.received) * SupplierPart.pack_qty),
+        )
+        .join(POLine, POLine.supplier_part_id == SupplierPart.id)
+        .join(PurchaseOrder, POLine.po_id == PurchaseOrder.id)
+        .where(
+            PurchaseOrder.status.not_in(
+                (
+                    POStatus.CANCELLED,
+                    POStatus.COMPLETE,
+                    POStatus.RETURNED,
+                    POStatus.LOST,
+                )
+            ),
+            POLine.quantity > POLine.received,
+        )
+        .group_by(SupplierPart.part_id)
+    ):
+        incoming[part_id] = units
+
+    return {
+        pid: (needed.get(pid, 0.0), incoming.get(pid, 0.0))
+        for pid in set(needed) | set(incoming)
+    }

@@ -223,7 +223,7 @@ def test_build_flow(client):
         "/api/build-orders", json={"part_id": asm, "quantity": 3}
     ).json()
     bid = build["id"]
-    assert build["status"] == "Pending"
+    assert build["status"] == "Draft"
     assert build["produced"] == 0
     # reverse lookup: the build shows up under its assembly part
     assert [b["id"] for b in client.get(f"/api/parts/{asm}/builds").json()] == [bid]
@@ -241,7 +241,7 @@ def test_build_flow(client):
     )
     # status transition rules once production has started (produced 1 of 3):
     # cannot complete before fully produced, cannot revert to a pre-production
-    # status; Production and On Hold are both allowed
+    # status; only Production remains
     assert (
         client.patch(
             f"/api/build-orders/{bid}", json={"status": "Complete"}
@@ -252,9 +252,10 @@ def test_build_flow(client):
         client.patch(f"/api/build-orders/{bid}", json={"status": "Pending"}).status_code
         == 400
     )
-    assert client.patch(
-        f"/api/build-orders/{bid}", json={"status": "On Hold"}
-    ).is_success
+    assert (
+        client.patch(f"/api/build-orders/{bid}", json={"status": "Draft"}).status_code
+        == 400
+    )
     assert client.patch(
         f"/api/build-orders/{bid}", json={"status": "Production"}
     ).is_success
@@ -812,3 +813,52 @@ def test_openapi_schema_generates(client):
     schema = client.get("/openapi.json").json()
     assert "/api/parts" in schema["paths"]
     assert "PartOut" in schema["components"]["schemas"]
+
+
+def test_part_demand_and_suggested_order(client):
+    asm = client.post("/api/parts", json={"sku": "ASM", "description": "a"}).json()[
+        "id"
+    ]
+    comp = client.post("/api/parts", json={"sku": "C", "description": "c"}).json()["id"]
+    client.patch(f"/api/parts/{asm}", json={"assembly": True})
+    client.post(
+        f"/api/parts/{asm}/bom", json={"component_part_id": comp, "quantity": 2}
+    )
+    item = client.post("/api/stock", json={"part_id": comp}).json()
+    client.patch(f"/api/stock/{item['id']}", json={"count": 3})
+
+    build = client.post(
+        "/api/build-orders", json={"part_id": asm, "quantity": 4}
+    ).json()
+    # a Draft build is a scratchpad and asks for nothing yet
+    assert build["status"] == "Draft"
+    assert client.get(f"/api/parts/{comp}").json()["needed"] == 0
+    # planning it (Pending) already books the demand, before production starts
+    client.patch(f"/api/build-orders/{build['id']}", json={"status": "Pending"})
+    assert client.get(f"/api/parts/{comp}").json()["needed"] == 8
+    client.patch(f"/api/build-orders/{build['id']}", json={"status": "Production"})
+
+    # 4 units x 2 each = 8 needed, 3 in stock, nothing on order
+    row = client.get(f"/api/parts/{comp}").json()
+    assert (row["needed"], row["in_stock"], row["incoming"]) == (8, 3, 0)
+    assert row["suggested_order"] == 5
+
+    # order 2 packs of 2 -> 4 incoming, suggestion drops to 1
+    sup = client.post("/api/suppliers", json={"name": "S"}).json()["id"]
+    sp = client.post(
+        "/api/supplier-parts",
+        json={"supplier_id": sup, "sku": "SP", "part_id": comp, "pack_qty": 2},
+    ).json()["id"]
+    po = client.post("/api/purchase-orders", json={"supplier_id": sup}).json()["id"]
+    client.post(
+        f"/api/purchase-orders/{po}/lines",
+        json={"supplier_part_id": sp, "quantity": 2, "price": 1.0},
+    )
+    row = client.get(f"/api/parts/{comp}").json()
+    assert (row["incoming"], row["suggested_order"]) == (4, 1)
+
+    # producing 1 unit consumes 2 and drops the remaining need to 6
+    client.post(f"/api/build-orders/{build['id']}/produce", json={"quantity": 1})
+    row = client.get(f"/api/parts/{comp}").json()
+    assert (row["needed"], row["in_stock"]) == (6, 1)
+    assert row["suggested_order"] == 1

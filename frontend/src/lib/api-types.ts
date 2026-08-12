@@ -49,7 +49,7 @@ export interface paths {
         };
         /**
          * List Part Pos
-         * @description POs that ordered this part (through any of its supplier parts).
+         * @description POs that ordered this part, with what this part cost on each.
          */
         get: operations["list_part_pos_api_parts__part_id__purchase_orders_get"];
         put?: never;
@@ -772,7 +772,7 @@ export interface components {
              * @default
              */
             reference: string;
-            /** @default Pending */
+            /** @default Draft */
             status: components["schemas"]["BuildStatus"];
             /** Start Date */
             start_date?: string | null;
@@ -814,11 +814,14 @@ export interface components {
         };
         /**
          * BuildStatus
-         * @description InvenTree BuildStatus labels; the only values a build's status may take.
-         *     StrEnum members compare/serialise as their string value.
+         * @description The values a build's status may take. Mostly InvenTree BuildStatus
+         *     labels, with two deliberate departures: Draft (ours, the status a new build
+         *     starts in -- not yet planned, so it asks for no stock) and no On Hold, which
+         *     the import folds into Pending. StrEnum members compare/serialise as their
+         *     string value.
          * @enum {string}
          */
-        BuildStatus: "Pending" | "Production" | "On Hold" | "Cancelled" | "Complete";
+        BuildStatus: "Draft" | "Pending" | "Production" | "Cancelled" | "Complete";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -911,6 +914,14 @@ export interface components {
             estimated_price: number | null;
             /** Price Partial */
             price_partial: boolean;
+            /** In Stock */
+            in_stock: number;
+            /** Needed */
+            needed: number;
+            /** Incoming */
+            incoming: number;
+            /** Suggested Order */
+            suggested_order: number;
         };
         /** PartPatch */
         PartPatch: {
@@ -928,6 +939,32 @@ export interface components {
             purchasable?: boolean | null;
             /** Estimated Price */
             estimated_price?: number | null;
+        };
+        /** PartPurchaseOrderOut */
+        PartPurchaseOrderOut: {
+            /** Id */
+            id: number;
+            /** Supplier Id */
+            supplier_id: number;
+            /** Reference */
+            reference: string;
+            /** Status */
+            status: string;
+            /**
+             * Start Date
+             * Format: date
+             */
+            start_date: string;
+            /** End Date */
+            end_date: string | null;
+            /** Delivery Cost */
+            delivery_cost: number;
+            /** Supplier Reference */
+            supplier_reference: string;
+            /** Quantity */
+            quantity: number;
+            /** Unit Price */
+            unit_price?: number | null;
         };
         /** ProduceIn */
         ProduceIn: {
@@ -1050,6 +1087,8 @@ export interface components {
             consumed_by_build_id: number | null;
             /** Build Reference */
             build_reference: string;
+            /** Consumed By Reference */
+            consumed_by_reference: string;
             /**
              * Status
              * @enum {string}
@@ -1381,7 +1420,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PurchaseOrderOut"][];
+                    "application/json": components["schemas"]["PartPurchaseOrderOut"][];
                 };
             };
             /** @description Validation Error */
@@ -2025,7 +2064,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PurchaseOrderOut"][];
+                    "application/json": components["schemas"]["PartPurchaseOrderOut"][];
                 };
             };
             /** @description Validation Error */
