@@ -24,12 +24,10 @@ import argparse
 from datetime import date
 from pathlib import Path
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
-
 import db
 import inventree
 from models import (
+    STOCK_CONSUMED,
     BomLine,
     BuildLine,
     BuildOrder,
@@ -37,11 +35,12 @@ from models import (
     POLine,
     PriceBasis,
     PurchaseOrder,
-    STOCK_CONSUMED,
     StockItem,
     Supplier,
     SupplierPart,
 )
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 
 def _parse_date(value: str | None) -> date | None:
@@ -62,15 +61,23 @@ def _drop_redundant_templates(parts: list[dict]) -> list[dict]:
     templates = [p for p in parts if p["is_template"]]
     if not templates:
         return parts
-    redundant = {p["id"] for p in templates if variants.get(p["id"]) and not p["in_stock"]}
+    redundant = {
+        p["id"] for p in templates if variants.get(p["id"]) and not p["in_stock"]
+    }
     print(f"  {len(templates)} template parts:")
     for p in templates:
         if p["id"] in redundant:
-            print(f"    dropped: part {p['id']} {p['description']!r} -- stock lives in its variants")
+            print(
+                f"    dropped: part {p['id']} {p['description']!r} -- stock lives in its variants"
+            )
         elif not variants.get(p["id"]):
-            print(f"    kept: part {p['id']} {p['description']!r} -- no variants, template flag looks unintended")
+            print(
+                f"    kept: part {p['id']} {p['description']!r} -- no variants, template flag looks unintended"
+            )
         else:
-            print(f"    kept: part {p['id']} {p['description']!r} -- has stock of its own")
+            print(
+                f"    kept: part {p['id']} {p['description']!r} -- has stock of its own"
+            )
     return [p for p in parts if p["id"] not in redundant]
 
 
@@ -241,7 +248,9 @@ def migrate(url: str, username: str, password: str, db_path: Path) -> None:
             if start is None:
                 start = _parse_date(po.get("creation_date"))
                 if start is not None:
-                    skipped.append(f"PO {po['id']}: no start date, used creation date {start}")
+                    skipped.append(
+                        f"PO {po['id']}: no start date, used creation date {start}"
+                    )
             if start is None:
                 start = date.today()
                 skipped.append(f"PO {po['id']}: no start date, defaulted to today")

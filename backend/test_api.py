@@ -1,10 +1,9 @@
 """API-level integration tests: drive the JSON routes the frontend uses, on a
 tmp database. Complements test_domain.py (which exercises db directly)."""
 
+import db
 import pytest
 from fastapi.testclient import TestClient
-
-import db
 from main import app
 from models import StockItem
 
@@ -82,19 +81,34 @@ def test_purchasing_and_booking(client):
     assert po["end_date"] == "2026-03-01"  # dates round-trip as ISO strings
     assert po["status"] == "Pending"  # new POs default to a valid status
     # a date can be cleared to null
-    assert client.patch(f"/api/purchase-orders/{po_id}", json={"end_date": None}).is_success
+    assert client.patch(
+        f"/api/purchase-orders/{po_id}", json={"end_date": None}
+    ).is_success
     assert client.get(f"/api/purchase-orders/{po_id}").json()["end_date"] is None
     # only InvenTree PurchaseOrderStatus labels are accepted
-    assert client.patch(f"/api/purchase-orders/{po_id}", json={"status": "Bogus"}).status_code == 422
-    assert client.patch(f"/api/purchase-orders/{po_id}", json={"status": "Placed"}).is_success
+    assert (
+        client.patch(
+            f"/api/purchase-orders/{po_id}", json={"status": "Bogus"}
+        ).status_code
+        == 422
+    )
+    assert client.patch(
+        f"/api/purchase-orders/{po_id}", json={"status": "Placed"}
+    ).is_success
     lines = client.post(
         f"/api/purchase-orders/{po_id}/lines",
         json={"supplier_part_id": sp_id, "quantity": 20, "price": 0.05},
     ).json()
     line_id = lines[0]["id"]
     # empty / non-positive receive qty is rejected before it reaches the domain
-    assert client.post(f"/api/po-lines/{line_id}/book", json={"quantity": ""}).status_code == 422
-    assert client.post(f"/api/po-lines/{line_id}/book", json={"quantity": 0}).status_code == 422
+    assert (
+        client.post(f"/api/po-lines/{line_id}/book", json={"quantity": ""}).status_code
+        == 422
+    )
+    assert (
+        client.post(f"/api/po-lines/{line_id}/book", json={"quantity": 0}).status_code
+        == 422
+    )
     # receive it -> creates stock (count * pack_qty), records received, links PO
     assert client.post(
         f"/api/po-lines/{line_id}/book", json={"quantity": 20}
@@ -115,7 +129,9 @@ def test_purchasing_and_booking(client):
 
 
 def test_receive_all_and_sku_edit(client):
-    pid = client.post("/api/parts", json={"sku": "OLD", "description": "p"}).json()["id"]
+    pid = client.post("/api/parts", json={"sku": "OLD", "description": "p"}).json()[
+        "id"
+    ]
     # part sku is editable
     client.patch(f"/api/parts/{pid}", json={"sku": "NEW"})
     assert client.get(f"/api/parts/{pid}").json()["sku"] == "NEW"
@@ -125,7 +141,9 @@ def test_receive_all_and_sku_edit(client):
         "/api/supplier-parts",
         json={"supplier_id": sup_id, "sku": "SP", "part_id": pid, "pack_qty": 2},
     ).json()["id"]
-    po_id = client.post("/api/purchase-orders", json={"supplier_id": sup_id}).json()["id"]
+    po_id = client.post("/api/purchase-orders", json={"supplier_id": sup_id}).json()[
+        "id"
+    ]
     for qty in (5, 3):
         client.post(
             f"/api/purchase-orders/{po_id}/lines",
@@ -137,11 +155,15 @@ def test_receive_all_and_sku_edit(client):
     assert all(line["received"] == line["quantity"] for line in lines)
     assert client.get(f"/api/purchase-orders/{po_id}").json()["status"] == "Complete"
     # stock created = outstanding * pack_qty for each line (5*2 and 3*2)
-    counts = sorted(s["count"] for s in client.get("/api/stock").json() if s["po_id"] == po_id)
+    counts = sorted(
+        s["count"] for s in client.get("/api/stock").json() if s["po_id"] == po_id
+    )
     assert counts == [6, 10]
     # receive-all again is a no-op (nothing outstanding), no extra stock
     client.post(f"/api/purchase-orders/{po_id}/receive-all")
-    assert sorted(s["count"] for s in client.get("/api/stock").json() if s["po_id"] == po_id) == [6, 10]
+    assert sorted(
+        s["count"] for s in client.get("/api/stock").json() if s["po_id"] == po_id
+    ) == [6, 10]
 
 
 def test_part_used_in(client):
@@ -170,28 +192,45 @@ def test_supplier_part_edit(client):
     assert got["ean"] == "999" and got["pack_qty"] == 4
     assert got["part_description"] == "p"  # linked part's description is joined in
     # non-positive pack_qty rejected
-    assert client.patch(f"/api/supplier-parts/{sp_id}", json={"pack_qty": 0}).status_code == 422
+    assert (
+        client.patch(f"/api/supplier-parts/{sp_id}", json={"pack_qty": 0}).status_code
+        == 422
+    )
     client.patch(f"/api/supplier-parts/{sp_id}", json={"active": False})
     assert client.get(f"/api/supplier-parts/{sp_id}").json()["active"] is False
 
 
 def test_build_flow(client):
-    asm = client.post("/api/parts", json={"sku": "ASM", "description": "a"}).json()["id"]
+    asm = client.post("/api/parts", json={"sku": "ASM", "description": "a"}).json()[
+        "id"
+    ]
     comp = client.post("/api/parts", json={"sku": "C", "description": "c"}).json()["id"]
     client.patch(f"/api/parts/{asm}", json={"assembly": True})
-    client.post(f"/api/parts/{asm}/bom", json={"component_part_id": comp, "quantity": 2})
+    client.post(
+        f"/api/parts/{asm}/bom", json={"component_part_id": comp, "quantity": 2}
+    )
     # stock the component: 10 units
     item = client.post("/api/stock", json={"part_id": comp}).json()
     client.patch(f"/api/stock/{item['id']}", json={"count": 10})
 
     # building a non-assembly part is rejected
-    assert client.post("/api/build-orders", json={"part_id": comp, "quantity": 1}).status_code == 400
+    assert (
+        client.post(
+            "/api/build-orders", json={"part_id": comp, "quantity": 1}
+        ).status_code
+        == 400
+    )
     # invalid status is rejected by the schema
-    assert client.post(
-        "/api/build-orders", json={"part_id": asm, "quantity": 3, "status": "Bogus"}
-    ).status_code == 422
+    assert (
+        client.post(
+            "/api/build-orders", json={"part_id": asm, "quantity": 3, "status": "Bogus"}
+        ).status_code
+        == 422
+    )
 
-    build = client.post("/api/build-orders", json={"part_id": asm, "quantity": 3}).json()
+    build = client.post(
+        "/api/build-orders", json={"part_id": asm, "quantity": 3}
+    ).json()
     bid = build["id"]
     assert build["status"] == "Pending"
     assert build["produced"] == 0
@@ -203,19 +242,36 @@ def test_build_flow(client):
     assert r.is_success and r.json()["produced"] == 1
     assert r.json()["status"] != "Complete"
     # producing more than remaining (2 left) is rejected
-    assert client.post(
-        f"/api/build-orders/{bid}/produce", json={"quantity": 3}
-    ).status_code == 400
+    assert (
+        client.post(
+            f"/api/build-orders/{bid}/produce", json={"quantity": 3}
+        ).status_code
+        == 400
+    )
     # status transition rules once production has started (produced 1 of 3):
     # cannot complete before fully produced, cannot revert to a pre-production
     # status; Production and On Hold are both allowed
-    assert client.patch(f"/api/build-orders/{bid}", json={"status": "Complete"}).status_code == 400
-    assert client.patch(f"/api/build-orders/{bid}", json={"status": "Pending"}).status_code == 400
-    assert client.patch(f"/api/build-orders/{bid}", json={"status": "On Hold"}).is_success
-    assert client.patch(f"/api/build-orders/{bid}", json={"status": "Production"}).is_success
+    assert (
+        client.patch(
+            f"/api/build-orders/{bid}", json={"status": "Complete"}
+        ).status_code
+        == 400
+    )
+    assert (
+        client.patch(f"/api/build-orders/{bid}", json={"status": "Pending"}).status_code
+        == 400
+    )
+    assert client.patch(
+        f"/api/build-orders/{bid}", json={"status": "On Hold"}
+    ).is_success
+    assert client.patch(
+        f"/api/build-orders/{bid}", json={"status": "Production"}
+    ).is_success
 
     # produce the last 2: consumes 4 comp, flips to Complete
-    assert client.post(f"/api/build-orders/{bid}/produce", json={"quantity": 2}).is_success
+    assert client.post(
+        f"/api/build-orders/{bid}/produce", json={"quantity": 2}
+    ).is_success
     assert client.get(f"/api/build-orders/{bid}").json()["status"] == "Complete"
     stock = client.get("/api/stock").json()
     # source component reduced 10 -> 4 (6 consumed), consumed stock preserved
@@ -226,9 +282,7 @@ def test_build_flow(client):
         if s["status"] == "Consumed by build order" and s["consumed_by_build_id"] == bid
     ]
     assert sum(s["count"] for s in consumed) == 6
-    produced = [
-        s for s in stock if s["part_id"] == asm and s["status"] == "Available"
-    ]
+    produced = [s for s in stock if s["part_id"] == asm and s["status"] == "Available"]
     assert sum(s["count"] for s in produced) == 3
 
     # the produces show up in the activity log with structured refs, newest first
@@ -241,7 +295,9 @@ def test_build_flow(client):
 
     # shortage does not block: components are exhausted, but producing anyway
     # succeeds -- it produces the full assembly count and consumes what exists
-    big = client.post("/api/build-orders", json={"part_id": asm, "quantity": 5}).json()["id"]
+    big = client.post("/api/build-orders", json={"part_id": asm, "quantity": 5}).json()[
+        "id"
+    ]
     r = client.post(f"/api/build-orders/{big}/produce", json={"quantity": 5})
     assert r.is_success and r.json()["produced"] == 5
     assert r.json()["status"] == "Complete"
@@ -259,12 +315,17 @@ def test_settings(client):
 def test_search(client):
     assert client.get("/api/search", params={"q": ""}).json() == []
 
-    active = client.post("/api/parts", json={"sku": "SRCH-1", "description": "widget"}).json()
-    inactive = client.post("/api/parts", json={"sku": "SRCH-2", "description": "gadget"}).json()
+    active = client.post(
+        "/api/parts", json={"sku": "SRCH-1", "description": "widget"}
+    ).json()
+    inactive = client.post(
+        "/api/parts", json={"sku": "SRCH-2", "description": "gadget"}
+    ).json()
     client.patch(f"/api/parts/{inactive['id']}", json={"active": False})
     sup = client.post("/api/suppliers", json={"name": "SrchCo"}).json()
     po = client.post(
-        "/api/purchase-orders", json={"supplier_id": sup["id"], "reference": "SRCH-PO-1"}
+        "/api/purchase-orders",
+        json={"supplier_id": sup["id"], "reference": "SRCH-PO-1"},
     ).json()
 
     hits = client.get("/api/search", params={"q": "srch"}).json()
@@ -276,18 +337,26 @@ def test_search(client):
     assert ("supplier", sup["id"]) in ids
     assert ("purchase_order", po["id"]) in ids
 
-    hits_all = client.get("/api/search", params={"q": "srch", "include_inactive": True}).json()
+    hits_all = client.get(
+        "/api/search", params={"q": "srch", "include_inactive": True}
+    ).json()
     assert ("part", inactive["id"]) in {(h["type"], h["id"]) for h in hits_all}
 
     # word order does not matter: each word must match, not the phrase as-is
-    din = client.post("/api/parts", json={"sku": "DIN933", "description": "DIN 933 bolt"}).json()
+    din = client.post(
+        "/api/parts", json={"sku": "DIN933", "description": "DIN 933 bolt"}
+    ).json()
     reordered = client.get("/api/search", params={"q": "933 DIN"}).json()
     assert ("part", din["id"]) in {(h["type"], h["id"]) for h in reordered}
 
 
 def test_stock_value_report(client):
-    part = client.post("/api/parts", json={"sku": "VAL-1", "description": "valued"}).json()
-    orphan = client.post("/api/parts", json={"sku": "VAL-2", "description": "unpriced"}).json()
+    part = client.post(
+        "/api/parts", json={"sku": "VAL-1", "description": "valued"}
+    ).json()
+    orphan = client.post(
+        "/api/parts", json={"sku": "VAL-2", "description": "unpriced"}
+    ).json()
     sup = client.post("/api/suppliers", json={"name": "ValCo"}).json()
     sp = client.post(
         "/api/supplier-parts",
@@ -327,7 +396,11 @@ def test_stock_value_report(client):
     report = client.get("/api/reports/stock-value").json()
     rows = {r["item_id"]: r for r in report["rows"]}
     booked = next(r for r in report["rows"] if r["count"] == 20)
-    assert (booked["basis"], booked["unit_price"], booked["value"]) == ("po", 5.0, 100.0)
+    assert (booked["basis"], booked["unit_price"], booked["value"]) == (
+        "po",
+        5.0,
+        100.0,
+    )
     assert booked["basis_po_id"] == po["id"]
     # po_id but no booking: still the PO's own price, not an estimate
     assert rows[migrated["id"]]["basis"] == "po"
@@ -340,7 +413,9 @@ def test_stock_value_report(client):
     assert report["unpriced"] == 1
 
     # a PO line with no price filled in: reported as such, not valued at 0.00
-    free_part = client.post("/api/parts", json={"sku": "VAL-3", "description": "free"}).json()
+    free_part = client.post(
+        "/api/parts", json={"sku": "VAL-3", "description": "free"}
+    ).json()
     free_sp = client.post(
         "/api/supplier-parts",
         json={
@@ -353,7 +428,9 @@ def test_stock_value_report(client):
             "pack_qty": 1,
         },
     ).json()
-    free_po = client.post("/api/purchase-orders", json={"supplier_id": sup["id"]}).json()
+    free_po = client.post(
+        "/api/purchase-orders", json={"supplier_id": sup["id"]}
+    ).json()
     free_line = client.post(
         f"/api/purchase-orders/{free_po['id']}/lines",
         json={"supplier_part_id": free_sp["id"], "quantity": 5},
@@ -374,7 +451,9 @@ def test_stock_value_report(client):
         "/api/purchase-orders",
         json={"supplier_id": sup["id"], "reference": "PO-LATER"},
     ).json()
-    client.patch(f"/api/purchase-orders/{later_po['id']}", json={"start_date": "2030-01-01"})
+    client.patch(
+        f"/api/purchase-orders/{later_po['id']}", json={"start_date": "2030-01-01"}
+    )
     client.post(
         f"/api/purchase-orders/{later_po['id']}/lines",
         json={"supplier_part_id": free_sp["id"], "quantity": 1, "price": 7.0},
@@ -392,8 +471,12 @@ def test_stock_value_report(client):
 
     # "latest" means the most recent order date, not the highest id: this PO is
     # created last but dated earlier, so it must not win the estimate
-    older_po = client.post("/api/purchase-orders", json={"supplier_id": sup["id"]}).json()
-    client.patch(f"/api/purchase-orders/{older_po['id']}", json={"start_date": "2020-01-01"})
+    older_po = client.post(
+        "/api/purchase-orders", json={"supplier_id": sup["id"]}
+    ).json()
+    client.patch(
+        f"/api/purchase-orders/{older_po['id']}", json={"start_date": "2020-01-01"}
+    )
     client.post(
         f"/api/purchase-orders/{older_po['id']}/lines",
         json={"supplier_part_id": free_sp["id"], "quantity": 1, "price": 99.0},
@@ -441,8 +524,13 @@ def test_part_price_cache(client):
     sp2 = client.post(
         "/api/supplier-parts",
         json={
-            "supplier_id": sup["id"], "sku": "SP-BOLT2", "part_id": bolt["id"],
-            "description": "", "ean": "", "hyperlink": "", "pack_qty": 1,
+            "supplier_id": sup["id"],
+            "sku": "SP-BOLT2",
+            "part_id": bolt["id"],
+            "description": "",
+            "ean": "",
+            "hyperlink": "",
+            "pack_qty": 1,
         },
     ).json()
     po2 = client.post("/api/purchase-orders", json={"supplier_id": sup["id"]}).json()
@@ -457,17 +545,30 @@ def test_part_price_cache(client):
     nut = _priced_part(client, sup, "NUT", price=0.05)
     asm = client.post("/api/parts", json={"sku": "ASM", "description": "widget"}).json()
     client.patch(f"/api/parts/{asm['id']}", json={"assembly": True})
-    client.post(f"/api/parts/{asm['id']}/bom", json={"component_part_id": bolt["id"], "quantity": 4})
-    client.post(f"/api/parts/{asm['id']}/bom", json={"component_part_id": nut["id"], "quantity": 2})
+    client.post(
+        f"/api/parts/{asm['id']}/bom",
+        json={"component_part_id": bolt["id"], "quantity": 4},
+    )
+    client.post(
+        f"/api/parts/{asm['id']}/bom",
+        json={"component_part_id": nut["id"], "quantity": 2},
+    )
     priced = client.get(f"/api/parts/{asm['id']}").json()
     assert priced["estimated_price"] == pytest.approx(4 * 0.25 + 2 * 0.05)
     assert priced["price_partial"] is False
 
     # nesting: an assembly inside an assembly rolls up recursively
-    outer = client.post("/api/parts", json={"sku": "OUT", "description": "outer"}).json()
+    outer = client.post(
+        "/api/parts", json={"sku": "OUT", "description": "outer"}
+    ).json()
     client.patch(f"/api/parts/{outer['id']}", json={"assembly": True})
-    client.post(f"/api/parts/{outer['id']}/bom", json={"component_part_id": asm["id"], "quantity": 3})
-    assert client.get(f"/api/parts/{outer['id']}").json()["estimated_price"] == pytest.approx(3 * 1.1)
+    client.post(
+        f"/api/parts/{outer['id']}/bom",
+        json={"component_part_id": asm["id"], "quantity": 3},
+    )
+    assert client.get(f"/api/parts/{outer['id']}").json()[
+        "estimated_price"
+    ] == pytest.approx(3 * 1.1)
 
     # a change deep in the tree propagates up to every ancestor
     po3 = client.post("/api/purchase-orders", json={"supplier_id": sup["id"]}).json()
@@ -476,12 +577,19 @@ def test_part_price_cache(client):
         f"/api/purchase-orders/{po3['id']}/lines",
         json={"supplier_part_id": sp2["id"], "quantity": 1, "price": 0.5},
     )
-    assert client.get(f"/api/parts/{asm['id']}").json()["estimated_price"] == pytest.approx(2.1)
-    assert client.get(f"/api/parts/{outer['id']}").json()["estimated_price"] == pytest.approx(6.3)
+    assert client.get(f"/api/parts/{asm['id']}").json()[
+        "estimated_price"
+    ] == pytest.approx(2.1)
+    assert client.get(f"/api/parts/{outer['id']}").json()[
+        "estimated_price"
+    ] == pytest.approx(6.3)
 
     # an unpriced component makes the roll-up a partial floor, not a null
     mystery = client.post("/api/parts", json={"sku": "MYST", "description": "?"}).json()
-    client.post(f"/api/parts/{asm['id']}/bom", json={"component_part_id": mystery["id"], "quantity": 1})
+    client.post(
+        f"/api/parts/{asm['id']}/bom",
+        json={"component_part_id": mystery["id"], "quantity": 1},
+    )
     partial = client.get(f"/api/parts/{asm['id']}").json()
     assert partial["estimated_price"] == pytest.approx(2.1)  # the priced part only
     assert partial["price_partial"] is True
@@ -492,12 +600,19 @@ def test_stock_keeps_its_own_purchase_price(client):
     """Stock is worth what its own order paid, not the part's latest price:
     two batches of one part bought at different prices stay different."""
     sup = client.post("/api/suppliers", json={"name": "TwoPriceCo"}).json()
-    part = client.post("/api/parts", json={"sku": "WIDGET", "description": "widget"}).json()
+    part = client.post(
+        "/api/parts", json={"sku": "WIDGET", "description": "widget"}
+    ).json()
     sp = client.post(
         "/api/supplier-parts",
         json={
-            "supplier_id": sup["id"], "sku": "SP-W", "part_id": part["id"],
-            "description": "", "ean": "", "hyperlink": "", "pack_qty": 1,
+            "supplier_id": sup["id"],
+            "sku": "SP-W",
+            "part_id": part["id"],
+            "description": "",
+            "ean": "",
+            "hyperlink": "",
+            "pack_qty": 1,
         },
     ).json()
 
@@ -514,7 +629,9 @@ def test_stock_keeps_its_own_purchase_price(client):
     cheap = receive(2.0, "2026-01-01", 10)
     dear = receive(5.0, "2026-06-01", 10)
 
-    rows = {r["item_id"]: r for r in client.get("/api/reports/stock-value").json()["rows"]}
+    rows = {
+        r["item_id"]: r for r in client.get("/api/reports/stock-value").json()["rows"]
+    }
     by_po = {r["basis_po_id"]: r for r in rows.values()}
     # each batch keeps its own price -- the later 5.00 order does not reprice
     # the stock bought at 2.00
@@ -529,7 +646,8 @@ def test_stock_keeps_its_own_purchase_price(client):
     loose = client.post("/api/stock", json={"part_id": part["id"]}).json()
     client.patch(f"/api/stock/{loose['id']}", json={"count": 4})
     row = next(
-        r for r in client.get("/api/reports/stock-value").json()["rows"]
+        r
+        for r in client.get("/api/reports/stock-value").json()["rows"]
         if r["item_id"] == loose["id"]
     )
     assert row["basis"] == "estimate" and row["unit_price"] == 5.0
@@ -547,8 +665,14 @@ def test_virtual_part_price(client):
 
     asm = client.post("/api/parts", json={"sku": "VASM", "description": "thing"}).json()
     client.patch(f"/api/parts/{asm['id']}", json={"assembly": True})
-    client.post(f"/api/parts/{asm['id']}/bom", json={"component_part_id": bolt["id"], "quantity": 2})
-    client.post(f"/api/parts/{asm['id']}/bom", json={"component_part_id": labour["id"], "quantity": 0.5})
+    client.post(
+        f"/api/parts/{asm['id']}/bom",
+        json={"component_part_id": bolt["id"], "quantity": 2},
+    )
+    client.post(
+        f"/api/parts/{asm['id']}/bom",
+        json={"component_part_id": labour["id"], "quantity": 0.5},
+    )
 
     # unpriced labour leaves the roll-up partial
     before = client.get(f"/api/parts/{asm['id']}").json()
@@ -593,10 +717,18 @@ def test_build_produced_stock_costed_from_consumption(client):
     stock(a, 10, 3.0, "2026-01-01")
     stock(b, 20, 0.5, "2026-01-01")
 
-    asm = client.post("/api/parts", json={"sku": "BASM", "description": "built thing"}).json()
+    asm = client.post(
+        "/api/parts", json={"sku": "BASM", "description": "built thing"}
+    ).json()
     client.patch(f"/api/parts/{asm['id']}", json={"assembly": True})
-    client.post(f"/api/parts/{asm['id']}/bom", json={"component_part_id": a["id"], "quantity": 2})
-    client.post(f"/api/parts/{asm['id']}/bom", json={"component_part_id": b["id"], "quantity": 4})
+    client.post(
+        f"/api/parts/{asm['id']}/bom",
+        json={"component_part_id": a["id"], "quantity": 2},
+    )
+    client.post(
+        f"/api/parts/{asm['id']}/bom",
+        json={"component_part_id": b["id"], "quantity": 4},
+    )
 
     build = client.post(
         "/api/build-orders", json={"part_id": asm["id"], "quantity": 3}
@@ -605,9 +737,12 @@ def test_build_produced_stock_costed_from_consumption(client):
     r = client.post(f"/api/build-orders/{build['id']}/produce", json={"quantity": 3})
     assert r.is_success
 
-    rows = {x["item_id"]: x for x in client.get("/api/reports/stock-value").json()["rows"]}
+    rows = {
+        x["item_id"]: x for x in client.get("/api/reports/stock-value").json()["rows"]
+    }
     produced = next(
-        x for x in rows.values()
+        x
+        for x in rows.values()
         if x["part_id"] == asm["id"] and x["status"] == "Available"
     )
     # consumed 3*(2 @ 3.00 + 4 @ 0.50) = 24.00 for 3 units -> 8.00 each
@@ -616,17 +751,22 @@ def test_build_produced_stock_costed_from_consumption(client):
     assert produced["value"] == pytest.approx(24.0)
 
     # a shortage makes the cost a floor, not exact
-    short_asm = client.post("/api/parts", json={"sku": "SHORT", "description": "short"}).json()
+    short_asm = client.post(
+        "/api/parts", json={"sku": "SHORT", "description": "short"}
+    ).json()
     client.patch(f"/api/parts/{short_asm['id']}", json={"assembly": True})
     client.post(
         f"/api/parts/{short_asm['id']}/bom",
         json={"component_part_id": a["id"], "quantity": 100},  # far more than stocked
     )
-    sb = client.post("/api/build-orders", json={"part_id": short_asm["id"], "quantity": 1}).json()
+    sb = client.post(
+        "/api/build-orders", json={"part_id": short_asm["id"], "quantity": 1}
+    ).json()
     client.patch(f"/api/build-orders/{sb['id']}", json={"status": "Production"})
     client.post(f"/api/build-orders/{sb['id']}/produce", json={"quantity": 1})
     short_row = next(
-        x for x in client.get("/api/reports/stock-value").json()["rows"]
+        x
+        for x in client.get("/api/reports/stock-value").json()["rows"]
         if x["part_id"] == short_asm["id"] and x["status"] == "Available"
     )
     assert short_row["basis"] == "build_partial"
@@ -640,8 +780,13 @@ def test_assemblies_cannot_be_purchased(client):
     r = client.post(
         "/api/supplier-parts",
         json={
-            "supplier_id": sup["id"], "sku": "SP-ASM", "part_id": asm["id"],
-            "description": "", "ean": "", "hyperlink": "", "pack_qty": 1,
+            "supplier_id": sup["id"],
+            "sku": "SP-ASM",
+            "part_id": asm["id"],
+            "description": "",
+            "ean": "",
+            "hyperlink": "",
+            "pack_qty": 1,
         },
     )
     assert r.status_code == 400 and "built, not purchased" in r.json()["detail"]

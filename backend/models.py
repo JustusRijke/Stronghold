@@ -281,7 +281,9 @@ class Activity(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    action: Mapped[str]  # ponytail: plain str (write fn name); StrEnum if a picklist is wanted
+    action: Mapped[
+        str
+    ]  # ponytail: plain str (write fn name); StrEnum if a picklist is wanted
     message: Mapped[str]  # displayed text, no markup: "Produced 3x Foobar"
     # ponytail: refs as JSON text; normalize to a child table only if filtering by a linked entity is needed
     refs: Mapped[str] = mapped_column(default="[]")

@@ -10,9 +10,8 @@ avoids main.py's db-init / static-mount side effects.
 import json
 from pathlib import Path
 
-from fastapi import FastAPI
-
 import api
+from fastapi import FastAPI
 
 app = FastAPI(title="Stronghold API")
 app.include_router(api.router)

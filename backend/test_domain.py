@@ -5,11 +5,10 @@ import json
 import sqlite3
 from datetime import date
 
-import pytest
-from sqlalchemy import select
-
 import db
+import pytest
 from models import Activity, Booking, BuildLine, Part, POLine, PurchaseOrder, StockItem
+from sqlalchemy import select
 
 
 @pytest.fixture
@@ -344,15 +343,23 @@ def test_virtual_part(database):
     db.create_build(snap_id, 1, 1)
     db.set_part_price(3, 90.0)
     with db.session() as s:
-        rates = {c: price for _l, c, _s, _d, _q, _v, price, _p in db.build_lines_for(s, snap_id)}
+        rates = {
+            c: price
+            for _l, c, _s, _d, _q, _v, price, _p in db.build_lines_for(s, snap_id)
+        }
         assert rates[3] == 40.0  # snapshot price, not the new 90
         # a legacy row without a snapshot price falls back to the part's current one
         line = s.scalars(
-            select(BuildLine).where(BuildLine.build_id == snap_id, BuildLine.component_part_id == 3)
+            select(BuildLine).where(
+                BuildLine.build_id == snap_id, BuildLine.component_part_id == 3
+            )
         ).one()
         line.unit_price = None
         s.commit()
-        rates = {c: price for _l, c, _s, _d, _q, _v, price, _p in db.build_lines_for(s, snap_id)}
+        rates = {
+            c: price
+            for _l, c, _s, _d, _q, _v, price, _p in db.build_lines_for(s, snap_id)
+        }
         assert rates[3] == 90.0
 
 

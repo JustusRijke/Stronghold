@@ -10,13 +10,12 @@ import json
 from datetime import date, datetime
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_, select
-
 import db
 from db import InventoryError
+from fastapi import APIRouter, HTTPException
 from models import (
+    STOCK_AVAILABLE,
+    STOCK_CONSUMED,
     Activity,
     BomLine,
     BuildOrder,
@@ -25,12 +24,12 @@ from models import (
     POLine,
     POStatus,
     PurchaseOrder,
-    STOCK_AVAILABLE,
-    STOCK_CONSUMED,
     StockItem,
     Supplier,
     SupplierPart,
 )
+from pydantic import BaseModel, Field
+from sqlalchemy import and_, func, or_, select
 
 router = APIRouter(prefix="/api")
 
@@ -1106,7 +1105,13 @@ def refresh_prices() -> dict[str, int]:
     this is the backfill/repair path (e.g. after an InvenTree import)."""
     _guard(db.refresh_all_prices)
     with db.session() as s:
-        return {"priced": len(list(s.scalars(select(Part.id).where(Part.estimated_price.is_not(None)))))}
+        return {
+            "priced": len(
+                list(
+                    s.scalars(select(Part.id).where(Part.estimated_price.is_not(None)))
+                )
+            )
+        }
 
 
 @router.get("/reports/stock-value", response_model=StockValueReport)
@@ -1234,7 +1239,9 @@ def search(q: str = "", include_inactive: bool = False) -> list[SearchResult]:
         if not include_inactive:
             parts_q = parts_q.where(Part.active)
         for p in s.scalars(parts_q.limit(SEARCH_LIMIT)):
-            results.append(SearchResult(type="part", id=p.id, label=f"{p.sku} - {p.description}"))
+            results.append(
+                SearchResult(type="part", id=p.id, label=f"{p.sku} - {p.description}")
+            )
 
         suppliers_q = select(Supplier).where(_matches_all_words(q, Supplier.name))
         if not include_inactive:
@@ -1248,13 +1255,21 @@ def search(q: str = "", include_inactive: bool = False) -> list[SearchResult]:
         if not include_inactive:
             sp_q = sp_q.where(SupplierPart.active)
         for x in s.scalars(sp_q.limit(SEARCH_LIMIT)):
-            results.append(SearchResult(type="supplier_part", id=x.id, label=f"{x.sku} - {x.description}"))
+            results.append(
+                SearchResult(
+                    type="supplier_part", id=x.id, label=f"{x.sku} - {x.description}"
+                )
+            )
 
         po_q = select(PurchaseOrder).where(
-            _matches_all_words(q, PurchaseOrder.reference, PurchaseOrder.supplier_reference)
+            _matches_all_words(
+                q, PurchaseOrder.reference, PurchaseOrder.supplier_reference
+            )
         )
         for x in s.scalars(po_q.limit(SEARCH_LIMIT)):
-            results.append(SearchResult(type="purchase_order", id=x.id, label=x.reference))
+            results.append(
+                SearchResult(type="purchase_order", id=x.id, label=x.reference)
+            )
 
         build_q = select(BuildOrder).where(_matches_all_words(q, BuildOrder.reference))
         for x in s.scalars(build_q.limit(SEARCH_LIMIT)):

@@ -8,13 +8,12 @@ Run prod:  build the frontend first (see frontend/), then `uv run main.py`.
 import logging
 from pathlib import Path
 
+import api
+import db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-
-import api
-import db
 from settings import Settings, setup_logging
 
 # built SvelteKit output (adapter-static) lives here after `npm run build`
