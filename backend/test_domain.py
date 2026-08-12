@@ -319,6 +319,14 @@ def test_build_shortfall_settled_by_purchase(database):
             select(StockItem).where(StockItem.build_id == build_id)
         ).one()
         assert produced.unit_price == 8.0  # the assembly repriced itself
+        # the receipt says what it paid off, and links the build
+        act = s.scalars(
+            select(Activity).where(Activity.action == "settle_stock_debt")
+        ).one()
+        assert "settled a shortfall" in act.message
+        assert ("build", build_id) in [
+            (r["type"], r["id"]) for r in json.loads(act.refs)
+        ]
 
 
 def test_virtual_part(database):

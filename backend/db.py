@@ -1131,14 +1131,14 @@ def _check_po_line_editable(s: Session, line: POLine) -> None:
         )
 
 
-def _settle_stock_debt(s: Session, item: StockItem) -> float:
+def _settle_stock_debt(s: Session, item: StockItem) -> dict[int, float]:
     """Pay off outstanding build shortfalls for a part out of freshly received
     stock. A shortfall left a negative Available row plus a placeholder consumed
     row priced at the part's estimate; the parts have now arrived, so the debt
     shrinks toward zero and the consumed row is stamped with this PO and
     repriced to what was actually paid -- the build stops being costed at a
     guess. Settled units never reach the shelf, so `item` is reduced by them.
-    Returns the quantity settled."""
+    Returns {build_id: quantity settled}."""
     debts = s.scalars(
         select(StockItem)
         .where(
@@ -1150,8 +1150,7 @@ def _settle_stock_debt(s: Session, item: StockItem) -> float:
         .order_by(StockItem.id)
     ).all()
     next_id = (s.scalar(select(func.max(StockItem.id))) or 0) + 1
-    settled = 0.0
-    builds: set[int] = set()
+    settled: dict[int, float] = {}
     for debt in debts:
         if item.count <= 1e-9:
             break
@@ -1187,11 +1186,12 @@ def _settle_stock_debt(s: Session, item: StockItem) -> float:
         refresh_stock_price(s, placeholder)
         debt.count += pay
         item.count -= pay
-        settled += pay
-        builds.add(debt.consumed_by_build_id)  # ty: ignore[invalid-argument-type]
+        # not-null: the debt query filters consumed_by_build_id is_not(None)
+        build_id: int = debt.consumed_by_build_id  # ty: ignore[invalid-assignment]
+        settled[build_id] = settled.get(build_id, 0.0) + pay
     # the assemblies those builds produced were costed off the estimate; now
     # that their inputs are real, reprice the output
-    for build_id in builds:
+    for build_id in settled:
         for produced in s.scalars(
             select(StockItem).where(
                 StockItem.build_id == build_id, StockItem.status == STOCK_AVAILABLE
@@ -1245,12 +1245,18 @@ def book_po_line(s: Session, line_id: int, stock_item_id: int, quantity: float) 
             ("stock", stock_item_id, f"{count:g}x {part.description}"),
         ],
     )
-    if settled:
+    for settled_build_id, qty in settled.items():
+        build = get_build(s, settled_build_id)
+        build_label = build.reference or f"BO-{settled_build_id}"
         _activity(
             s,
             "settle_stock_debt",
-            f"{settled:g}x {part.description} went to build shortfalls",
-            [("po", po.id, po_label), ("part", part.id, part.description)],
+            f"{qty:g}x {part.description} settled a shortfall on {build_label}",
+            [
+                ("po", po.id, po_label),
+                ("build", settled_build_id, build_label),
+                ("part", part.id, part.description),
+            ],
         )
     _complete_po_if_fully_received(s, line.po_id)
 
