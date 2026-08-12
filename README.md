@@ -92,6 +92,14 @@ Open-source inventory/stock tracking for small and medium businesses.
 - Consumed stock is never destroyed -- it is recorded as a "Consumed by build
   order" item linked to the build and its source purchase, so you can trace
   exactly which stock went into each build (and what it cost)
+- The part page carries a **Stock log**: what happened to that part's stock,
+  oldest first -- received, produced, consumed by a build, owed to a build, or
+  corrected by a stocktake, each linking to the stock item and the order behind
+  it. It is derived from the stock rows themselves rather than a separate event
+  table, which is why dates are marked `~`: a receipt or consumption is dated by
+  its purchase or build order, not the moment the stock actually moved. Only a
+  stocktake records the exact time. An incoming row later eaten by a build shows
+  what is left of it, marked "(left)"
 - Correct a counted quantity with **Stocktake** on the part page. Every
   stocktake needs a reason: click one of the suggestions or type your own. The
   suggestions differ by direction -- finding stock (Found, Refurbished/repaired,
