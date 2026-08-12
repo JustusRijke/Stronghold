@@ -124,7 +124,9 @@ Open-source inventory/stock tracking for small and medium businesses.
 - Nothing is ever deleted: parts are deactivated and stock is marked consumed
   rather than removed, so your history and data stay intact
 - Your data as a readable SQL file: `inventory.sql` is kept up to date next
-  to the database, so you can keep your inventory in version control (git)
+  to the database, so you can keep your inventory in version control (git).
+  This repo gitignores it while pre-1.0, since it only holds throwaway
+  development data -- un-ignore it once you run Stronghold in production
 - Configurable via an optional `settings.toml` (database location, SQL export,
   web port, logging) -- see `settings.toml.example`
 
