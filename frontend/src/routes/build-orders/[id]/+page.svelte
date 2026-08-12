@@ -106,7 +106,7 @@
 	const remaining = $derived(build ? build.quantity - build.produced : 0);
 	// components short for producing `qty` units: {sku, need, have}. Producing is
 	// never blocked -- the user sees the shortfall and decides whether to proceed
-	// (short components are drained to zero, produced count stays full).
+	// (the missing parts become a negative stock item owed by this build).
 	function shortages(qty: number) {
 		return bom
 			.filter((l) => !l.component_virtual)
@@ -368,8 +368,10 @@
 					{/each}
 				</ul>
 				<p class="muted">
-					You can produce anyway -- short components are consumed down to zero and the
-					full quantity is still produced.
+					You can produce anyway -- the full quantity is still produced and the missing
+					parts are recorded as negative stock, valued at the part's estimated price
+					and deducted from stock value. Receiving them on a purchase order clears the
+					shortfall and reprices this build at what you actually paid.
 				</p>
 			</div>
 		{/if}
