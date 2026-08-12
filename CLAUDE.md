@@ -19,7 +19,8 @@ Two invariants the file layout does not show:
   to HTTP 400.
 - Detail pages cross-link heavily to related entities. Reverse lookups needing a
   join have a dedicated route -- `GET /parts/{id}/purchase-orders`,
-  `/parts/{id}/used-in`, `/suppliers/{id}/parts|purchase-orders`,
+  `/parts/{id}/used-in`, `/parts/{id}/builds|consumed-by`,
+  `/suppliers/{id}/parts|purchase-orders`,
   `/supplier-parts/{id}/purchase-orders`; everything else filters an existing
   list client-side.
 
