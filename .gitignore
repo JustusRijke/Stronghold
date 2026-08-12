@@ -1,0 +1,35 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Runtime data
+inventory.db
+log.txt*
+
+# Local deployment config (see settings.toml.example)
+settings.toml
+
+# python
+__pycache__/
+*.pyc
+backend/openapi.json
+backend/inventory.db
+backend/inventory.sql
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
+# Machine-local agent config (permissions etc.)
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# Secrets
+SECRETS.md
