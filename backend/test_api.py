@@ -229,13 +229,15 @@ def test_build_flow(client):
     assert [b["id"] for b in client.get(f"/api/parts/{asm}/builds").json()] == [bid]
     # and under the component it consumes, needing 2 per unit but taking none yet
     consumers = client.get(f"/api/parts/{comp}/consumed-by").json()
-    assert [(b["id"], b["required"], b["used"]) for b in consumers] == [(bid, 6.0, 0.0)]
+    assert [(b["id"], b["required"], b["consumed"]) for b in consumers] == [
+        (bid, 6.0, 0.0)
+    ]
 
     # produce 1 of 3: consumes 2 comp; not yet Complete
     r = client.post(f"/api/build-orders/{bid}/produce", json={"quantity": 1})
     assert r.is_success and r.json()["produced"] == 1
     # the consumed figure now tracks the stock actually taken
-    assert client.get(f"/api/parts/{comp}/consumed-by").json()[0]["used"] == 2.0
+    assert client.get(f"/api/parts/{comp}/consumed-by").json()[0]["consumed"] == 2.0
     assert r.json()["status"] != "Complete"
     # producing more than remaining (2 left) is rejected
     assert (

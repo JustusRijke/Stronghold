@@ -269,10 +269,10 @@ class BuildOrderOut(BaseModel):
 
 
 class PartBuildOut(BuildOrderOut):
-    """A build that consumes this part, with what it needs and has taken of it."""
+    """A build that consumes this part, with what it requires and has taken of it."""
 
     required: float  # per-unit snapshot quantity * build quantity
-    used: float  # stock actually consumed so far
+    consumed: float  # stock actually consumed so far
 
 
 class BuildLineOut(BaseModel):
@@ -488,7 +488,7 @@ def list_part_builds(part_id: int) -> list[BuildOrderOut]:
 @router.get("/parts/{part_id}/consumed-by", response_model=list[PartBuildOut])
 def list_part_consumed_by(part_id: int) -> list[PartBuildOut]:
     """Build orders whose component snapshot lists this part, with the quantity
-    each needs of it and the stock each has consumed so far."""
+    each requires of it and the stock each has consumed so far."""
     with db.session() as s:
         taken = {
             build_id: total
@@ -506,7 +506,7 @@ def list_part_consumed_by(part_id: int) -> list[PartBuildOut]:
             PartBuildOut(
                 **_build_out(s, b).model_dump(),
                 required=qty * b.quantity,
-                used=taken.get(b.id, 0.0),
+                consumed=taken.get(b.id, 0.0),
             )
             for b, qty in s.execute(
                 select(BuildOrder, BuildLine.quantity)
