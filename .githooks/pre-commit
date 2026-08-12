@@ -1,10 +1,12 @@
 #!/bin/sh
 # Regenerate frontend API types when the API schema could have changed, and
-# fail the commit if the checked-in types are stale. Only runs when backend/api.py
-# or the generated types are part of the commit, so unrelated commits stay fast.
+# fail the commit if the checked-in types are stale. Only runs when a backend
+# module or the generated types are part of the commit, so unrelated commits
+# stay fast. Matches all of backend/ deliberately: models.py holds the StrEnums
+# that become picklists, so narrowing this to api.py ships wrong validators.
 # Enable once with: git config core.hooksPath .githooks
 staged=$(git diff --cached --name-only)
-echo "$staged" | grep -qE '^backend/api\.py$|^frontend/src/lib/(api-types|validators)\.ts$' || exit 0
+echo "$staged" | grep -qE '^backend/.*\.py$|^frontend/src/lib/(api-types|validators)\.ts$' || exit 0
 
 echo "pre-commit: checking frontend API types + validators are fresh..."
 ( cd frontend && npm run --silent check:types-fresh ) || {
