@@ -1168,6 +1168,7 @@ class StockValueRow(BaseModel):
     build_reference: str  # its human code (e.g. BO-2865); "" when build_id is null
     last_po_date: date | None  # newest non-cancelled PO date pricing this part
     part_active: bool
+    part_assembly: bool
 
 
 class StockValueReport(BaseModel):
@@ -1203,7 +1204,7 @@ def stock_value_report() -> StockValueReport:
     generally worth -- price_basis says which applied."""
     with db.session() as s:
         items = s.execute(
-            select(StockItem, Part.sku, Part.description, Part.active)
+            select(StockItem, Part.sku, Part.description, Part.active, Part.assembly)
             .join(Part, StockItem.part_id == Part.id)
             .order_by(StockItem.id)
         ).all()
@@ -1249,8 +1250,9 @@ def stock_value_report() -> StockValueReport:
             build_reference=build_references.get(item.build_id, ""),
             last_po_date=last_po_dates.get(item.part_id),
             part_active=part_active,
+            part_assembly=part_assembly,
         )
-        for item, sku, description, part_active in items
+        for item, sku, description, part_active, part_assembly in items
     ]
     # totals cover stock on hand only: consumed rows are historical build inputs
     # (already counted inside the assembly they went into), so summing them too

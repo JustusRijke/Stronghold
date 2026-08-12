@@ -1213,6 +1213,8 @@ export interface components {
             last_po_date: string | null;
             /** Part Active */
             part_active: boolean;
+            /** Part Assembly */
+            part_assembly: boolean;
         };
         /** SupplierIn */
         SupplierIn: {

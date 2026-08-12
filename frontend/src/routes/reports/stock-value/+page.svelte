@@ -37,6 +37,7 @@
 		nonzero: boolean;
 		last_po_date: string;
 		part_active: boolean;
+		part_assembly: boolean;
 	};
 
 	// the report names its PO columns basis_*; reshape so the shared stock
@@ -65,7 +66,8 @@
 			order_url: stockOrderUrl(origin(r)),
 			nonzero: r.count !== 0,
 			last_po_date: r.last_po_date ?? '',
-			part_active: r.part_active
+			part_active: r.part_active,
+			part_assembly: r.part_assembly
 		}))
 	);
 
@@ -127,6 +129,12 @@
 			width: '110px',
 			bool: true,
 			boolPreset: true // inactive parts keep their leftover stock; hide it by default
+		},
+		{
+			key: 'part_assembly',
+			header: 'Assembly',
+			width: '100px',
+			bool: true // no preset: assemblies and bought parts both shown by default
 		},
 		{
 			key: 'status',
