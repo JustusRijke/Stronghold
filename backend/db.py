@@ -800,6 +800,22 @@ def on_hand(s: Session, part_id: int) -> float:
     )
 
 
+def owed(s: Session, part_id: int) -> float:
+    """What a part already owes builds, as a negative number (0.0 if nothing).
+    This is the floor a stocktake can count down to: emptying the shelf leaves
+    the debt, and only add_negative_stock may deepen it."""
+    return (
+        s.scalar(
+            select(func.coalesce(func.sum(StockItem.count), 0.0)).where(
+                StockItem.part_id == part_id,
+                StockItem.status == STOCK_AVAILABLE,
+                StockItem.count < 0,
+            )
+        )
+        or 0.0
+    )
+
+
 @_write
 def stocktake(
     s: Session,
@@ -815,14 +831,19 @@ def stocktake(
     Counting more creates a stock item for the surplus. Counting less draws the
     difference down FIFO across items, or off one named item, splitting off a
     consumed row per source so what left -- and the price it was bought at --
-    stays traceable; stock never just disappears. The count cannot go below
-    zero: a build that used stock nobody booked is add_negative_stock's job."""
+    stays traceable; stock never just disappears. A stocktake only ever empties
+    the shelf, so the floor is whatever the part already owes: it never creates
+    a debt, which is add_negative_stock's job."""
     part = get_part(s, part_id)
     if not reason:
         raise InventoryError("a stocktake needs a reason")
-    if count < 0:
+    # a part already owing stock counts below zero; the debt rows are not the
+    # shelf, so a stocktake may empty the shelf but never deepen the debt
+    floor = owed(s, part_id)
+    if count < floor - 1e-9:
         raise InventoryError(
-            "a stocktake cannot go below zero; add a negative stock item instead"
+            f"a stocktake cannot count below {floor:g} for this part; "
+            "add a negative stock item instead"
         )
     if build_id is not None:
         get_build(s, build_id)

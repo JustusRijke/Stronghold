@@ -1037,6 +1037,8 @@ export interface components {
             price_partial: boolean;
             /** In Stock */
             in_stock: number;
+            /** Owed */
+            owed: number;
             /** Needed */
             needed: number;
             /** Incoming */

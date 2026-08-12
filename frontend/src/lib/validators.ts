@@ -89,7 +89,7 @@ export const StockItemPatch = v.object({
 	});
 export const StocktakeIn = v.object({
 	part_id: v.pipe(v.number(), v.integer()),
-	count: v.pipe(v.number(), v.minValue(0)),
+	count: v.number(),
 	reason: v.string(),
 	item_id: v.optional(v.nullable(v.pipe(v.number(), v.integer()))),
 	build_id: v.optional(v.nullable(v.pipe(v.number(), v.integer()))),

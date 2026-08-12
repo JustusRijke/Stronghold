@@ -66,6 +66,7 @@ class PartOut(BaseModel):
     estimated_price: float | None  # cached unit price; None when nothing prices it
     price_partial: bool  # an assembly whose BOM has unpriced components
     in_stock: float  # Available stock on hand (debt rows net out)
+    owed: float  # what builds are owed, negative (0 if none); a stocktake's floor
     needed: float  # units builds in production still have to consume
     incoming: float  # units still to be received on open POs
     suggested_order: float  # max(0, needed - in_stock - incoming)
@@ -148,7 +149,9 @@ class StockItemIn(BaseModel):
 
 class StocktakeIn(BaseModel):
     part_id: int
-    count: float = Field(ge=0)  # below zero is NegativeStockIn's job
+    # may be negative only down to what the part already owes (db.stocktake
+    # enforces the floor); creating a debt is NegativeStockIn's job
+    count: float
     reason: str = Field(min_length=1)
     item_id: int | None = None  # to take from when lowering; oldest if null
     build_id: int | None = None
@@ -372,8 +375,23 @@ def _on_hand(s) -> dict[int, float]:
     }
 
 
+def _owed(s) -> dict[int, float]:
+    """Per part, what builds are owed (negative). See db.owed."""
+    return {
+        part_id: total
+        for part_id, total in s.execute(
+            select(StockItem.part_id, func.sum(StockItem.count))
+            .where(StockItem.status == STOCK_AVAILABLE, StockItem.count < 0)
+            .group_by(StockItem.part_id)
+        )
+    }
+
+
 def _part_out(
-    p: Part, on_hand: dict[int, float], demand: dict[int, tuple[float, float]]
+    p: Part,
+    on_hand: dict[int, float],
+    demand: dict[int, tuple[float, float]],
+    owed: dict[int, float],
 ) -> PartOut:
     stock = on_hand.get(p.id, 0.0)
     needed, incoming = demand.get(p.id, (0.0, 0.0))
@@ -388,6 +406,7 @@ def _part_out(
         estimated_price=p.estimated_price,
         price_partial=p.price_partial,
         in_stock=stock,
+        owed=owed.get(p.id, 0.0),
         needed=needed,
         incoming=incoming,
         suggested_order=max(0.0, needed - stock - incoming),
@@ -397,9 +416,9 @@ def _part_out(
 @router.get("/parts", response_model=list[PartOut])
 def list_parts() -> list[PartOut]:
     with db.session() as s:
-        on_hand, demand = _on_hand(s), db.part_demand(s)
+        on_hand, demand, owed = _on_hand(s), db.part_demand(s), _owed(s)
         return [
-            _part_out(p, on_hand, demand)
+            _part_out(p, on_hand, demand, owed)
             for p in s.scalars(select(Part).order_by(Part.id))
         ]
 
@@ -410,7 +429,7 @@ def get_part(part_id: int) -> PartOut:
         part = s.get(Part, part_id)
         if part is None:
             raise HTTPException(status_code=404, detail=f"no part {part_id}")
-        return _part_out(part, _on_hand(s), db.part_demand(s))
+        return _part_out(part, _on_hand(s), db.part_demand(s), _owed(s))
 
 
 @router.post("/parts", response_model=PartOut, status_code=201)

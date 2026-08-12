@@ -8,6 +8,7 @@ from datetime import date
 import db
 import pytest
 from models import (
+    STOCK_AVAILABLE,
     STOCK_CONSUMED,
     Activity,
     Booking,
@@ -421,6 +422,40 @@ def test_stocktake_rejects_no_reason_and_going_negative(database):
         db.stocktake(1, -1, "Lost")  # below zero is add_negative_stock's job
     with pytest.raises(db.InventoryError):
         db.stocktake(1, 1, "Damaged", item_id=99)  # not this part's stock
+
+
+def test_stocktake_floor_is_what_the_part_already_owes(database):
+    """A part already owing stock counts below zero. The stocktake may empty the
+    shelf down to that debt, but never deepen it -- that needs the negative
+    stock item button."""
+    db.create_part(1, "ASM", "an assembly")
+    db.create_part(2, "COMP", "a component")
+    db.set_part_assembly(1, True)
+    db.add_bomline(db.next_bomline_id(), 1, 2, 1.0)
+    build_id = db.next_build_id()
+    db.create_build(build_id, 1, 1)
+    db.stocktake(2, 10, "Found")
+    db.add_negative_stock(2, 4, build_id)  # now 10 on the shelf, 4 owed
+    with db.session() as s:
+        assert db.on_hand(s, 2) == 6
+        assert db.owed(s, 2) == -4
+
+    with pytest.raises(db.InventoryError):
+        db.stocktake(2, -5, "Lost")  # deeper than the existing debt
+    db.stocktake(2, -4, "Lost")  # empties the shelf, debt untouched
+    with db.session() as s:
+        assert db.on_hand(s, 2) == -4
+        assert db.owed(s, 2) == -4  # no new debt row was created
+        shelf = [
+            i
+            for i in s.scalars(
+                select(StockItem).where(
+                    StockItem.part_id == 2, StockItem.status == STOCK_AVAILABLE
+                )
+            )
+            if i.count > 0
+        ]
+        assert shelf == []
 
 
 def test_negative_stocktake_settled_by_purchase(database):
