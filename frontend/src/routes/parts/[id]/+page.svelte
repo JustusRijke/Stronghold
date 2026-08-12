@@ -9,7 +9,7 @@
 	import type { PartBuild, Part, BomLine, BomUsage, POLine, PartPurchaseOrder, PurchaseOrder, StockItem, Supplier, SupplierPart } from '$lib/types';
 
 	type PartPO = PartPurchaseOrder & { supplier_name: string };
-	import { BUILD_STATUS_OPTIONS, PO_STATUS_OPTIONS, stockOrderLabel, stockOrderUrl } from '$lib/status';
+	import { BUILD_DONE, BUILD_STATUS_OPTIONS, PO_STATUS_OPTIONS, stockOrderLabel, stockOrderUrl } from '$lib/status';
 	import { STATUS_OPTIONS as STOCK_STATUS_OPTIONS } from '$lib/validators';
 
 	const id = $derived(Number($page.params.id));
@@ -159,7 +159,8 @@
 		if (!Number.isNaN(id)) load();
 	});
 
-	// sidebar sections, in document order; BOM only when the part is an assembly.
+	// sidebar sections, in document order; BOM only when the part is an assembly,
+	// build orders last (history, and the longest table).
 	// A virtual part is never bought or stocked, so it has no supplier parts,
 	// stock or purchase orders to show. A non-purchasable part still holds
 	// stock (a build can produce it), but is never bought.
@@ -167,7 +168,6 @@
 	const sections = $derived([
 		{ id: 'details', label: 'Details' },
 		...(part?.assembly ? [{ id: 'bom', label: 'BOM' }] : []),
-		{ id: 'build-orders', label: 'Build orders' },
 		...(part?.virtual
 			? []
 			: [
@@ -175,7 +175,8 @@
 					{ id: 'stock', label: 'Stock items' },
 					...(buyable ? [{ id: 'purchase-orders', label: 'Purchase orders' }] : [])
 				]),
-		{ id: 'used-in', label: 'Used in' }
+		{ id: 'used-in', label: 'Used in' },
+		{ id: 'build-orders', label: 'Build orders' }
 	]);
 
 	function label(p: Part) {
@@ -285,7 +286,10 @@
 			header: 'Status',
 			width: '120px',
 			statusFilter: true,
-			statusOptions: BUILD_STATUS_OPTIONS
+			statusOptions: BUILD_STATUS_OPTIONS,
+			// finished builds are history and outnumber the open ones; the status
+			// filter unhides them
+			statusDefaultHide: BUILD_DONE
 		},
 		{ key: 'end_date', header: 'Target', width: '140px' }
 	]);
@@ -470,17 +474,6 @@
 					</div>
 				</section>
 			{/if}
-			<section id="build-orders">
-				<h2 class="h2">Build orders ({builds.length})</h2>
-				<DataTable
-					columns={buildCols}
-					rows={builds}
-					href={(b) => `/build-orders/${b.id}`}
-					storageKey={`/parts/${id}/builds`}
-					defaultSort={{ key: 'end_date', dir: 'desc' }}
-					onAdd={part.assembly ? () => goto(`/build-orders/new?part_id=${id}`) : undefined}
-				/>
-			</section>
 
 			{#if !part.virtual}
 				{#if buyable}
@@ -527,6 +520,17 @@
 					rows={usedIn}
 					href={(u) => `/parts/${u.parent_part_id}`}
 					storageKey={`/parts/${id}/used-in`}
+				/>
+			</section>
+			<section id="build-orders">
+				<h2 class="h2">Build orders ({builds.length})</h2>
+				<DataTable
+					columns={buildCols}
+					rows={builds}
+					href={(b) => `/build-orders/${b.id}`}
+					storageKey={`/parts/${id}/builds`}
+					defaultSort={{ key: 'end_date', dir: 'desc' }}
+					onAdd={part.assembly ? () => goto(`/build-orders/new?part_id=${id}`) : undefined}
 				/>
 			</section>
 		</div>
