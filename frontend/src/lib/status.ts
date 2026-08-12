@@ -13,6 +13,8 @@ export const PO_STATUS_OPTIONS = [
 ];
 
 export const BUILD_STATUS_OPTIONS = ['Draft', 'Pending', 'Production', 'Cancelled', 'Complete'];
+// builds in a finished state, hidden by default wherever builds are listed
+export const BUILD_DONE = ['Complete', 'Cancelled'];
 
 // Where a stock row came from: the PO it was received on, else the build that
 // produced it, else (shortfall debt rows have neither) the build that owes it.

@@ -12,6 +12,7 @@ import type {
 	POLine,
 	BuildOrder,
 	BuildLine,
+	PartBuild,
 	Setting,
 	Activity,
 	SearchResult,
@@ -60,6 +61,7 @@ export const api = {
 	partPos: (id: number) => get<PartPurchaseOrder[]>(`/parts/${id}/purchase-orders`),
 	partUsedIn: (id: number) => get<BomUsage[]>(`/parts/${id}/used-in`),
 	partBuilds: (id: number) => get<BuildOrder[]>(`/parts/${id}/builds`),
+	partConsumedBy: (id: number) => get<PartBuild[]>(`/parts/${id}/consumed-by`),
 	createPart: (b: { sku: string; description: string; virtual?: boolean }) =>
 		post<Part>('/parts', b),
 	patchPart: (

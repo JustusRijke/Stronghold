@@ -18,6 +18,7 @@ from models import (
     STOCK_CONSUMED,
     Activity,
     BomLine,
+    BuildLine,
     BuildOrder,
     BuildStatus,
     Part,
@@ -267,6 +268,13 @@ class BuildOrderOut(BaseModel):
     bom_drifted: bool  # the part's BOM no longer matches this build's snapshot
 
 
+class PartBuildOut(BuildOrderOut):
+    """A build that consumes this part, with what it needs and has taken of it."""
+
+    required: float  # per-unit snapshot quantity * build quantity
+    used: float  # stock actually consumed so far
+
+
 class BuildLineOut(BaseModel):
     """One component of a build's snapshot, with what the build has consumed of
     it so far -- a shortfall is what makes the produced cost a floor."""
@@ -472,6 +480,38 @@ def list_part_builds(part_id: int) -> list[BuildOrderOut]:
             for b in s.scalars(
                 select(BuildOrder)
                 .where(BuildOrder.part_id == part_id)
+                .order_by(BuildOrder.id)
+            )
+        ]
+
+
+@router.get("/parts/{part_id}/consumed-by", response_model=list[PartBuildOut])
+def list_part_consumed_by(part_id: int) -> list[PartBuildOut]:
+    """Build orders whose component snapshot lists this part, with the quantity
+    each needs of it and the stock each has consumed so far."""
+    with db.session() as s:
+        taken = {
+            build_id: total
+            for build_id, total in s.execute(
+                select(StockItem.consumed_by_build_id, func.sum(StockItem.count))
+                .where(
+                    StockItem.part_id == part_id,
+                    StockItem.status == STOCK_CONSUMED,
+                    StockItem.consumed_by_build_id.is_not(None),
+                )
+                .group_by(StockItem.consumed_by_build_id)
+            )
+        }
+        return [
+            PartBuildOut(
+                **_build_out(s, b).model_dump(),
+                required=qty * b.quantity,
+                used=taken.get(b.id, 0.0),
+            )
+            for b, qty in s.execute(
+                select(BuildOrder, BuildLine.quantity)
+                .join(BuildLine, BuildLine.build_id == BuildOrder.id)
+                .where(BuildLine.component_part_id == part_id)
                 .order_by(BuildOrder.id)
             )
         ]

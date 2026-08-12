@@ -2,10 +2,8 @@
 	import { goto } from '$app/navigation';
 	import { api } from '$lib/api';
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
-	import { BUILD_STATUS_OPTIONS } from '$lib/status';
+	import { BUILD_DONE, BUILD_STATUS_OPTIONS } from '$lib/status';
 
-	// builds in a finished state are hidden by default (the "Open" filter)
-	const DONE = ['Complete', 'Cancelled'];
 
 	type Row = {
 		id: number;
@@ -45,7 +43,7 @@
 			width: '120px',
 			statusFilter: true,
 			statusOptions: BUILD_STATUS_OPTIONS,
-			statusDefaultHide: DONE
+			statusDefaultHide: BUILD_DONE
 		},
 		{ key: 'end_date', header: 'Target', width: '140px' }
 	];

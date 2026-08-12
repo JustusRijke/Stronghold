@@ -6,10 +6,10 @@
 	import { partTabs } from '$lib/tabs.svelte';
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
-	import type { Part, BomLine, BomUsage, POLine, PartPurchaseOrder, PurchaseOrder, StockItem, Supplier, SupplierPart } from '$lib/types';
+	import type { PartBuild, Part, BomLine, BomUsage, POLine, PartPurchaseOrder, PurchaseOrder, StockItem, Supplier, SupplierPart } from '$lib/types';
 
 	type PartPO = PartPurchaseOrder & { supplier_name: string };
-	import { PO_STATUS_OPTIONS, stockOrderLabel, stockOrderUrl } from '$lib/status';
+	import { BUILD_DONE, BUILD_STATUS_OPTIONS, PO_STATUS_OPTIONS, stockOrderLabel, stockOrderUrl } from '$lib/status';
 	import { STATUS_OPTIONS as STOCK_STATUS_OPTIONS } from '$lib/validators';
 
 	const id = $derived(Number($page.params.id));
@@ -24,6 +24,9 @@
 	let stock = $state<StockItem[]>([]);
 	let pos = $state<PartPO[]>([]);
 	let usedIn = $state<BomUsage[]>([]);
+	// an assembly lists the builds that make it; any other part lists the builds
+	// that consume it (with what they need of it and have taken so far)
+	let builds = $state<PartBuild[]>([]);
 
 	// new-bom-line inputs
 	let newComp = $state<number | ''>('');
@@ -128,7 +131,7 @@
 		}
 		// register (or relabel) this part's tab so it persists across reloads
 		partTabs.open(id, part.description || part.sku || `Part ${id}`);
-		const [bomLines, allParts, allSupplierParts, allStock, partPos, usage, allSuppliers] =
+		const [bomLines, allParts, allSupplierParts, allStock, partPos, usage, allSuppliers, partBuilds] =
 			await Promise.all([
 				part.assembly ? api.bom(id) : Promise.resolve([]),
 				api.parts(),
@@ -136,7 +139,10 @@
 				api.stock(),
 				api.partPos(id),
 				api.partUsedIn(id),
-				api.suppliers()
+				api.suppliers(),
+				part.assembly
+					? (api.partBuilds(id) as Promise<PartBuild[]>)
+					: api.partConsumedBy(id)
 			]);
 		bom = bomLines;
 		activeParts = allParts.filter((p) => p.active);
@@ -147,12 +153,14 @@
 		stock = allStock.filter((s) => s.part_id === id);
 		pos = partPos.map((po) => ({ ...po, supplier_name: supplierName.get(po.supplier_id) ?? '' }));
 		usedIn = usage;
+		builds = partBuilds;
 	}
 	$effect(() => {
 		if (!Number.isNaN(id)) load();
 	});
 
-	// sidebar sections, in document order; BOM only when the part is an assembly.
+	// sidebar sections, in document order; BOM only when the part is an assembly,
+	// build orders last (history, and the longest table).
 	// A virtual part is never bought or stocked, so it has no supplier parts,
 	// stock or purchase orders to show. A non-purchasable part still holds
 	// stock (a build can produce it), but is never bought.
@@ -167,7 +175,8 @@
 					{ id: 'stock', label: 'Stock items' },
 					...(buyable ? [{ id: 'purchase-orders', label: 'Purchase orders' }] : [])
 				]),
-		{ id: 'used-in', label: 'Used in' }
+		{ id: 'used-in', label: 'Used in' },
+		{ id: 'build-orders', label: 'Build orders' }
 	]);
 
 	function label(p: Part) {
@@ -263,6 +272,27 @@
 		},
 		{ key: 'end_date', header: 'Target', width: '140px' }
 	];
+	const buildCols: Column<PartBuild>[] = $derived([
+		{ key: 'reference', header: 'Build', mono: true, width: '150px' },
+		{ key: 'quantity', header: 'Qty', mono: true, width: '90px' },
+		...(part?.assembly
+			? ([{ key: 'produced', header: 'Produced', mono: true, width: '100px' }] as Column<PartBuild>[])
+			: ([
+					{ key: 'required', header: 'Required', mono: true, width: '100px' },
+					{ key: 'used', header: 'Used', mono: true, width: '90px' }
+				] as Column<PartBuild>[])),
+		{
+			key: 'status',
+			header: 'Status',
+			width: '120px',
+			statusFilter: true,
+			statusOptions: BUILD_STATUS_OPTIONS,
+			// finished builds are history and outnumber the open ones; the status
+			// filter unhides them
+			statusDefaultHide: BUILD_DONE
+		},
+		{ key: 'end_date', header: 'Target', width: '140px' }
+	]);
 	const usedInCols: Column<BomUsage>[] = [
 		{ key: 'parent_sku', header: 'Assembly', mono: true, width: '150px' },
 		{ key: 'parent_description', header: 'Description', truncate: true },
@@ -490,6 +520,17 @@
 					rows={usedIn}
 					href={(u) => `/parts/${u.parent_part_id}`}
 					storageKey={`/parts/${id}/used-in`}
+				/>
+			</section>
+			<section id="build-orders">
+				<h2 class="h2">Build orders ({builds.length})</h2>
+				<DataTable
+					columns={buildCols}
+					rows={builds}
+					href={(b) => `/build-orders/${b.id}`}
+					storageKey={`/parts/${id}/builds`}
+					defaultSort={{ key: 'end_date', dir: 'desc' }}
+					onAdd={part.assembly ? () => goto(`/build-orders/new?part_id=${id}`) : undefined}
 				/>
 			</section>
 		</div>

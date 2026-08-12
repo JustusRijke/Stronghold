@@ -100,6 +100,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/parts/{part_id}/consumed-by": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Part Consumed By
+         * @description Build orders whose component snapshot lists this part, with the quantity
+         *     each needs of it and the stock each has consumed so far.
+         */
+        get: operations["list_part_consumed_by_api_parts__part_id__consumed_by_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/parts/{part_id}/bom": {
         parameters: {
             query?: never;
@@ -879,6 +900,34 @@ export interface components {
          * @enum {string}
          */
         POStatus: "Pending" | "Placed" | "On Hold" | "Complete" | "Cancelled" | "Lost" | "Returned";
+        /**
+         * PartBuildOut
+         * @description A build that consumes this part, with what it needs and has taken of it.
+         */
+        PartBuildOut: {
+            /** Id */
+            id: number;
+            /** Part Id */
+            part_id: number;
+            /** Quantity */
+            quantity: number;
+            /** Reference */
+            reference: string;
+            /** Status */
+            status: string;
+            /** Start Date */
+            start_date: string | null;
+            /** End Date */
+            end_date: string | null;
+            /** Produced */
+            produced: number;
+            /** Bom Drifted */
+            bom_drifted: boolean;
+            /** Required */
+            required: number;
+            /** Used */
+            used: number;
+        };
         /** PartIn */
         PartIn: {
             /** Sku */
@@ -1483,6 +1532,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BuildOrderOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_part_consumed_by_api_parts__part_id__consumed_by_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                part_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartBuildOut"][];
                 };
             };
             /** @description Validation Error */
