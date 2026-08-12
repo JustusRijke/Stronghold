@@ -404,6 +404,13 @@ def test_stocktake_up_and_down(database):
         assert s.get(StockItem, 1).count == 7  # still untouched
         assert s.get(StockItem, 2).count == 3
 
+    # automatic (no item named) spills onto the next item once one runs dry
+    db.stocktake(1, 1, "Lost")  # 10 -> 1: drains item 1's 7, then 2 off item 2
+    with db.session() as s:
+        assert db.on_hand(s, 1) == 1
+        assert s.get(StockItem, 1).count == 0
+        assert s.get(StockItem, 2).count == 1
+
 
 def test_stocktake_rejects_no_reason_and_going_negative(database):
     db.create_part(1, "BOLT", "a bolt")

@@ -813,10 +813,10 @@ def stocktake(
     """Correct a part's on-hand stock to a counted figure. Always needs a reason.
 
     Counting more creates a stock item for the surplus. Counting less draws the
-    difference off one stock item (the oldest by default), splitting off a
-    consumed row so what left -- and the price it was bought at -- stays
-    traceable; stock never just disappears. The count cannot go below zero: a
-    build that used stock nobody booked is add_negative_stock's job."""
+    difference down FIFO across items, or off one named item, splitting off a
+    consumed row per source so what left -- and the price it was bought at --
+    stays traceable; stock never just disappears. The count cannot go below
+    zero: a build that used stock nobody booked is add_negative_stock's job."""
     part = get_part(s, part_id)
     if not reason:
         raise InventoryError("a stocktake needs a reason")
@@ -853,9 +853,10 @@ def stocktake(
         s.flush()
         refresh_stock_price(s, get_item(s, next_id))
     else:
-        # take it off the named item, else the oldest with stock on it
+        # no item named: walk the shelf FIFO, spilling onto the next item as
+        # each runs out. A named item is the only source, and must cover it.
         if item_id is None:
-            source = s.scalars(
+            sources = s.scalars(
                 select(StockItem)
                 .where(
                     StockItem.part_id == part_id,
@@ -863,36 +864,45 @@ def stocktake(
                     StockItem.count > 0,  # never draw down an outstanding debt row
                 )
                 .order_by(StockItem.id)
-            ).first()
-            if source is None:
-                raise InventoryError(f"no stock of part {part_id} to take from")
+            ).all()
         else:
-            source = get_item(s, item_id)
-            if source.part_id != part_id or source.status != STOCK_AVAILABLE:
+            named = get_item(s, item_id)
+            if named.part_id != part_id or named.status != STOCK_AVAILABLE:
                 raise InventoryError(
                     f"stock item {item_id} is not available stock of part {part_id}"
                 )
-        take = -delta
-        if take > source.count + 1e-9:
-            raise InventoryError(
-                f"stock item {source.id} holds {source.count:g}, cannot take {take:g}"
+            sources = [named]
+        need = -delta
+        available = sum(i.count for i in sources)
+        if need > available + 1e-9:
+            where = (
+                f"stock item {sources[0].id} holds {available:g}"
+                if item_id is not None
+                else f"only {available:g} of part {part_id} is in stock"
             )
-        source.count -= take
-        s.add(
-            StockItem(
-                id=next_id,
-                count=take,
-                part_id=part_id,
-                po_id=source.po_id,  # keep the source's price provenance
-                build_id=source.build_id,
-                status=STOCK_CONSUMED,
-                unit_price=source.unit_price,
-                price_basis=source.price_basis,
-                price_po_id=source.price_po_id,
-                stocktake_at=at,
-                stocktake_reason=reason,
+            raise InventoryError(f"{where}, cannot take {need:g}")
+        for source in sources:
+            if need <= 1e-9:
+                break
+            take = min(source.count, need)
+            source.count -= take
+            need -= take
+            s.add(
+                StockItem(
+                    id=next_id,
+                    count=take,
+                    part_id=part_id,
+                    po_id=source.po_id,  # keep the source's price provenance
+                    build_id=source.build_id,
+                    status=STOCK_CONSUMED,
+                    unit_price=source.unit_price,
+                    price_basis=source.price_basis,
+                    price_po_id=source.price_po_id,
+                    stocktake_at=at,
+                    stocktake_reason=reason,
+                )
             )
-        )
+            next_id += 1
 
     refs = [("part", part_id, part.sku)]
     if build_id is not None:
