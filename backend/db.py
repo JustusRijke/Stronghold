@@ -1201,6 +1201,51 @@ def _settle_stock_debt(s: Session, item: StockItem) -> dict[int, float]:
     return settled
 
 
+def _receive_line(
+    s: Session, line: POLine, stock_item_id: int, quantity: float
+) -> tuple[StockItem, dict[int, float]]:
+    """Receive `quantity` packs of one PO line into a new stock item: create it,
+    book it to the line, price it, and pay off any build shortfalls for that part
+    out of it. Returns (the stock item, {build_id: quantity settled}). Shared by
+    book_po_line and book_po so the two receive paths cannot drift apart."""
+    supplier_part = get_supplier_part(s, line.supplier_part_id)
+    s.add(
+        StockItem(
+            id=stock_item_id,
+            count=quantity * supplier_part.pack_qty,
+            part_id=supplier_part.part_id,
+            po_id=line.po_id,
+        )
+    )
+    line.received += quantity
+    s.flush()  # stock item must exist before the booking FK references it
+    s.add(Booking(stock_item_id=stock_item_id, po_line_id=line.id))
+    s.flush()  # the booking must exist before the new stock is priced from it
+    item = get_item(s, stock_item_id)
+    refresh_stock_price(s, item)
+    return item, _settle_stock_debt(s, item)
+
+
+def _settle_activity(
+    s: Session, settled: dict[int, float], part: Part, po_id: int, po_label: str
+) -> None:
+    """One activity row per build a receipt paid off, so receiving tells the user
+    what it settled instead of silently zeroing rows."""
+    for build_id, qty in settled.items():
+        build = get_build(s, build_id)
+        build_label = build.reference or f"BO-{build_id}"
+        _activity(
+            s,
+            "settle_stock_debt",
+            f"{qty:g}x {part.description} settled a shortfall on {build_label}",
+            [
+                ("po", po_id, po_label),
+                ("build", build_id, build_label),
+                ("part", part.id, part.description),
+            ],
+        )
+
+
 @_write
 def book_po_line(s: Session, line_id: int, stock_item_id: int, quantity: float) -> None:
     """Receive `quantity` ordered units of a PO line into stock, in one
@@ -1217,25 +1262,11 @@ def book_po_line(s: Session, line_id: int, stock_item_id: int, quantity: float) 
     if s.get(StockItem, stock_item_id) is not None:
         raise InventoryError(f"stock item id {stock_item_id} already exists")
     supplier_part = get_supplier_part(s, line.supplier_part_id)
-    s.add(
-        StockItem(
-            id=stock_item_id,
-            count=quantity * supplier_part.pack_qty,
-            part_id=supplier_part.part_id,
-            po_id=line.po_id,
-        )
-    )
-    line.received += quantity
-    s.flush()  # stock item must exist before the booking FK references it
-    s.add(Booking(stock_item_id=stock_item_id, po_line_id=line_id))
-    s.flush()  # the booking must exist before the new stock is priced from it
-    item = get_item(s, stock_item_id)
-    refresh_stock_price(s, item)
-    settled = _settle_stock_debt(s, item)
+    count = quantity * supplier_part.pack_qty
+    _, settled = _receive_line(s, line, stock_item_id, quantity)
     part = get_part(s, supplier_part.part_id)
     po = get_po(s, line.po_id)
     po_label = po.reference or f"PO-{po.id}"
-    count = quantity * supplier_part.pack_qty
     _activity(
         s,
         "book_po_line",
@@ -1245,19 +1276,7 @@ def book_po_line(s: Session, line_id: int, stock_item_id: int, quantity: float) 
             ("stock", stock_item_id, f"{count:g}x {part.description}"),
         ],
     )
-    for settled_build_id, qty in settled.items():
-        build = get_build(s, settled_build_id)
-        build_label = build.reference or f"BO-{settled_build_id}"
-        _activity(
-            s,
-            "settle_stock_debt",
-            f"{qty:g}x {part.description} settled a shortfall on {build_label}",
-            [
-                ("po", po.id, po_label),
-                ("build", settled_build_id, build_label),
-                ("part", part.id, part.description),
-            ],
-        )
+    _settle_activity(s, settled, part, po.id, po_label)
     _complete_po_if_fully_received(s, line.po_id)
 
 
@@ -1281,30 +1300,22 @@ def book_po(s: Session, po_id: int) -> None:
     next_id = (s.scalar(select(func.max(StockItem.id))) or 0) + 1
     po_label = po.reference or f"PO-{po_id}"
     refs = [("po", po_id, po_label)]
+    all_settled: list[tuple[dict[int, float], Part]] = []
     for line in s.scalars(select(POLine).where(POLine.po_id == po_id)):
         outstanding = line.quantity - line.received
         if outstanding <= 0:
             continue
         supplier_part = get_supplier_part(s, line.supplier_part_id)
         count = outstanding * supplier_part.pack_qty
-        s.add(
-            StockItem(
-                id=next_id,
-                count=count,
-                part_id=supplier_part.part_id,
-                po_id=po_id,
-            )
-        )
-        line.received += outstanding
-        s.flush()
-        s.add(Booking(stock_item_id=next_id, po_line_id=line.id))
-        s.flush()  # the booking must exist before the new stock is priced
-        refresh_stock_price(s, get_item(s, next_id))
+        _, settled = _receive_line(s, line, next_id, outstanding)
         part = get_part(s, supplier_part.part_id)
         refs.append(("stock", next_id, f"{count:g}x {part.description}"))
+        all_settled.append((settled, part))
         next_id += 1
     if len(refs) > 1:
         _activity(s, "book_po", f"Received {po_label} into stock", refs)
+    for settled, part in all_settled:
+        _settle_activity(s, settled, part, po_id, po_label)
     _complete_po_if_fully_received(s, po_id)
 
 

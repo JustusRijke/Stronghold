@@ -329,6 +329,42 @@ def test_build_shortfall_settled_by_purchase(database):
         ]
 
 
+def test_shortfall_settled_by_whole_po_receipt(database):
+    """Receiving a whole PO settles shortfalls exactly like booking its lines
+    one at a time -- the two receive paths must not drift apart."""
+    db.create_part(1, "ASM", "an assembly")
+    db.create_part(2, "COMP", "a component")
+    db.set_part_assembly(1, True)
+    db.add_bomline(db.next_bomline_id(), 1, 2, 4.0)
+    db.create_supplier(1, "Acme")
+    db.create_supplier_part(1, 1, "C-1", 2, pack_qty=1)
+    db.create_po(1, 1)
+    db.add_po_line(db.next_line_id(), 1, 1, 4, 2.0)
+
+    build_id = db.next_build_id()
+    db.create_build(build_id, 1, 1)
+    db.produce_build(build_id, 1)  # no stock at all: all 4 go on credit
+    with db.session() as s:
+        debt_id = (
+            s.scalars(
+                select(StockItem).where(StockItem.part_id == 2, StockItem.count < 0)
+            )
+            .one()
+            .id
+        )
+    db.book_po(1)  # the whole-PO path, not book_po_line
+    with db.session() as s:
+        assert s.get(StockItem, debt_id).count == 0  # settled
+        settled = s.scalars(
+            select(StockItem).where(
+                StockItem.consumed_by_build_id == build_id,
+                StockItem.po_id.is_not(None),
+            )
+        ).one()
+        assert (settled.count, settled.price_basis) == (4, "po")
+        assert db.build_unit_cost(s, build_id) == (8.0, True)
+
+
 def test_virtual_part(database):
     db.create_part(1, "ASM", "an assembly")
     db.create_part(2, "COMP-A", "component a")
