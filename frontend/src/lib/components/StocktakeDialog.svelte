@@ -19,9 +19,11 @@
 	let count = $state(0);
 	let reason = $state('');
 	let sourceId = $state<number | ''>('');
+	let auto = $state(true);
 	let items = $state<StockItem[]>([]);
 	let reasons = $state<{ add: string[]; subtract: string[] }>({ add: [], subtract: [] });
 
+	const changed = $derived(count !== currentCount);
 	const lowering = $derived(count < currentCount);
 	// finding stock and losing it have little vocabulary in common
 	const reasonOptions = $derived(lowering ? reasons.subtract : reasons.add);
@@ -32,13 +34,17 @@
 			.sort((a, b) => a.id - b.id)
 	);
 	const source = $derived(sources.find((i) => i.id === Number(sourceId)));
-	// only what sits on the chosen item can come off it
-	const tooMuch = $derived(lowering && source ? currentCount - count > source.count : false);
+	// automatic spills across items FIFO; a chosen item is the only source, so
+	// only what sits on it can come off
+	const tooMuch = $derived(
+		lowering && !auto && source ? currentCount - count > source.count : false
+	);
 
 	$effect(() => {
 		if (open) {
 			count = currentCount;
 			reason = '';
+			auto = true;
 			dialog?.showModal();
 			api.stock().then((all) => {
 				items = all;
@@ -57,7 +63,8 @@
 					part_id: partId,
 					count,
 					reason,
-					item_id: lowering && sourceId !== '' ? Number(sourceId) : null
+					// null lets the backend walk the shelf FIFO
+					item_id: lowering && !auto && sourceId !== '' ? Number(sourceId) : null
 				}),
 			'Stock updated'
 		);
@@ -89,20 +96,26 @@
 		/>
 	</label>
 
-	<label class="field req">
-		<span>Reason</span>
-		<input bind:value={reason} placeholder="Why does the count differ?" />
-	</label>
-	<div class="reasons">
-		{#each reasonOptions as r (r)}
-			<button class="btn ghost small" type="button" onclick={() => (reason = r)}>{r}</button>
-		{/each}
-	</div>
+	{#if changed}
+		<label class="field req">
+			<span>Reason</span>
+			<input bind:value={reason} placeholder="Why does the count differ?" />
+		</label>
+		<div class="reasons">
+			{#each reasonOptions as r (r)}
+				<button class="btn ghost small" type="button" onclick={() => (reason = r)}>{r}</button>
+			{/each}
+		</div>
+	{/if}
 
 	{#if lowering}
-		<label class="field req">
+		<label class="field">
 			<span>Take from</span>
-			<select bind:value={sourceId}>
+			<label class="check auto">
+				<input type="checkbox" bind:checked={auto} />
+				Automatic (oldest stock first, across items)
+			</label>
+			<select bind:value={sourceId} disabled={auto}>
 				{#each sources as i (i.id)}
 					<option value={i.id}>
 						#{i.id} &middot; {i.count} in stock{i.po_reference ? ` · ${i.po_reference}` : ''}
@@ -111,7 +124,9 @@
 			</select>
 		</label>
 		{#if tooMuch && source}
-			<p class="muted warn">Stock item #{source.id} only holds {source.count}.</p>
+			<p class="muted warn">
+				Stock item #{source.id} only holds {source.count}. Tick Automatic to spread it across items.
+			</p>
 		{/if}
 	{/if}
 
@@ -121,11 +136,11 @@
 			class="btn"
 			type="button"
 			onclick={save}
-			disabled={count === currentCount ||
+			disabled={!changed ||
 				count < 0 ||
 				!reason ||
 				tooMuch ||
-				(lowering && sourceId === '')}
+				(lowering && !auto && sourceId === '')}
 		>
 			Save
 		</button>
@@ -153,6 +168,16 @@
 	.btn.small {
 		padding: 2px 8px;
 		font-size: 0.85em;
+	}
+	.check.auto {
+		flex-direction: row;
+		align-items: center;
+		gap: 6px;
+		margin-bottom: 6px;
+		font-weight: normal;
+	}
+	select:disabled {
+		opacity: 0.5;
 	}
 	.warn {
 		color: var(--warn, #b45309);
