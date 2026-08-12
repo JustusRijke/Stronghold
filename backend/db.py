@@ -46,6 +46,10 @@ _export_enabled = True
 # ponytail: all values are strings; add typed casting back when a non-str setting appears
 DOMAIN_DEFAULTS = {
     "gui.title": "Stronghold",
+    # stocktake reason suggestions, comma separated. Split by direction: finding
+    # stock and losing it have little vocabulary in common.
+    "stocktake.add_reasons": "Found,Refurbished/repaired,Returned by customer,Unknown",
+    "stocktake.subtract_reasons": "Damaged,Warranty claim by customer,Lost,Unknown",
 }
 
 

@@ -625,6 +625,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/stocktake-reasons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stocktake Reasons */
+        get: operations["stocktake_reasons_api_settings_stocktake_reasons_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/parts/refresh-prices": {
         parameters: {
             query?: never;
@@ -1289,6 +1306,17 @@ export interface components {
             build_id?: number | null;
             /** Po Id */
             po_id?: number | null;
+        };
+        /**
+         * StocktakeReasonsOut
+         * @description Reason suggestions, split by direction; the setting holds them comma
+         *     separated.
+         */
+        StocktakeReasonsOut: {
+            /** Add */
+            add: string[];
+            /** Subtract */
+            subtract: string[];
         };
         /** SupplierIn */
         SupplierIn: {
@@ -2915,6 +2943,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stocktake_reasons_api_settings_stocktake_reasons_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StocktakeReasonsOut"];
                 };
             };
         };

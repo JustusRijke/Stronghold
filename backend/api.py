@@ -1196,6 +1196,25 @@ def set_setting(key: str, body: SettingIn) -> SettingOut:
     return SettingOut(key=key, value=db.get_setting(key))
 
 
+class StocktakeReasonsOut(BaseModel):
+    """Reason suggestions, split by direction; the setting holds them comma
+    separated."""
+
+    add: list[str]
+    subtract: list[str]
+
+
+@router.get("/settings/stocktake-reasons", response_model=StocktakeReasonsOut)
+def stocktake_reasons() -> StocktakeReasonsOut:
+    def split(key: str) -> list[str]:
+        return [r.strip() for r in db.get_setting(key).split(",") if r.strip()]
+
+    return StocktakeReasonsOut(
+        add=split("stocktake.add_reasons"),
+        subtract=split("stocktake.subtract_reasons"),
+    )
+
+
 # -- reports ----------------------------------------------------------------
 
 

@@ -303,12 +303,26 @@ def test_build_flow(client):
 
 
 def test_settings(client):
-    assert client.get("/api/settings").json() == [
-        {"key": "gui.title", "value": "Stronghold"}
-    ]
+    assert {"key": "gui.title", "value": "Stronghold"} in client.get(
+        "/api/settings"
+    ).json()
     client.put("/api/settings/gui.title", json={"value": "My Stock"})
     assert client.get("/api/settings").json()[0]["value"] == "My Stock"
     assert client.put("/api/settings/nope", json={"value": "x"}).status_code == 400
+
+
+def test_stocktake_reasons(client):
+    """Served split by direction, parsed from the comma-separated setting."""
+    reasons = client.get("/api/settings/stocktake-reasons").json()
+    assert "Damaged" in reasons["subtract"]
+    assert "Refurbished/repaired" in reasons["add"]
+    assert "Unknown" in reasons["add"] and "Unknown" in reasons["subtract"]
+
+    client.put("/api/settings/stocktake.add_reasons", json={"value": "Found, Given"})
+    assert client.get("/api/settings/stocktake-reasons").json()["add"] == [
+        "Found",
+        "Given",
+    ]
 
 
 def test_search(client):
