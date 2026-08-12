@@ -911,6 +911,14 @@ export interface components {
             estimated_price: number | null;
             /** Price Partial */
             price_partial: boolean;
+            /** In Stock */
+            in_stock: number;
+            /** Needed */
+            needed: number;
+            /** Incoming */
+            incoming: number;
+            /** Suggested Order */
+            suggested_order: number;
         };
         /** PartPatch */
         PartPatch: {

@@ -64,6 +64,10 @@ class PartOut(BaseModel):
     purchasable: bool
     estimated_price: float | None  # cached unit price; None when nothing prices it
     price_partial: bool  # an assembly whose BOM has unpriced components
+    in_stock: float  # Available stock on hand (debt rows net out)
+    needed: float  # units builds in production still have to consume
+    incoming: float  # units still to be received on open POs
+    suggested_order: float  # max(0, needed - in_stock - incoming)
 
 
 class PartIn(BaseModel):
@@ -331,7 +335,22 @@ class ActivityOut(BaseModel):
 # -- parts ------------------------------------------------------------------
 
 
-def _part_out(p: Part) -> PartOut:
+def _on_hand(s) -> dict[int, float]:
+    return {
+        part_id: total
+        for part_id, total in s.execute(
+            select(StockItem.part_id, func.sum(StockItem.count))
+            .where(StockItem.status == STOCK_AVAILABLE)
+            .group_by(StockItem.part_id)
+        )
+    }
+
+
+def _part_out(
+    p: Part, on_hand: dict[int, float], demand: dict[int, tuple[float, float]]
+) -> PartOut:
+    stock = on_hand.get(p.id, 0.0)
+    needed, incoming = demand.get(p.id, (0.0, 0.0))
     return PartOut(
         id=p.id,
         sku=p.sku,
@@ -342,22 +361,30 @@ def _part_out(p: Part) -> PartOut:
         purchasable=p.purchasable,
         estimated_price=p.estimated_price,
         price_partial=p.price_partial,
+        in_stock=stock,
+        needed=needed,
+        incoming=incoming,
+        suggested_order=max(0.0, needed - stock - incoming),
     )
 
 
 @router.get("/parts", response_model=list[PartOut])
 def list_parts() -> list[PartOut]:
     with db.session() as s:
-        return [_part_out(p) for p in s.scalars(select(Part).order_by(Part.id))]
+        on_hand, demand = _on_hand(s), db.part_demand(s)
+        return [
+            _part_out(p, on_hand, demand)
+            for p in s.scalars(select(Part).order_by(Part.id))
+        ]
 
 
 @router.get("/parts/{part_id}", response_model=PartOut)
 def get_part(part_id: int) -> PartOut:
     with db.session() as s:
         part = s.get(Part, part_id)
-    if part is None:
-        raise HTTPException(status_code=404, detail=f"no part {part_id}")
-    return _part_out(part)
+        if part is None:
+            raise HTTPException(status_code=404, detail=f"no part {part_id}")
+        return _part_out(part, _on_hand(s), db.part_demand(s))
 
 
 @router.post("/parts", response_model=PartOut, status_code=201)
