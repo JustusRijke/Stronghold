@@ -104,7 +104,7 @@
 	// another build is still this build's output, so status is not a filter here
 	const produced = $derived(producedStock.filter((s) => s.build_id === id));
 	const remaining = $derived(build ? build.quantity - build.produced : 0);
-	// components short for producing `qty` units: {sku, need, have}. Producing is
+	// components short for producing `qty` units: {sku, required, have}. Producing is
 	// never blocked -- the user sees the shortfall and decides whether to proceed
 	// (the missing parts become a negative stock item owed by this build).
 	function shortages(qty: number) {
@@ -114,10 +114,10 @@
 				part_id: l.component_part_id,
 				sku: l.component_sku,
 				description: l.component_description,
-				need: l.quantity * qty,
+				required: l.quantity * qty,
 				have: available.get(l.component_part_id) ?? 0
 			}))
-			.filter((c) => c.have < c.need);
+			.filter((c) => c.have < c.required);
 	}
 
 	// produce popup
@@ -149,39 +149,40 @@
 		}
 	];
 
-	// component rows for the DataTable: BOM lines enriched with need/have. Need is
-	// for the units still to produce (remaining). virtual = unlimited, never short.
+	// component rows for the DataTable: BOM lines enriched with required/have.
+	// Required covers the units still to produce (remaining), not the whole build.
+	// virtual = unlimited, never short.
 	type CompRow = {
 		component_part_id: number;
 		sku: string;
 		description: string;
-		need: number;
+		required: number;
 		have: number;
-		used: number;
+		consumed: number;
 		virtual: boolean;
 		short: boolean;
 	};
 	const compRows = $derived.by<CompRow[]>(() =>
 		bom.map((l) => {
-			const need = l.quantity * remaining;
+			const required = l.quantity * remaining;
 			const have = available.get(l.component_part_id) ?? 0;
 			return {
 				component_part_id: l.component_part_id,
 				sku: l.component_sku,
 				description: l.component_description,
-				need,
+				required,
 				have,
-				used: l.consumed,
+				consumed: l.consumed,
 				virtual: l.component_virtual,
-				short: !l.component_virtual && have < need
+				short: !l.component_virtual && have < required
 			};
 		})
 	);
 	const compCols: Column<CompRow>[] = [
 		{ key: 'sku', header: 'SKU', mono: true, width: '140px' },
 		{ key: 'description', header: 'Description', truncate: true },
-		{ key: 'need', header: 'Need', mono: true, width: '100px' },
-		{ key: 'used', header: 'Used', mono: true, width: '100px' },
+		{ key: 'required', header: 'Required', mono: true, width: '100px' },
+		{ key: 'consumed', header: 'Consumed', mono: true, width: '100px' },
 		{
 			key: 'have',
 			header: 'Have',
@@ -323,7 +324,7 @@
 					<p class="muted">This build has not consumed any stock yet.</p>
 				{:else}
 					<p class="muted">
-						What this build actually used, at the price it was bought for &mdash; this is
+						What this build actually consumed, at the price it was bought for &mdash; this is
 						what prices the output. Virtual components (labour) are listed at the rate
 						this build recorded; they hold no stock, so nothing is drawn down.
 						Total {consumedTotal.toFixed(2)}.
@@ -362,8 +363,8 @@
 				<ul>
 					{#each dialogShortages as c (c.part_id)}
 						<li>
-							{#if c.sku}<span class="mono">{c.sku}</span> &mdash; {/if}{c.description}: need
-							{c.need}, have {c.have}
+							{#if c.sku}<span class="mono">{c.sku}</span> &mdash; {/if}{c.description}: requires
+							{c.required}, have {c.have}
 						</li>
 					{/each}
 				</ul>

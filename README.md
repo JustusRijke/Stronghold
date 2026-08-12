@@ -70,10 +70,10 @@ Open-source inventory/stock tracking for small and medium businesses.
 - Every part page lists the build orders it is involved in. For an assembly
   these are the builds that make it (with how many each has produced, and a
   button to raise a new one); for any other part they are the builds that
-  consume it, showing how much each needs of it ("Required") and how much stock
-  it has actually taken so far ("Used"). Like the build orders overview, the
-  list shows open builds and hides finished ones until you unhide them with the
-  status filter
+  consume it, showing how much each requires of it ("Required") and how much
+  stock it has actually taken so far ("Consumed"). Like the build orders
+  overview, the list shows open builds and hides finished ones until you unhide
+  them with the status filter
 - A build order keeps its own copy of the assembly's BOM, taken when the order
   was created, so editing the BOM later does not change what an existing build
   is set to consume. If the two drift apart the build page says so and offers
@@ -85,8 +85,8 @@ Open-source inventory/stock tracking for small and medium businesses.
   re-price builds you already finished. Builds imported from InvenTree are
   baselined at the rate current when you import (InvenTree does not record what
   a past build was costed at), so re-importing re-baselines them.
-- Virtual components (labour) are listed as consumed by the build that used
-  them, at the rate that build recorded, so the work shows up alongside the
+- Virtual components (labour) are listed as consumed by the build that
+  consumed them, at the rate that build recorded, so the work shows up alongside the
   parts and counts toward what the assembly cost. They hold no stock, so
   nothing is drawn down and they are never counted as stock you own
 - Consumed stock is never destroyed -- it is recorded as a "Consumed by build

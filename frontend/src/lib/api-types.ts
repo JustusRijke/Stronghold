@@ -110,7 +110,7 @@ export interface paths {
         /**
          * List Part Consumed By
          * @description Build orders whose component snapshot lists this part, with the quantity
-         *     each needs of it and the stock each has consumed so far.
+         *     each requires of it and the stock each has consumed so far.
          */
         get: operations["list_part_consumed_by_api_parts__part_id__consumed_by_get"];
         put?: never;
@@ -902,7 +902,7 @@ export interface components {
         POStatus: "Pending" | "Placed" | "On Hold" | "Complete" | "Cancelled" | "Lost" | "Returned";
         /**
          * PartBuildOut
-         * @description A build that consumes this part, with what it needs and has taken of it.
+         * @description A build that consumes this part, with what it requires and has taken of it.
          */
         PartBuildOut: {
             /** Id */
@@ -925,8 +925,8 @@ export interface components {
             bom_drifted: boolean;
             /** Required */
             required: number;
-            /** Used */
-            used: number;
+            /** Consumed */
+            consumed: number;
         };
         /** PartIn */
         PartIn: {

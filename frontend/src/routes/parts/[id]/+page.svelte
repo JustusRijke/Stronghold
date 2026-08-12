@@ -25,7 +25,7 @@
 	let pos = $state<PartPO[]>([]);
 	let usedIn = $state<BomUsage[]>([]);
 	// an assembly lists the builds that make it; any other part lists the builds
-	// that consume it (with what they need of it and have taken so far)
+	// that consume it (with what they require of it and have consumed so far)
 	let builds = $state<PartBuild[]>([]);
 
 	// new-bom-line inputs
@@ -279,7 +279,7 @@
 			? ([{ key: 'produced', header: 'Produced', mono: true, width: '100px' }] as Column<PartBuild>[])
 			: ([
 					{ key: 'required', header: 'Required', mono: true, width: '100px' },
-					{ key: 'used', header: 'Used', mono: true, width: '90px' }
+					{ key: 'consumed', header: 'Consumed', mono: true, width: '100px' }
 				] as Column<PartBuild>[])),
 		{
 			key: 'status',
