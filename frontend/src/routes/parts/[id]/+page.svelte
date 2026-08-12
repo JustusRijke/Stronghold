@@ -33,7 +33,9 @@
 	// line on an open PO (Pending/Placed/On Hold) for this part's supplier(s),
 	// add a new line to one of those POs, or start a fresh PO+line.
 	let poDialog = $state<HTMLDialogElement | null>(null);
-	let poQty = $state(1);
+	// packs to order, per supplier part: pack size differs between them, so the
+	// suggested unit count rounds up to a different number of packs for each
+	let poQty = $state<Record<number, number>>({});
 	// price per pack, defaulted per supplier part (pack size differs between them)
 	let poPrice = $state<Record<number, number>>({});
 	// candidates for the part's active supplier parts: existing open PO + line (if any)
@@ -66,7 +68,11 @@
 			const line = linesByPo[i].find((l) => l.supplier_part_id === sp.id) ?? null;
 			return { po, supplierPart: sp, line };
 		});
-		poQty = 1;
+		// prefill with enough packs to cover the shortfall (needed - stock - on order)
+		const suggested = part?.suggested_order ?? 0;
+		poQty = Object.fromEntries(
+			activeSp.map((sp) => [sp.id, Math.max(1, Math.ceil(suggested / (sp.pack_qty || 1)))])
+		);
 		// a line is priced per pack; last_price and the part estimate are per unit
 		const est = part?.estimated_price ?? 0;
 		poPrice = Object.fromEntries(
@@ -263,11 +269,6 @@
 		{ key: 'quantity', header: 'Qty', mono: true, width: '90px' }
 	];
 
-	// total on-hand counts only Available stock
-	const stockTotal = $derived(
-		stock.reduce((n, s) => n + (s.status === 'Available' ? s.count : 0), 0)
-	);
-
 	async function saveSku(v: string) {
 		if (await toast.run(() => api.patchPart(id, { sku: v }))) load();
 	}
@@ -331,7 +332,12 @@
 					<input value={part.description} onblur={(e) => saveDescription(e.currentTarget.value)} />
 				</label>
 				{#if !part.virtual}
-					<p class="muted">In stock: <strong>{stockTotal}</strong></p>
+					<p class="muted">
+						In stock: <strong>{part.in_stock}</strong> &middot; needed for builds:
+						<strong>{part.needed}</strong>
+						&middot; on order: <strong>{part.incoming}</strong> &middot; suggested to order:
+						<strong>{part.suggested_order}</strong>
+					</p>
 				{/if}
 				{#if part.virtual}
 					<label class="field">
@@ -491,10 +497,12 @@
 
 	<dialog bind:this={poDialog} class="podialog">
 		<h2 class="h2">Purchase this part</h2>
-		<label class="field">
-			<span>Quantity (packs)</span>
-			<input type="number" min="1" step="1" bind:value={poQty} />
-		</label>
+		{#if part}
+			<p class="muted">
+				In stock {part.in_stock} &middot; needed {part.needed} &middot; on order {part.incoming}
+				&middot; <strong>suggested {part.suggested_order}</strong>
+			</p>
+		{/if}
 		{#if poCandidates.length > 0}
 			<p class="muted">
 				Open purchase orders exist for this part's supplier(s). Adding to an existing line keeps
@@ -504,10 +512,23 @@
 				{#each poCandidates as c (c.po.id)}
 					<li>
 						<a href={`/purchase-orders/${c.po.id}`}>{c.po.reference || `PO ${c.po.id}`}</a>
-						<span class="muted">&middot; {c.supplierPart.supplier_name}</span>
+						<span class="muted">
+							&middot; {c.supplierPart.supplier_name} &middot; packs of {c.supplierPart.pack_qty}
+						</span>
+						<input
+							class="qty"
+							type="number"
+							min="1"
+							step="1"
+							title="Packs to order"
+							bind:value={poQty[c.supplierPart.id]}
+						/>
 						{#if c.line}
-							<button class="btn" onclick={() => addToExistingLine(c.line!, poQty)}
-								>Add to existing line ({c.line.quantity} &rarr; {c.line.quantity + poQty})</button
+							<button
+								class="btn"
+								onclick={() => addToExistingLine(c.line!, poQty[c.supplierPart.id])}
+								>Add to existing line ({c.line.quantity} &rarr;
+								{c.line.quantity + poQty[c.supplierPart.id]})</button
 							>
 						{:else}
 							<input
@@ -518,7 +539,9 @@
 								title="Price per pack"
 								bind:value={poPrice[c.supplierPart.id]}
 							/>
-							<button class="btn" onclick={() => addAsNewLine(c.po, c.supplierPart, poQty)}
+							<button
+								class="btn"
+								onclick={() => addAsNewLine(c.po, c.supplierPart, poQty[c.supplierPart.id])}
 								>Add as new line</button
 							>
 						{/if}
@@ -532,6 +555,14 @@
 				<li>
 					<span class="muted">{sp.supplier_name} &middot; packs of {sp.pack_qty}</span>
 					<input
+						class="qty"
+						type="number"
+						min="1"
+						step="1"
+						title="Packs to order"
+						bind:value={poQty[sp.id]}
+					/>
+					<input
 						class="price"
 						type="number"
 						min="0"
@@ -539,7 +570,7 @@
 						title="Price per pack"
 						bind:value={poPrice[sp.id]}
 					/>
-					<button class="btn" onclick={() => addAsNewPo(sp, poQty)}>New PO</button>
+					<button class="btn" onclick={() => addAsNewPo(sp, poQty[sp.id])}>New PO</button>
 				</li>
 			{/each}
 		</ul>
