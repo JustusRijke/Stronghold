@@ -91,8 +91,14 @@ Open-source inventory/stock tracking for small and medium businesses.
   item** linked to that build, valued at the part's estimated price and deducted
   from your stock value -- so an almost-complete assembly becomes available
   without the shortfall going untracked. Receiving those parts on a purchase
-  order clears the negative item automatically and reprices the build at what
-  you actually paid
+  order clears the negative item automatically, reprices the build at what you
+  actually paid, and says so in the activity feed. A settled shortfall and a
+  receipt that went straight into a build both end at zero count, so stock
+  tables hide zero-count rows by default -- flip the "In stock" filter to see
+  them
+- Stock tables show the order each item came from -- the purchase order it was
+  received on, or the build order that produced it (or owes it) -- as a link
+  straight to that order
 - A "Reports" tab with a stock value report, listing every stock item at its
   value. Totals cover stock on hand; consumed rows stay listed for provenance
   but are not counted again (they are already inside the assembly they built). The table shows how each row was priced (and links to the purchase
