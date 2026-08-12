@@ -8,7 +8,7 @@
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
 	import StocktakeDialog from '$lib/components/StocktakeDialog.svelte';
 	import NegativeStockDialog from '$lib/components/NegativeStockDialog.svelte';
-	import type { PartBuild, Part, BomLine, BomUsage, POLine, PartPurchaseOrder, PurchaseOrder, StockItem, Supplier, SupplierPart } from '$lib/types';
+	import type { PartBuild, Part, BomLine, BomUsage, POLine, PartPurchaseOrder, PurchaseOrder, StockItem, StockLogEntry, Supplier, SupplierPart } from '$lib/types';
 
 	type PartPO = PartPurchaseOrder & { supplier_name: string };
 	import { BUILD_DONE, BUILD_STATUS_OPTIONS, PO_STATUS_OPTIONS, stockOrderLabel, stockOrderUrl } from '$lib/status';
@@ -20,6 +20,7 @@
 	let notFound = $state(false);
 	let stocktakeOpen = $state(false);
 	let negStockOpen = $state(false);
+	let stockLog = $state<StockLogEntry[]>([]);
 	let bom = $state<BomLine[]>([]);
 	let activeParts = $state<Part[]>([]);
 
@@ -135,19 +136,28 @@
 		}
 		// register (or relabel) this part's tab so it persists across reloads
 		partTabs.open(id, part.description || part.sku || `Part ${id}`);
-		const [bomLines, allParts, allSupplierParts, allStock, partPos, usage, allSuppliers, partBuilds] =
-			await Promise.all([
-				part.assembly ? api.bom(id) : Promise.resolve([]),
-				api.parts(),
-				api.supplierParts(),
-				api.stock(),
-				api.partPos(id),
-				api.partUsedIn(id),
-				api.suppliers(),
-				part.assembly
-					? (api.partBuilds(id) as Promise<PartBuild[]>)
-					: api.partConsumedBy(id)
-			]);
+		const [
+			bomLines,
+			allParts,
+			allSupplierParts,
+			allStock,
+			partPos,
+			usage,
+			allSuppliers,
+			partBuilds,
+			log
+		] = await Promise.all([
+			part.assembly ? api.bom(id) : Promise.resolve([]),
+			api.parts(),
+			api.supplierParts(),
+			api.stock(),
+			api.partPos(id),
+			api.partUsedIn(id),
+			api.suppliers(),
+			part.assembly ? (api.partBuilds(id) as Promise<PartBuild[]>) : api.partConsumedBy(id),
+			api.partStockLog(id)
+		]);
+		stockLog = log;
 		bom = bomLines;
 		activeParts = allParts.filter((p) => p.active);
 		const supplierName = new Map(allSuppliers.map((s) => [s.id, s.name]));
@@ -177,6 +187,7 @@
 			: [
 					...(buyable ? [{ id: 'supplier-parts', label: 'Supplier parts' }] : []),
 					{ id: 'stock', label: 'Stock items' },
+					{ id: 'stock-log', label: 'Stock log' },
 					...(buyable ? [{ id: 'purchase-orders', label: 'Purchase orders' }] : [])
 				]),
 		{ id: 'used-in', label: 'Used in' },
@@ -234,6 +245,38 @@
 			nonzero: s.count !== 0
 		}))
 	);
+	const EVENT_LABEL: Record<StockLogEntry['kind'], string> = {
+		received: 'Received',
+		produced: 'Produced',
+		consumed: 'Consumed',
+		stocktake: 'Stocktake',
+		debt: 'Owed to build',
+		unknown: 'Unknown'
+	};
+	// dates from an order are the order's date, not the moment stock moved --
+	// only a stocktake records the real time, so mark the rest approximate
+	const logRows = $derived(
+		stockLog.map((e) => ({
+			...e,
+			when: e.at ? (e.at_approx ? `~ ${e.at.slice(0, 10)}` : e.at.replace('T', ' ').slice(0, 16)) : '',
+			event: EVENT_LABEL[e.kind],
+			qty: e.drawn_down ? `${e.quantity} (left)` : String(e.quantity)
+		}))
+	);
+	type LogRow = (typeof logRows)[number];
+	const logCols: Column<LogRow>[] = [
+		{ key: 'when', header: 'When', mono: true, width: '150px' },
+		{ key: 'event', header: 'Event', width: '130px' },
+		{ key: 'qty', header: 'Quantity', mono: true, width: '110px' },
+		{
+			key: 'order_label',
+			header: 'Order',
+			mono: true,
+			width: '140px',
+			cellHref: (r) => r.order_url
+		},
+		{ key: 'reason', header: 'Reason', truncate: true }
+	];
 	const stockCols: Column<StockRow>[] = [
 		{ key: 'id', header: '#', mono: true, width: '80px' },
 		{ key: 'count', header: 'Count', mono: true, width: '110px' },
@@ -508,6 +551,22 @@
 						rows={stockRows}
 						href={(s) => `/stock/${s.id}`}
 						storageKey={`/parts/${id}/stock`}
+					/>
+				</section>
+				<section id="stock-log">
+					<h2 class="h2">
+						Stock log ({logRows.length})
+						<span class="hint">what happened to this part's stock, oldest first</span>
+					</h2>
+					<p class="muted hint">
+						Dates marked ~ come from the purchase or build order, not the moment stock moved. Only a
+						stocktake records the exact time.
+					</p>
+					<DataTable
+						columns={logCols}
+						rows={logRows}
+						href={(r) => `/stock/${r.item_id}`}
+						storageKey={`/parts/${id}/stock-log`}
 					/>
 				</section>
 				{#if buyable}

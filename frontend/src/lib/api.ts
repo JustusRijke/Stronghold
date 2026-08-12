@@ -13,6 +13,7 @@ import type {
 	BuildOrder,
 	BuildLine,
 	PartBuild,
+	StockLogEntry,
 	Setting,
 	Activity,
 	SearchResult,
@@ -62,6 +63,7 @@ export const api = {
 	partUsedIn: (id: number) => get<BomUsage[]>(`/parts/${id}/used-in`),
 	partBuilds: (id: number) => get<BuildOrder[]>(`/parts/${id}/builds`),
 	partConsumedBy: (id: number) => get<PartBuild[]>(`/parts/${id}/consumed-by`),
+	partStockLog: (id: number) => get<StockLogEntry[]>(`/parts/${id}/stock-log`),
 	createPart: (b: { sku: string; description: string; virtual?: boolean }) =>
 		post<Part>('/parts', b),
 	patchPart: (

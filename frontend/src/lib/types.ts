@@ -17,6 +17,7 @@ export type PartPurchaseOrder = S['PartPurchaseOrderOut'];
 export type POLine = S['POLineOut'];
 export type BuildOrder = S['BuildOrderOut'];
 export type PartBuild = S['PartBuildOut'];
+export type StockLogEntry = S['StockLogEntryOut'];
 export type BuildLine = S['BuildLineOut'];
 export type Setting = S['SettingOut'];
 export type Activity = S['ActivityOut'];
