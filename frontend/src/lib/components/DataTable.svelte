@@ -23,6 +23,7 @@
 		statusFilter?: boolean; // render as a multi-select checklist of the distinct values present
 		statusOptions?: string[]; // full set of possible values shown in the checklist; defaults to values present in `rows`
 		statusDefaultHide?: string[]; // values unchecked (hidden) on first visit, e.g. ['Complete', 'Cancelled']
+		cellHref?: (row: T) => string; // this cell links here instead of to the row
 		hideByDefault?: boolean; // start hidden (e.g. the debug-only id column)
 		truncate?: boolean; // clip overflow to one line with an ellipsis (+ title tooltip)
 		format?: (value: T[keyof T & string], row: T) => string | number; // display-only transform
@@ -391,7 +392,10 @@
 										onEdit?.(row, c.key, c.edit === 'number' ? Number(e.currentTarget.value) : e.currentTarget.value)}
 								/>
 							{:else}
-								<a href={href(row)} title={c.truncate ? String(row[c.key] ?? '') : undefined}>
+								<a
+									href={c.cellHref?.(row) || href(row)}
+									title={c.truncate ? String(row[c.key] ?? '') : undefined}
+								>
 									{#if c.bool}
 										<span class="boolmark" data-v={row[c.key] ? 'true' : 'false'}
 											>{row[c.key] ? '✓' : '—'}</span

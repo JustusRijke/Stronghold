@@ -7,7 +7,7 @@
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
 	import type { Part, BomLine, BomUsage, POLine, PurchaseOrder, StockItem, Supplier, SupplierPart } from '$lib/types';
-	import { PO_STATUS_OPTIONS } from '$lib/status';
+	import { PO_STATUS_OPTIONS, stockOrderLabel, stockOrderUrl } from '$lib/status';
 	import { STATUS_OPTIONS as STOCK_STATUS_OPTIONS } from '$lib/validators';
 
 	const id = $derived(Number($page.params.id));
@@ -203,10 +203,27 @@
 		{ key: 'last_po_date', header: 'Last PO', mono: true, width: '120px' },
 		{ key: 'active', header: 'Active', bool: true, boolPreset: true, width: '90px' }
 	];
-	const stockCols: Column<StockItem>[] = [
+	// where a stock row came from: its PO, else the build that made or owes it
+	type StockRow = StockItem & { order: string; order_url: string; nonzero: boolean };
+	const stockRows = $derived<StockRow[]>(
+		stock.map((s) => ({
+			...s,
+			order: stockOrderLabel(s),
+			order_url: stockOrderUrl(s),
+			nonzero: s.count !== 0
+		}))
+	);
+	const stockCols: Column<StockRow>[] = [
 		{ key: 'id', header: '#', mono: true, width: '80px' },
 		{ key: 'count', header: 'Count', mono: true, width: '110px' },
-		{ key: 'po_reference', header: 'PO', mono: true, width: '140px' },
+		{ key: 'order', header: 'Order', mono: true, width: '140px', cellHref: (r) => r.order_url },
+		{
+			key: 'nonzero',
+			header: 'In stock',
+			width: '90px',
+			bool: true,
+			boolPreset: true // settled debts and fully-consumed receipts sit at zero
+		},
 		{
 			key: 'status',
 			header: 'Status',
@@ -427,7 +444,7 @@
 					<h2 class="h2">Stock items ({stock.length})</h2>
 					<DataTable
 						columns={stockCols}
-						rows={stock}
+						rows={stockRows}
 						href={(s) => `/stock/${s.id}`}
 						storageKey={`/parts/${id}/stock`}
 						onAdd={() => goto(`/stock/new?part_id=${id}`)}

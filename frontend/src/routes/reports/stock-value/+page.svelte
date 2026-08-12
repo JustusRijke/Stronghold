@@ -33,6 +33,9 @@
 		basis: string;
 		po: string;
 		build: string;
+		po_url: string;
+		build_url: string;
+		nonzero: boolean;
 		last_po_date: string;
 		part_active: boolean;
 	};
@@ -51,6 +54,9 @@
 			po: r.basis_po_id === null ? '' : r.basis_po_reference || `PO-${r.basis_po_id}`,
 			// the build's real reference, never a fabricated "BO-<id>"
 			build: r.build_reference || (r.build_id === null ? '' : `#${r.build_id}`),
+			po_url: r.basis_po_id === null ? '' : `/purchase-orders/${r.basis_po_id}`,
+			build_url: r.build_id === null ? '' : `/build-orders/${r.build_id}`,
+			nonzero: r.count !== 0,
 			last_po_date: r.last_po_date ?? '',
 			part_active: r.part_active
 		}))
@@ -91,11 +97,24 @@
 			statusFilter: true,
 			statusOptions: Object.values(BASIS_LABEL)
 		},
-		{ key: 'po', header: 'PO', width: '130px', mono: true },
+		{ key: 'po', header: 'PO', width: '130px', mono: true, cellHref: (r) => r.po_url },
 		// blank = never ordered; DataTable sorts blanks last in both directions,
 		// so ascending shows the oldest real date first
 		{ key: 'last_po_date', header: 'Last PO', width: '120px', mono: true },
-		{ key: 'build', header: 'Build', width: '110px', mono: true },
+		{
+			key: 'build',
+			header: 'Build',
+			width: '110px',
+			mono: true,
+			cellHref: (r) => r.build_url
+		},
+		{
+			key: 'nonzero',
+			header: 'In stock',
+			width: '90px',
+			bool: true,
+			boolPreset: true // settled debts and fully-consumed receipts sit at zero
+		},
 		{
 			key: 'part_active',
 			header: 'Active part',

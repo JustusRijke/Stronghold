@@ -127,6 +127,7 @@ class StockItemOut(BaseModel):
     po_reference: str  # "" when po_id is null
     build_id: int | None  # the build that produced this stock
     consumed_by_build_id: int | None  # the build that consumed it
+    build_reference: str  # label of build_id, else consumed_by_build_id; "" if neither
     status: StockStatus
     unit_price: float | None  # what THIS stock is worth per item
     price_basis: PriceBasisOut
@@ -489,6 +490,11 @@ def remove_bom_line(line_id: int) -> OkOut:
 # -- stock ------------------------------------------------------------------
 
 
+# the build a stock row belongs to: its producer, else the build that owes it
+# (a shortfall debt row and its consumed placeholder have no producing build)
+_src_build = func.coalesce(StockItem.build_id, StockItem.consumed_by_build_id)
+
+
 def _stock_rows() -> list[StockItemOut]:
     with db.session() as s:
         return [
@@ -502,18 +508,30 @@ def _stock_rows() -> list[StockItemOut]:
                 po_reference=po_ref or "",
                 build_id=i.build_id,
                 consumed_by_build_id=i.consumed_by_build_id,
+                build_reference=build_ref
+                or (f"BO-{src_build}" if src_build is not None else ""),
                 status=i.status,
                 unit_price=i.unit_price,
                 price_basis=i.price_basis,
             )
-            for i, sku, desc, po_ref in s.execute(
-                select(StockItem, Part.sku, Part.description, PurchaseOrder.reference)
+            for i, sku, desc, po_ref, src_build, build_ref in s.execute(
+                select(
+                    StockItem,
+                    Part.sku,
+                    Part.description,
+                    PurchaseOrder.reference,
+                    _src_build,
+                    BuildOrder.reference,
+                )
                 .join(Part, StockItem.part_id == Part.id)
                 .join(
                     PurchaseOrder,
                     StockItem.po_id == PurchaseOrder.id,
                     isouter=True,
                 )
+                # the build this stock came from: the one that produced it, or
+                # (debt/consumed rows have no producer) the one that owes it
+                .join(BuildOrder, _src_build == BuildOrder.id, isouter=True)
                 .order_by(StockItem.id)
             )
         ]
@@ -1025,18 +1043,28 @@ def list_build_stock(build_id: int) -> list[StockItemOut]:
                 po_reference=po_ref or "",
                 build_id=i.build_id,
                 consumed_by_build_id=i.consumed_by_build_id,
+                build_reference=build_ref
+                or (f"BO-{src_build}" if src_build is not None else ""),
                 status=i.status,
                 unit_price=i.unit_price,
                 price_basis=i.price_basis,
             )
-            for i, sku, desc, po_ref in s.execute(
-                select(StockItem, Part.sku, Part.description, PurchaseOrder.reference)
+            for i, sku, desc, po_ref, src_build, build_ref in s.execute(
+                select(
+                    StockItem,
+                    Part.sku,
+                    Part.description,
+                    PurchaseOrder.reference,
+                    _src_build,
+                    BuildOrder.reference,
+                )
                 .join(Part, StockItem.part_id == Part.id)
                 .join(
                     PurchaseOrder,
                     StockItem.po_id == PurchaseOrder.id,
                     isouter=True,
                 )
+                .join(BuildOrder, _src_build == BuildOrder.id, isouter=True)
                 .where(
                     or_(
                         StockItem.build_id == build_id,

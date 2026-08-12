@@ -85,15 +85,27 @@ Open-source inventory/stock tracking for small and medium businesses.
 - Assembly stock produced by a build order is worth what that build actually
   consumed, not the BOM estimate -- so a batch built when components were cheap
   keeps its real cost. It reads "partly estimated" when an input was itself a
-  guess or a component ran short, meaning the figure is a floor
+  guess, which includes parts the build still owes
+- You can finish a build you do not have all the parts for. The assembly is
+  produced in full and the missing parts are recorded as a **negative stock
+  item** linked to that build, valued at the part's estimated price and deducted
+  from your stock value -- so an almost-complete assembly becomes available
+  without the shortfall going untracked. Receiving those parts on a purchase
+  order clears the negative item automatically, reprices the build at what you
+  actually paid, and says so in the activity feed. A settled shortfall and a
+  receipt that went straight into a build both end at zero count, so stock
+  tables hide zero-count rows by default -- flip the "In stock" filter to see
+  them
+- Stock tables show the order each item came from -- the purchase order it was
+  received on, or the build order that produced it (or owes it) -- as a link
+  straight to that order
 - A "Reports" tab with a stock value report, listing every stock item at its
   value. Totals cover stock on hand; consumed rows stay listed for provenance
   but are not counted again (they are already inside the assembly they built). The table shows how each row was priced (and links to the purchase
   order), filters and sorts like the other overviews, and totals both the
   filtered rows and all stock. An "Understated" tile counts the rows whose value
-  is only a floor (a build that did not consume everything its components asked
-  for, or whose inputs were themselves estimated) so an underestimate cannot
-  hide inside the total
+  rests on an estimate (a build whose inputs were themselves estimated, or which
+  still owes parts) so an underestimate cannot hide inside the total
 - Every part carries an estimated unit price, shown on the part page and in the
   parts overview. A purchased part is worth its most recent purchase price; an
   assembly is worth the sum of its BOM components (recursively, so assemblies

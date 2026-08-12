@@ -1048,6 +1048,8 @@ export interface components {
             build_id: number | null;
             /** Consumed By Build Id */
             consumed_by_build_id: number | null;
+            /** Build Reference */
+            build_reference: string;
             /**
              * Status
              * @enum {string}
