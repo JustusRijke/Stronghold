@@ -35,12 +35,15 @@ class PriceBasis(StrEnum):
 
 
 class BuildStatus(StrEnum):
-    """InvenTree BuildStatus labels; the only values a build's status may take.
-    StrEnum members compare/serialise as their string value."""
+    """The values a build's status may take. Mostly InvenTree BuildStatus
+    labels, with two deliberate departures: Draft (ours, the status a new build
+    starts in -- not yet planned, so it asks for no stock) and no On Hold, which
+    the import folds into Pending. StrEnum members compare/serialise as their
+    string value."""
 
+    DRAFT = "Draft"
     PENDING = "Pending"
     PRODUCTION = "Production"
-    ON_HOLD = "On Hold"
     CANCELLED = "Cancelled"
     COMPLETE = "Complete"
 

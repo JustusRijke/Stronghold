@@ -10,12 +10,12 @@
 	import { STATUS_OPTIONS as STOCK_STATUS_OPTIONS } from '$lib/validators';
 
 	// mirror the backend transition rules (db.edit_build): Complete only when
-	// fully produced; once anything is produced, status is locked to Production,
-	// On Hold, or Complete. Disabled options can't be picked but stay visible.
+	// fully produced; once anything is produced, status is locked to Production
+	// or Complete. Disabled options can't be picked but stay visible.
 	function statusAllowed(st: string): boolean {
 		if (!build) return true;
 		if (st === 'Complete') return build.produced === build.quantity;
-		if (build.produced > 0) return st === 'Production' || st === 'On Hold';
+		if (build.produced > 0) return st === 'Production';
 		return true;
 	}
 

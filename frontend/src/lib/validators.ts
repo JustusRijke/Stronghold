@@ -17,14 +17,14 @@ export const BuildOrderIn = v.object({
 	part_id: v.pipe(v.number(), v.integer()),
 	quantity: v.pipe(v.number(), v.integer(), v.gtValue(0, 'must be greater than 0')),
 	reference: v.optional(v.string()),
-	status: v.optional(v.picklist(["Pending","Production","On Hold","Cancelled","Complete"])),
+	status: v.optional(v.picklist(["Draft","Pending","Production","Cancelled","Complete"])),
 	start_date: v.optional(v.nullable(v.string())),
 	end_date: v.optional(v.nullable(v.string())),
 	});
 export const BuildOrderPatch = v.object({
 	quantity: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.gtValue(0, 'must be greater than 0')))),
 	reference: v.optional(v.nullable(v.string())),
-	status: v.optional(v.nullable(v.picklist(["Pending","Production","On Hold","Cancelled","Complete"]))),
+	status: v.optional(v.nullable(v.picklist(["Draft","Pending","Production","Cancelled","Complete"]))),
 	start_date: v.optional(v.nullable(v.string())),
 	end_date: v.optional(v.nullable(v.string())),
 	});

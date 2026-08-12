@@ -772,7 +772,7 @@ export interface components {
              * @default
              */
             reference: string;
-            /** @default Pending */
+            /** @default Draft */
             status: components["schemas"]["BuildStatus"];
             /** Start Date */
             start_date?: string | null;
@@ -814,11 +814,14 @@ export interface components {
         };
         /**
          * BuildStatus
-         * @description InvenTree BuildStatus labels; the only values a build's status may take.
-         *     StrEnum members compare/serialise as their string value.
+         * @description The values a build's status may take. Mostly InvenTree BuildStatus
+         *     labels, with two deliberate departures: Draft (ours, the status a new build
+         *     starts in -- not yet planned, so it asks for no stock) and no On Hold, which
+         *     the import folds into Pending. StrEnum members compare/serialise as their
+         *     string value.
          * @enum {string}
          */
-        BuildStatus: "Pending" | "Production" | "On Hold" | "Cancelled" | "Complete";
+        BuildStatus: "Draft" | "Pending" | "Production" | "Cancelled" | "Complete";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
