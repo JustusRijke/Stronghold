@@ -1,0 +1,21 @@
+[project]
+name = "stronghold"
+version = "0.1.0"
+description = "Inventory and stock tracking for small and medium businesses"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.139.0",
+    "sqlalchemy>=2.0.51",
+    "uvicorn>=0.34.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["backend"]
+pythonpath = ["backend"]

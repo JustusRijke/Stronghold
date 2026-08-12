@@ -1,0 +1,14 @@
+#!/bin/sh
+# Regenerate frontend API types when the API schema could have changed, and
+# fail the commit if the checked-in types are stale. Only runs when backend/api.py
+# or the generated types are part of the commit, so unrelated commits stay fast.
+# Enable once with: git config core.hooksPath .githooks
+staged=$(git diff --cached --name-only)
+echo "$staged" | grep -qE '^backend/api\.py$|^frontend/src/lib/(api-types|validators)\.ts$' || exit 0
+
+echo "pre-commit: checking frontend API types + validators are fresh..."
+( cd frontend && npm run --silent check:types-fresh ) || {
+	echo "Generated types/validators are stale. Run 'npm run gen:types' in frontend/ and stage the result." >&2
+	exit 1
+}
+git add frontend/src/lib/api-types.ts frontend/src/lib/validators.ts
