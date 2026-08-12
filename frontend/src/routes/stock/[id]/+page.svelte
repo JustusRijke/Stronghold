@@ -78,6 +78,14 @@
 						>
 					</p>
 				{/if}
+				{#if item.stocktake_reason}
+					<p>
+						Stocktake: {item.stocktake_reason}
+						{#if item.stocktake_at}
+							<span class="hint">{new Date(item.stocktake_at).toLocaleString()}</span>
+						{/if}
+					</p>
+				{/if}
 				<p>Status: {item.status}</p>
 				<p>
 					Value:

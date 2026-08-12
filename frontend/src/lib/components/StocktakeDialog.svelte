@@ -4,7 +4,6 @@
 	// stock a build used but nobody booked is NegativeStockDialog's job.
 	import { api } from '$lib/api';
 	import { toast } from '$lib/toast.svelte';
-	import { STOCKTAKE_REASONS } from '$lib/status';
 	import type { StockItem } from '$lib/types';
 
 	interface Props {
@@ -21,8 +20,11 @@
 	let reason = $state('');
 	let sourceId = $state<number | ''>('');
 	let items = $state<StockItem[]>([]);
+	let reasons = $state<{ add: string[]; subtract: string[] }>({ add: [], subtract: [] });
 
 	const lowering = $derived(count < currentCount);
+	// finding stock and losing it have little vocabulary in common
+	const reasonOptions = $derived(lowering ? reasons.subtract : reasons.add);
 	// oldest first, matching the default the backend picks
 	const sources = $derived(
 		items
@@ -42,6 +44,7 @@
 				items = all;
 				sourceId = sources[0]?.id ?? '';
 			});
+			api.stocktakeReasons().then((r) => (reasons = r));
 		} else {
 			dialog?.close();
 		}
@@ -71,7 +74,19 @@
 
 	<label class="field req">
 		<span>Counted quantity</span>
-		<input type="number" min="0" step="any" bind:value={count} />
+		<!-- a count is never negative: min alone still lets you type "-" -->
+		<input
+			type="number"
+			min="0"
+			step="any"
+			bind:value={count}
+			onkeydown={(e) => {
+				if (e.key === '-') e.preventDefault();
+			}}
+			oninput={(e) => {
+				if (e.currentTarget.value.includes('-')) e.currentTarget.value = '';
+			}}
+		/>
 	</label>
 
 	<label class="field req">
@@ -79,7 +94,7 @@
 		<input bind:value={reason} placeholder="Why does the count differ?" />
 	</label>
 	<div class="reasons">
-		{#each STOCKTAKE_REASONS as r (r)}
+		{#each reasonOptions as r (r)}
 			<button class="btn ghost small" type="button" onclick={() => (reason = r)}>{r}</button>
 		{/each}
 	</div>

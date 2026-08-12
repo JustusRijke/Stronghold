@@ -25,8 +25,9 @@
 			buildId = '';
 			dialog?.showModal();
 			api.partConsumedBy(partId).then((b) => {
-				builds = b;
-				buildId = b[0]?.id ?? '';
+				// newest first: a shortfall is nearly always on a recent build
+				builds = [...b].sort((x, y) => (y.start_date ?? '').localeCompare(x.start_date ?? ''));
+				buildId = builds[0]?.id ?? '';
 			});
 		} else {
 			dialog?.close();
@@ -71,7 +72,7 @@
 			<select bind:value={buildId}>
 				{#each builds as b (b.id)}
 					<option value={b.id}>
-						{b.reference || `BO-${b.id}`} &middot; {b.status} &middot; needs {b.required}, took {b.consumed}
+						{b.reference || `BO-${b.id}`} &middot; {b.start_date || 'no date'}
 					</option>
 				{/each}
 			</select>
