@@ -6,10 +6,10 @@
 	import { partTabs } from '$lib/tabs.svelte';
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
-	import type { Part, BomLine, BomUsage, POLine, PartPurchaseOrder, PurchaseOrder, StockItem, Supplier, SupplierPart } from '$lib/types';
+	import type { BuildOrder, Part, BomLine, BomUsage, POLine, PartPurchaseOrder, PurchaseOrder, StockItem, Supplier, SupplierPart } from '$lib/types';
 
 	type PartPO = PartPurchaseOrder & { supplier_name: string };
-	import { PO_STATUS_OPTIONS, stockOrderLabel, stockOrderUrl } from '$lib/status';
+	import { BUILD_STATUS_OPTIONS, PO_STATUS_OPTIONS, stockOrderLabel, stockOrderUrl } from '$lib/status';
 	import { STATUS_OPTIONS as STOCK_STATUS_OPTIONS } from '$lib/validators';
 
 	const id = $derived(Number($page.params.id));
@@ -24,6 +24,7 @@
 	let stock = $state<StockItem[]>([]);
 	let pos = $state<PartPO[]>([]);
 	let usedIn = $state<BomUsage[]>([]);
+	let builds = $state<BuildOrder[]>([]);
 
 	// new-bom-line inputs
 	let newComp = $state<number | ''>('');
@@ -128,7 +129,7 @@
 		}
 		// register (or relabel) this part's tab so it persists across reloads
 		partTabs.open(id, part.description || part.sku || `Part ${id}`);
-		const [bomLines, allParts, allSupplierParts, allStock, partPos, usage, allSuppliers] =
+		const [bomLines, allParts, allSupplierParts, allStock, partPos, usage, allSuppliers, partBuilds] =
 			await Promise.all([
 				part.assembly ? api.bom(id) : Promise.resolve([]),
 				api.parts(),
@@ -136,7 +137,8 @@
 				api.stock(),
 				api.partPos(id),
 				api.partUsedIn(id),
-				api.suppliers()
+				api.suppliers(),
+				part.assembly ? api.partBuilds(id) : Promise.resolve([])
 			]);
 		bom = bomLines;
 		activeParts = allParts.filter((p) => p.active);
@@ -147,6 +149,7 @@
 		stock = allStock.filter((s) => s.part_id === id);
 		pos = partPos.map((po) => ({ ...po, supplier_name: supplierName.get(po.supplier_id) ?? '' }));
 		usedIn = usage;
+		builds = partBuilds;
 	}
 	$effect(() => {
 		if (!Number.isNaN(id)) load();
@@ -159,7 +162,12 @@
 	const buyable = $derived(!!part?.purchasable && !part?.assembly);
 	const sections = $derived([
 		{ id: 'details', label: 'Details' },
-		...(part?.assembly ? [{ id: 'bom', label: 'BOM' }] : []),
+		...(part?.assembly
+			? [
+					{ id: 'bom', label: 'BOM' },
+					{ id: 'build-orders', label: 'Build orders' }
+				]
+			: []),
 		...(part?.virtual
 			? []
 			: [
@@ -260,6 +268,19 @@
 			width: '120px',
 			statusFilter: true,
 			statusOptions: PO_STATUS_OPTIONS
+		},
+		{ key: 'end_date', header: 'Target', width: '140px' }
+	];
+	const buildCols: Column<BuildOrder>[] = [
+		{ key: 'reference', header: 'Build', mono: true, width: '150px' },
+		{ key: 'quantity', header: 'Qty', mono: true, width: '90px' },
+		{ key: 'produced', header: 'Produced', mono: true, width: '100px' },
+		{
+			key: 'status',
+			header: 'Status',
+			width: '120px',
+			statusFilter: true,
+			statusOptions: BUILD_STATUS_OPTIONS
 		},
 		{ key: 'end_date', header: 'Target', width: '140px' }
 	];
@@ -442,6 +463,17 @@
 						<input class="qty" type="number" min="0" step="any" bind:value={newQty} />
 						<button class="btn" onclick={addBomLine}>Add component</button>
 					</div>
+				</section>
+				<section id="build-orders">
+					<h2 class="h2">Build orders ({builds.length})</h2>
+					<DataTable
+						columns={buildCols}
+						rows={builds}
+						href={(b) => `/build-orders/${b.id}`}
+						storageKey={`/parts/${id}/builds`}
+						defaultSort={{ key: 'end_date', dir: 'desc' }}
+						onAdd={() => goto(`/build-orders/new?part_id=${id}`)}
+					/>
 				</section>
 			{/if}
 
