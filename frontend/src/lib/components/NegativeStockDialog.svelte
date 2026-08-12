@@ -9,10 +9,11 @@
 	interface Props {
 		partId: number;
 		partLabel: string;
+		isAssembly: boolean;
 		open: boolean;
 		onsaved: () => void;
 	}
-	let { partId, partLabel, open = $bindable(), onsaved }: Props = $props();
+	let { partId, partLabel, isAssembly, open = $bindable(), onsaved }: Props = $props();
 
 	let dialog = $state<HTMLDialogElement | null>(null);
 	let quantity = $state(1);
@@ -61,7 +62,16 @@
 	</p>
 
 	{#if builds.length === 0}
-		<p class="muted warn">No build order uses this part, so none can owe it.</p>
+		<!-- an assembly is produced by builds, never consumed by them: the build
+		     orders on this page build it, so none of them can owe it -->
+		<p class="muted warn">
+			{#if isAssembly}
+				This part is an assembly: build orders produce it, they do not consume it, so none can owe
+				it. Record a shortfall on the build that used its <em>components</em> instead.
+			{:else}
+				No build order lists this part as a component, so none can owe it.
+			{/if}
+		</p>
 	{:else}
 		<label class="field req">
 			<span>Quantity used but never booked</span>
