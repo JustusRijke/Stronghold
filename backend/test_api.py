@@ -3,16 +3,7 @@ tmp database. Complements test_domain.py (which exercises db directly)."""
 
 import db
 import pytest
-from fastapi.testclient import TestClient
-from main import app
 from models import StockItem
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    db.init(tmp_path / "inventory.db")
-    return TestClient(app)
 
 
 def test_parts_crud_and_bom(client):

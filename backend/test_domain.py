@@ -11,13 +11,6 @@ from models import Activity, Booking, BuildLine, Part, POLine, PurchaseOrder, St
 from sqlalchemy import select
 
 
-@pytest.fixture
-def database(tmp_path):
-    path = tmp_path / "inventory.db"
-    db.init(path)
-    return path
-
-
 def test_parts_and_stock_flow(database):
     part_id = db.next_part_id()
     db.create_part(part_id, "BOLT-M3", "M3 bolt")
