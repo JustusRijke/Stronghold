@@ -1,11 +1,11 @@
 <script lang="ts">
-	// Correct a part's counted stock. Lowering it needs a reason; counting below
-	// zero means a build used stock that was never booked, so it needs the build.
+	// Correct a part's counted stock. Always needs a reason. Lowering it takes
+	// the difference off one stock item, oldest first. It cannot go below zero:
+	// stock a build used but nobody booked is NegativeStockDialog's job.
 	import { api } from '$lib/api';
 	import { toast } from '$lib/toast.svelte';
 	import { STOCKTAKE_REASONS } from '$lib/status';
-	import Picker from './Picker.svelte';
-	import type { BuildOrder } from '$lib/types';
+	import type { StockItem } from '$lib/types';
 
 	interface Props {
 		partId: number;
@@ -19,19 +19,29 @@
 	let dialog = $state<HTMLDialogElement | null>(null);
 	let count = $state(0);
 	let reason = $state('');
-	let buildId = $state<number | ''>('');
-	let builds = $state<BuildOrder[]>([]);
+	let sourceId = $state<number | ''>('');
+	let items = $state<StockItem[]>([]);
 
 	const lowering = $derived(count < currentCount);
-	const negative = $derived(count < 0);
+	// oldest first, matching the default the backend picks
+	const sources = $derived(
+		items
+			.filter((i) => i.part_id === partId && i.status === 'Available' && i.count > 0)
+			.sort((a, b) => a.id - b.id)
+	);
+	const source = $derived(sources.find((i) => i.id === Number(sourceId)));
+	// only what sits on the chosen item can come off it
+	const tooMuch = $derived(lowering && source ? currentCount - count > source.count : false);
 
 	$effect(() => {
 		if (open) {
 			count = currentCount;
 			reason = '';
-			buildId = '';
-			if (builds.length === 0) api.builds().then((b) => (builds = b));
 			dialog?.showModal();
+			api.stock().then((all) => {
+				items = all;
+				sourceId = sources[0]?.id ?? '';
+			});
 		} else {
 			dialog?.close();
 		}
@@ -44,7 +54,7 @@
 					part_id: partId,
 					count,
 					reason,
-					build_id: negative ? Number(buildId) : null
+					item_id: lowering && sourceId !== '' ? Number(sourceId) : null
 				}),
 			'Stock updated'
 		);
@@ -61,33 +71,33 @@
 
 	<label class="field req">
 		<span>Counted quantity</span>
-		<input type="number" step="any" bind:value={count} />
+		<input type="number" min="0" step="any" bind:value={count} />
 	</label>
+
+	<label class="field req">
+		<span>Reason</span>
+		<input bind:value={reason} placeholder="Why does the count differ?" />
+	</label>
+	<div class="reasons">
+		{#each STOCKTAKE_REASONS as r (r)}
+			<button class="btn ghost small" type="button" onclick={() => (reason = r)}>{r}</button>
+		{/each}
+	</div>
 
 	{#if lowering}
 		<label class="field req">
-			<span>Reason</span>
-			<input list="stocktake-reasons" bind:value={reason} placeholder="Why is stock lower?" />
-			<datalist id="stocktake-reasons">
-				{#each STOCKTAKE_REASONS as r (r)}
-					<option value={r}></option>
+			<span>Take from</span>
+			<select bind:value={sourceId}>
+				{#each sources as i (i.id)}
+					<option value={i.id}>
+						#{i.id} &middot; {i.count} in stock{i.po_reference ? ` · ${i.po_reference}` : ''}
+					</option>
 				{/each}
-			</datalist>
+			</select>
 		</label>
-	{/if}
-
-	{#if negative}
-		<label class="field req">
-			<span>Used by build order</span>
-			<Picker
-				id="stocktake-build"
-				bind:value={buildId}
-				rows={builds}
-				label={(b) => b.reference || `BO-${b.id}`}
-				required
-			/>
-		</label>
-		<p class="muted">A count below zero is owed to this build, and settles when the parts arrive.</p>
+		{#if tooMuch && source}
+			<p class="muted warn">Stock item #{source.id} only holds {source.count}.</p>
+		{/if}
 	{/if}
 
 	<div class="actions">
@@ -96,7 +106,11 @@
 			class="btn"
 			type="button"
 			onclick={save}
-			disabled={count === currentCount || (lowering && !reason) || (negative && buildId === '')}
+			disabled={count === currentCount ||
+				count < 0 ||
+				!reason ||
+				tooMuch ||
+				(lowering && sourceId === '')}
 		>
 			Save
 		</button>
@@ -114,6 +128,19 @@
 	}
 	dialog.stocktake::backdrop {
 		background: rgba(0, 0, 0, 0.4);
+	}
+	.reasons {
+		display: flex;
+		gap: 6px;
+		flex-wrap: wrap;
+		margin: -4px 0 12px;
+	}
+	.btn.small {
+		padding: 2px 8px;
+		font-size: 0.85em;
+	}
+	.warn {
+		color: var(--warn, #b45309);
 	}
 	.actions {
 		display: flex;

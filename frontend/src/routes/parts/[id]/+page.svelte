@@ -7,6 +7,7 @@
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
 	import StocktakeDialog from '$lib/components/StocktakeDialog.svelte';
+	import NegativeStockDialog from '$lib/components/NegativeStockDialog.svelte';
 	import type { PartBuild, Part, BomLine, BomUsage, POLine, PartPurchaseOrder, PurchaseOrder, StockItem, Supplier, SupplierPart } from '$lib/types';
 
 	type PartPO = PartPurchaseOrder & { supplier_name: string };
@@ -18,6 +19,7 @@
 	let part = $state<Part | null>(null);
 	let notFound = $state(false);
 	let stocktakeOpen = $state(false);
+	let negStockOpen = $state(false);
 	let bom = $state<BomLine[]>([]);
 	let activeParts = $state<Part[]>([]);
 
@@ -374,6 +376,9 @@
 						<button class="btn ghost" type="button" onclick={() => (stocktakeOpen = true)}>
 							Stocktake
 						</button>
+						<button class="btn ghost" type="button" onclick={() => (negStockOpen = true)}>
+							Add negative stock item
+						</button>
 					</p>
 				{/if}
 				{#if part.virtual}
@@ -549,6 +554,12 @@
 			partLabel={part.description}
 			currentCount={part.in_stock}
 			bind:open={stocktakeOpen}
+			onsaved={load}
+		/>
+		<NegativeStockDialog
+			partId={id}
+			partLabel={part.description}
+			bind:open={negStockOpen}
 			onsaved={load}
 		/>
 	{/if}

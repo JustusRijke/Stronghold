@@ -1,17 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { api } from '$lib/api';
-	import { toast } from '$lib/toast.svelte';
 	import { stockTabs } from '$lib/tabs.svelte';
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
-	import StocktakeDialog from '$lib/components/StocktakeDialog.svelte';
-	import type { Part, StockItem } from '$lib/types';
+	import type { StockItem } from '$lib/types';
 
 	const id = $derived(Number($page.params.id));
 	let item = $state<StockItem | null>(null);
-	let part = $state<Part | null>(null);
 	let notFound = $state(false);
-	let stocktakeOpen = $state(false);
 
 	const sections = [{ id: 'details', label: 'Details' }];
 
@@ -35,16 +31,11 @@
 			return;
 		}
 		stockTabs.open(id, `#${item.id}${item.sku ? ` - ${item.sku}` : ''}`);
-		// a stocktake corrects the whole part, not this one row
-		part = await api.part(item.part_id);
 	}
 	$effect(() => {
 		if (!Number.isNaN(id)) load();
 	});
 
-	async function saveCount(v: number) {
-		if (await toast.run(() => api.patchStock(id, { count: v }))) load();
-	}
 	function label(i: StockItem) {
 		return i.sku ? `${i.sku} - ${i.description}` : i.description;
 	}
@@ -101,48 +92,20 @@
 						</span>
 					{/if}
 				</p>
-				<label class="field">
-					<span>Count</span>
-					<input
-						type="number"
-						min="0"
-						step="any"
-						value={item.count}
-						onblur={(e) => saveCount(Number(e.currentTarget.value))}
-					/>
-				</label>
-				{#if part}
-					<p class="muted stockline">
-						<span>In stock (all of {part.sku || part.description}): <strong>{part.in_stock}</strong></span>
-						<button class="btn ghost" type="button" onclick={() => (stocktakeOpen = true)}>
-							Stocktake
-						</button>
-					</p>
-				{/if}
+				<p>
+					Count: <strong>{item.count}</strong>
+					<span class="hint">
+						corrected with Stocktake on the <a href={`/parts/${item.part_id}`}>part page</a>
+					</span>
+				</p>
 			</section>
 		</div>
 	</div>
-
-	{#if part}
-		<StocktakeDialog
-			partId={part.id}
-			partLabel={part.description}
-			currentCount={part.in_stock}
-			bind:open={stocktakeOpen}
-			onsaved={load}
-		/>
-	{/if}
 {/if}
 
 <style>
 	.hint {
 		color: var(--ink-faint);
 		font-size: 0.85em;
-	}
-	.stockline {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		flex-wrap: wrap;
 	}
 </style>

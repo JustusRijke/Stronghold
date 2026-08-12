@@ -89,10 +89,17 @@ export const api = {
 	stocktake: (b: {
 		part_id: number;
 		count: number;
-		reason?: string;
+		reason: string;
+		item_id?: number | null;
 		build_id?: number | null;
 		po_id?: number | null;
 	}) => post<Part>('/stock/stocktake', b),
+	addNegativeStock: (b: {
+		part_id: number;
+		quantity: number;
+		build_id: number;
+		reason?: string;
+	}) => post<Part>('/stock/negative', b),
 
 	// suppliers
 	suppliers: () => get<Supplier[]>('/suppliers'),
