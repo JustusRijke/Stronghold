@@ -559,7 +559,6 @@
 		<NegativeStockDialog
 			partId={id}
 			partLabel={part.description}
-			isAssembly={part.assembly}
 			bind:open={negStockOpen}
 			onsaved={load}
 		/>

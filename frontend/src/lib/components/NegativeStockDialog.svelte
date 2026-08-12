@@ -9,11 +9,10 @@
 	interface Props {
 		partId: number;
 		partLabel: string;
-		isAssembly: boolean;
 		open: boolean;
 		onsaved: () => void;
 	}
-	let { partId, partLabel, isAssembly, open = $bindable(), onsaved }: Props = $props();
+	let { partId, partLabel, open = $bindable(), onsaved }: Props = $props();
 
 	let dialog = $state<HTMLDialogElement | null>(null);
 	let quantity = $state(1);
@@ -62,15 +61,11 @@
 	</p>
 
 	{#if builds.length === 0}
-		<!-- an assembly is produced by builds, never consumed by them: the build
-		     orders on this page build it, so none of them can owe it -->
+		<!-- only builds that CONSUME the part can owe it. An assembly can be both
+		     produced and consumed (a sub-assembly), so this is not about assembly -->
 		<p class="muted warn">
-			{#if isAssembly}
-				This part is an assembly: build orders produce it, they do not consume it, so none can owe
-				it. Record a shortfall on the build that used its <em>components</em> instead.
-			{:else}
-				No build order lists this part as a component, so none can owe it.
-			{/if}
+			No build order lists this part among its components, so none can owe it. A build order that
+			<em>produces</em> this part does not consume it.
 		</p>
 	{:else}
 		<label class="field req">
