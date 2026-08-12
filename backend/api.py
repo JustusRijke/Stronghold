@@ -48,9 +48,9 @@ def _guard(fn, *args, **kwargs):
 
 # Status picklists live as StrEnums in models.py (single source of truth, also
 # used by db.py). ponytail: the frontend validator generator keys enum picklists
-# by field name, so both PO and Build "status" fields would collapse into one
-# STATUS_OPTIONS; the build detail page hardcodes its own options instead of
-# importing the generated one (see build-orders/[id]).
+# by field name (last write wins), so PO, build and stock "status" collapse into
+# one generated STATUS_OPTIONS -- stock's wins. The PO and build picklists are
+# hardcoded in frontend/src/lib/status.ts instead of importing the generated one.
 
 
 class PartOut(BaseModel):
