@@ -1,0 +1,17 @@
+# Deployment settings. Copy to settings.toml and edit; every key is optional
+# and falls back to the default shown here. These are knobs whose wrong value
+# can stop the app running or make it unreachable. Settings that are just data
+# (e.g. the shop title) are edited on the app's Settings page instead.
+
+[db]
+db_path = "inventory.db"   # SQLite database file
+export_sql = true          # keep a readable <db>.sql next to the database for git
+
+[gui]
+port = 8080
+
+[logging]
+level = "DEBUG"        # DEBUG, INFO, WARNING or ERROR
+file = "log.txt"       # writes are logged here (INFO), failures at ERROR
+rollover_kb = 100      # start a new file (log.txt.1, ...) after this many KB
+max_total_kb = 400     # once the total exceeds this, the oldest file is deleted

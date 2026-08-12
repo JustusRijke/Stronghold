@@ -1,0 +1,43 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Runtime data
+inventory.db
+log.txt*
+
+# Local deployment config (see settings.toml.example)
+settings.toml
+
+# python
+__pycache__/
+*.pyc
+backend/openapi.json
+backend/inventory.db
+# Ignored only because this is a pre-1.0 repo carrying throwaway dev data.
+# inventory.sql is the backup/recovery story and is meant to be tracked: when
+# running in production, un-ignore it so the data lives in git.
+backend/inventory.sql
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
+# Machine-local agent config (permissions etc.)
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# Secrets
+SECRETS.md
+# Local dev launcher: carries the InvenTree host and password on its migrate line
+go.sh
+
+# Personal scratch list, not a public roadmap
+TODO.md

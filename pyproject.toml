@@ -1,0 +1,36 @@
+[project]
+name = "stronghold"
+version = "0.1.0"
+description = "Inventory and stock tracking for small and medium businesses"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.139.0",
+    "sqlalchemy>=2.0.51",
+    "uvicorn>=0.34.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+    "ruff>=0.16.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["backend"]
+pythonpath = ["backend"]
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+# S and BLE are what the existing noqa suppressions reference; I and UP keep
+# agent-written diffs free of import-order and legacy-syntax churn.
+extend-select = ["S", "BLE", "I", "UP"]
+# Stock dates are plain calendar dates (PO start_date is a sort key, not an
+# instant), so date.today() is intended -- tz-aware datetimes add nothing.
+ignore = ["DTZ011"]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/test_*.py" = ["S101"]  # assert is the point of a test
