@@ -31,6 +31,7 @@ from models import (
     BomLine,
     BuildLine,
     BuildOrder,
+    BuildStatus,
     Part,
     POLine,
     PriceBasis,
@@ -181,7 +182,11 @@ def migrate(url: str, username: str, password: str, db_path: Path) -> None:
                     id=b["id"],
                     part_id=b["part"],
                     reference=b["reference"],
-                    status=b["status_text"],
+                    # we have no On Hold for builds: a held build is still
+                    # planned, so it lands on Pending
+                    status=BuildStatus.PENDING
+                    if b["status_text"] == "On Hold"
+                    else b["status_text"],
                     quantity=int(qty),
                     # InvenTree's own produced count: it deletes fully-used
                     # stock, so the rows we import cannot reconstruct history
