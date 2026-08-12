@@ -117,6 +117,7 @@ a standalone script (`backend/migrate_inventree.py`), not the API or UI:
     uv run python migrate_inventree.py <url> <username> <password>
 
 It fetches parts, BOM, suppliers, supplier-parts, purchase orders, PO lines,
+build orders (with each build's component snapshot and the stock it consumed),
 and available stock (`inventree.py`, read-only HTTP), **drops** the target
 database, recreates the schema, then inserts everything in one transaction.
 Because it's one-shot into an empty database, each InvenTree pk is copied
@@ -125,7 +126,8 @@ traceable back to InvenTree for follow-up steps and debugging. Cancelled
 purchase orders (and their lines) are dropped; only available stock is imported
 (fetched directly, not replayed as bookings). Rows whose FK targets are missing,
 and fractional stock quantities (rounded to int `count`), are skipped/adjusted
-and listed in a printed report. Build orders are not imported yet.
+and listed in a printed report. Cancelled build orders are dropped; a fractional
+build quantity aborts the import (assemblies are whole).
 
 ## No hard deletes (soft-delete convention)
 
