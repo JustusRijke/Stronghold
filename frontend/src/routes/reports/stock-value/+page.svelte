@@ -2,6 +2,7 @@
 	import { api } from '$lib/api';
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
 	import type { StockValueReport } from '$lib/types';
+	import { stockOrderLabel, stockOrderUrl } from '$lib/status';
 
 	// Part prices are cached in the database and kept current by the writes that
 	// change them, so the report just reads them -- no calculate step, no
@@ -31,14 +32,22 @@
 		unit_price: number | null;
 		value: number | null;
 		basis: string;
-		po: string;
-		build: string;
-		po_url: string;
-		build_url: string;
+		order: string;
+		order_url: string;
 		nonzero: boolean;
 		last_po_date: string;
 		part_active: boolean;
 	};
+
+	// the report names its PO columns basis_*; reshape so the shared stock
+	// helpers can label and link the order the same way the stock tables do
+	const origin = (r: StockValueReport['rows'][number]) => ({
+		po_id: r.basis_po_id,
+		po_reference: r.basis_po_reference,
+		build_id: r.build_id,
+		consumed_by_build_id: null,
+		build_reference: r.build_reference
+	});
 
 	const rows = $derived<Row[]>(
 		(report?.rows ?? []).map((r) => ({
@@ -50,12 +59,10 @@
 			unit_price: r.unit_price,
 			value: r.value,
 			basis: BASIS_LABEL[r.basis],
-			// build-priced stock has no source PO; it points at its build instead
-			po: r.basis_po_id === null ? '' : r.basis_po_reference || `PO-${r.basis_po_id}`,
-			// the build's real reference, never a fabricated "BO-<id>"
-			build: r.build_reference || (r.build_id === null ? '' : `#${r.build_id}`),
-			po_url: r.basis_po_id === null ? '' : `/purchase-orders/${r.basis_po_id}`,
-			build_url: r.build_id === null ? '' : `/build-orders/${r.build_id}`,
+			// build-priced stock has no source PO; it points at its build instead.
+			// the report has no consumed_by_build_id, so a debt row shows no order.
+			order: stockOrderLabel(origin(r)),
+			order_url: stockOrderUrl(origin(r)),
 			nonzero: r.count !== 0,
 			last_po_date: r.last_po_date ?? '',
 			part_active: r.part_active
@@ -97,17 +104,16 @@
 			statusFilter: true,
 			statusOptions: Object.values(BASIS_LABEL)
 		},
-		{ key: 'po', header: 'PO', width: '130px', mono: true, cellHref: (r) => r.po_url },
+		{
+			key: 'order',
+			header: 'Order',
+			width: '130px',
+			mono: true,
+			cellHref: (r) => r.order_url
+		},
 		// blank = never ordered; DataTable sorts blanks last in both directions,
 		// so ascending shows the oldest real date first
 		{ key: 'last_po_date', header: 'Last PO', width: '120px', mono: true },
-		{
-			key: 'build',
-			header: 'Build',
-			width: '110px',
-			mono: true,
-			cellHref: (r) => r.build_url
-		},
 		{
 			key: 'nonzero',
 			header: 'In stock',
