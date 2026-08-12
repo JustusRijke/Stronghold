@@ -4,26 +4,23 @@
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
 	import type { Part } from '$lib/types';
 
-	type Row = Part & { stock: number };
-	let rows = $state<Row[]>([]);
+	let rows = $state<Part[]>([]);
 
 	async function load() {
-		const [parts, stock] = await Promise.all([api.parts(), api.stock()]);
-		const totals = new Map<number, number>();
-		for (const s of stock)
-			if (s.status === 'Available')
-				totals.set(s.part_id, (totals.get(s.part_id) ?? 0) + s.count);
-		rows = parts.map((p) => ({ ...p, stock: totals.get(p.id) ?? 0 }));
+		rows = await api.parts();
 	}
 	$effect(() => {
 		load();
 	});
 
-	const columns: Column<Row>[] = [
+	const columns: Column<Part>[] = [
 		{ key: 'id', header: '#', width: '70px', mono: true, hideByDefault: true },
 		{ key: 'sku', header: 'SKU', mono: true, width: '160px' },
 		{ key: 'description', header: 'Description', truncate: true },
-		{ key: 'stock', header: 'In stock', mono: true, width: '100px' },
+		{ key: 'in_stock', header: 'In stock', mono: true, width: '100px' },
+		{ key: 'needed', header: 'Needed', mono: true, width: '100px' },
+		{ key: 'incoming', header: 'On order', mono: true, width: '100px' },
+		{ key: 'suggested_order', header: 'To order', mono: true, width: '100px' },
 		{
 			key: 'estimated_price',
 			header: 'Est. price',
