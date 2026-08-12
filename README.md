@@ -92,6 +92,22 @@ Open-source inventory/stock tracking for small and medium businesses.
 - Consumed stock is never destroyed -- it is recorded as a "Consumed by build
   order" item linked to the build and its source purchase, so you can trace
   exactly which stock went into each build (and what it cost)
+- Correct a counted quantity with **Stocktake** on the part page. Every
+  stocktake needs a reason: click one of the suggestions or type your own. The
+  suggestions differ by direction -- finding stock (Found, Refurbished/repaired,
+  Returned by customer) and losing it (Damaged, Warranty claim by customer,
+  Lost) have little vocabulary in common, with Unknown offered for both. Both
+  lists are settings, editable on the settings page. Counting more adds an item
+  for the surplus; counting less comes off a stock item you pick (the oldest by
+  default), and what left is kept as a consumed item carrying the reason and
+  date, shown on the stock page -- so nothing is destroyed and the price it was
+  bought at stays traceable. Stock counts are corrected here and nowhere else --
+  the stock page shows a count but does not edit it
+- **Add negative stock item**, also on the part page, records stock a build
+  consumed that was never booked in -- mostly a repair for imported build orders
+  completed without their stock fully allocated. It offers only the build orders
+  whose components actually include the part, and the shortfall settles itself
+  when the parts are received on a purchase order
 - Each stock item carries its own value, shown on the stock page: what the
   purchase order it came from actually paid. This is deliberately not the part's
   current price -- a batch bought last year at 0.07 stays worth 0.07 even if the

@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { api } from '$lib/api';
-	import { toast } from '$lib/toast.svelte';
 	import { stockTabs } from '$lib/tabs.svelte';
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
 	import type { StockItem } from '$lib/types';
@@ -37,9 +36,6 @@
 		if (!Number.isNaN(id)) load();
 	});
 
-	async function saveCount(v: number) {
-		if (await toast.run(() => api.patchStock(id, { count: v }))) load();
-	}
 	function label(i: StockItem) {
 		return i.sku ? `${i.sku} - ${i.description}` : i.description;
 	}
@@ -82,6 +78,14 @@
 						>
 					</p>
 				{/if}
+				{#if item.stocktake_reason}
+					<p>
+						Stocktake: {item.stocktake_reason}
+						{#if item.stocktake_at}
+							<span class="hint">{new Date(item.stocktake_at).toLocaleString()}</span>
+						{/if}
+					</p>
+				{/if}
 				<p>Status: {item.status}</p>
 				<p>
 					Value:
@@ -96,16 +100,12 @@
 						</span>
 					{/if}
 				</p>
-				<label class="field">
-					<span>Count</span>
-					<input
-						type="number"
-						min="0"
-						step="any"
-						value={item.count}
-						onblur={(e) => saveCount(Number(e.currentTarget.value))}
-					/>
-				</label>
+				<p>
+					Count: <strong>{item.count}</strong>
+					<span class="hint">
+						corrected with Stocktake on the <a href={`/parts/${item.part_id}`}>part page</a>
+					</span>
+				</p>
 			</section>
 		</div>
 	</div>

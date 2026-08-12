@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import { api } from '$lib/api';
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
 	import { STATUS_OPTIONS } from '$lib/validators';
@@ -64,13 +63,9 @@
 </script>
 
 <div class="content nosidebar">
-	<DataTable
-		{columns}
-		{rows}
-		href={(r) => `/stock/${r.id}`}
-		storageKey="/stock"
-		onAdd={() => goto('/stock/new')}
-	/>
+	<!-- no add button: stock items come from receiving a PO, a build, or a
+	     stocktake on the part page -- never by hand -->
+	<DataTable {columns} {rows} href={(r) => `/stock/${r.id}`} storageKey="/stock" />
 </div>
 
 <style>

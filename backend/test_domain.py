@@ -7,7 +7,17 @@ from datetime import date
 
 import db
 import pytest
-from models import Activity, Booking, BuildLine, Part, POLine, PurchaseOrder, StockItem
+from models import (
+    STOCK_AVAILABLE,
+    STOCK_CONSUMED,
+    Activity,
+    Booking,
+    BuildLine,
+    Part,
+    POLine,
+    PurchaseOrder,
+    StockItem,
+)
 from sqlalchemy import select
 
 
@@ -17,8 +27,6 @@ def test_parts_and_stock_flow(database):
     db.edit_part(part_id, "M3 hex bolt")
     item_id = db.next_item_id()
     db.create_item(item_id, part_id)
-    db.adjust_count(item_id, 5)
-    db.adjust_count(item_id, -2)
     db.set_count(item_id, 7)  # grid edits set the count directly -> logged
     db.set_count(item_id, 3)
     db.set_item_status(item_id, "Consumed by build order")
@@ -365,6 +373,138 @@ def test_shortfall_settled_by_whole_po_receipt(database):
         assert db.build_unit_cost(s, build_id) == (8.0, True)
 
 
+def test_stocktake_up_and_down(database):
+    """Counting more adds stock; counting less comes off one item, splitting off
+    a consumed row so what left stays traceable."""
+    db.create_part(1, "BOLT", "a bolt")
+    db.stocktake(1, 10, "Lost")
+    with db.session() as s:
+        assert db.on_hand(s, 1) == 10
+        added = s.scalars(select(StockItem).where(StockItem.part_id == 1)).one()
+        assert added.stocktake_reason == "Lost"
+        assert added.stocktake_at is not None
+
+    # a second row, so "oldest by default" has something to choose between
+    db.create_item(db.next_item_id(), 1)
+    db.set_count(2, 5)
+    db.stocktake(1, 12, "Damaged")  # 15 -> 12: 3 off the oldest item
+    with db.session() as s:
+        assert db.on_hand(s, 1) == 12
+        assert s.get(StockItem, 1).count == 7  # taken off the oldest
+        assert s.get(StockItem, 2).count == 5  # untouched
+        gone = s.scalars(
+            select(StockItem).where(
+                StockItem.part_id == 1, StockItem.status == STOCK_CONSUMED
+            )
+        ).one()
+        assert (gone.count, gone.stocktake_reason) == (3, "Damaged")
+
+    # naming an item takes it off that one instead
+    db.stocktake(1, 10, "Damaged", item_id=2)
+    with db.session() as s:
+        assert s.get(StockItem, 1).count == 7  # still untouched
+        assert s.get(StockItem, 2).count == 3
+
+    # automatic (no item named) spills onto the next item once one runs dry
+    db.stocktake(1, 1, "Lost")  # 10 -> 1: drains item 1's 7, then 2 off item 2
+    with db.session() as s:
+        assert db.on_hand(s, 1) == 1
+        assert s.get(StockItem, 1).count == 0
+        assert s.get(StockItem, 2).count == 1
+
+
+def test_stocktake_rejects_no_reason_and_going_negative(database):
+    db.create_part(1, "BOLT", "a bolt")
+    db.stocktake(1, 5, "Lost")
+    with pytest.raises(db.InventoryError):
+        db.stocktake(1, 2, "")  # every stocktake needs a reason
+    with pytest.raises(db.InventoryError):
+        db.stocktake(1, -1, "Lost")  # below zero is add_negative_stock's job
+    with pytest.raises(db.InventoryError):
+        db.stocktake(1, 1, "Damaged", item_id=99)  # not this part's stock
+
+
+def test_stocktake_floor_is_what_the_part_already_owes(database):
+    """A part already owing stock counts below zero. The stocktake may empty the
+    shelf down to that debt, but never deepen it -- that needs the negative
+    stock item button."""
+    db.create_part(1, "ASM", "an assembly")
+    db.create_part(2, "COMP", "a component")
+    db.set_part_assembly(1, True)
+    db.add_bomline(db.next_bomline_id(), 1, 2, 1.0)
+    build_id = db.next_build_id()
+    db.create_build(build_id, 1, 1)
+    db.stocktake(2, 10, "Found")
+    db.add_negative_stock(2, 4, build_id)  # now 10 on the shelf, 4 owed
+    with db.session() as s:
+        assert db.on_hand(s, 2) == 6
+        assert db.owed(s, 2) == -4
+
+    with pytest.raises(db.InventoryError):
+        db.stocktake(2, -5, "Lost")  # deeper than the existing debt
+    db.stocktake(2, -4, "Lost")  # empties the shelf, debt untouched
+    with db.session() as s:
+        assert db.on_hand(s, 2) == -4
+        assert db.owed(s, 2) == -4  # no new debt row was created
+        shelf = [
+            i
+            for i in s.scalars(
+                select(StockItem).where(
+                    StockItem.part_id == 2, StockItem.status == STOCK_AVAILABLE
+                )
+            )
+            if i.count > 0
+        ]
+        assert shelf == []
+
+
+def test_negative_stocktake_settled_by_purchase(database):
+    """Stock a build used but nobody booked. The debt must take the same shape
+    produce_build's shortfall does -- adjacent consumed/debt rows -- or a later
+    receipt would not settle it."""
+    db.create_part(1, "ASM", "an assembly")
+    db.create_part(2, "COMP", "a component")
+    db.set_part_assembly(1, True)
+    db.add_bomline(db.next_bomline_id(), 1, 2, 1.0)
+    db.create_supplier(1, "Acme")
+    db.create_supplier_part(1, 1, "C-1", 2, pack_qty=1)
+    db.create_po(1, 1)
+    line_id = db.next_line_id()
+    db.add_po_line(line_id, 1, 1, 10, 3.0)  # comp estimate becomes 3.00
+    build_id = db.next_build_id()
+    db.create_build(build_id, 1, 1)
+
+    db.add_negative_stock(2, 3, build_id)
+    with db.session() as s:
+        assert db.on_hand(s, 2) == -3
+        debt = s.scalars(
+            select(StockItem).where(StockItem.part_id == 2, StockItem.count < 0)
+        ).one()
+        assert debt.count == -3
+        assert debt.consumed_by_build_id == build_id
+        # the placeholder _settle_stock_debt pairs by `debt.id - 1`
+        placeholder = s.get(StockItem, debt.id - 1)
+        assert placeholder.count == 3
+        assert placeholder.status == STOCK_CONSUMED
+        assert placeholder.consumed_by_build_id == build_id
+
+    # the missing parts arrive: the debt clears and is repriced to what was paid
+    db.edit_po_line(line_id, price=2.0)
+    item_id = db.next_item_id()
+    db.book_po_line(line_id, item_id, 10)
+    with db.session() as s:
+        assert s.get(StockItem, debt.id).count == 0
+        assert s.get(StockItem, item_id).count == 7  # 3 went straight to the build
+        settled = s.scalars(
+            select(StockItem).where(
+                StockItem.consumed_by_build_id == build_id,
+                StockItem.po_id.is_not(None),
+            )
+        ).one()
+        assert (settled.count, settled.price_basis) == (3, "po")
+        assert settled.unit_price == 2.0
+
+
 def test_virtual_part(database):
     db.create_part(1, "ASM", "an assembly")
     db.create_part(2, "COMP-A", "component a")
@@ -479,7 +619,7 @@ def test_settings(database):
 def test_export_restore_roundtrip(database, tmp_path):
     db.create_part(1, "BOLT-M3", "M3 bolt")
     db.create_item(1, 1)
-    db.adjust_count(1, 4)
+    db.set_count(1, 4)
     sql = database.with_suffix(".sql").read_text(encoding="utf-8")
     # restore into a raw empty db: the export's CREATE TABLEs must stand alone
     fresh = tmp_path / "restored.db"

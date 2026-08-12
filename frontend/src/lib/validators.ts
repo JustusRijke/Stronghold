@@ -28,6 +28,12 @@ export const BuildOrderPatch = v.object({
 	start_date: v.optional(v.nullable(v.string())),
 	end_date: v.optional(v.nullable(v.string())),
 	});
+export const NegativeStockIn = v.object({
+	part_id: v.pipe(v.number(), v.integer()),
+	quantity: v.pipe(v.number(), v.gtValue(0, 'must be greater than 0')),
+	build_id: v.pipe(v.number(), v.integer()),
+	reason: v.optional(v.string()),
+	});
 export const POLineIn = v.object({
 	supplier_part_id: v.pipe(v.number(), v.integer()),
 	quantity: v.pipe(v.number(), v.integer(), v.gtValue(0, 'must be greater than 0')),
@@ -80,6 +86,14 @@ export const StockItemIn = v.object({
 export const StockItemPatch = v.object({
 	count: v.optional(v.nullable(v.number())),
 	status: v.optional(v.nullable(v.picklist(["Available","Consumed by build order"]))),
+	});
+export const StocktakeIn = v.object({
+	part_id: v.pipe(v.number(), v.integer()),
+	count: v.number(),
+	reason: v.string(),
+	item_id: v.optional(v.nullable(v.pipe(v.number(), v.integer()))),
+	build_id: v.optional(v.nullable(v.pipe(v.number(), v.integer()))),
+	po_id: v.optional(v.nullable(v.pipe(v.number(), v.integer()))),
 	});
 export const SupplierIn = v.object({
 	name: v.optional(v.string()),

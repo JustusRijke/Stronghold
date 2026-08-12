@@ -66,6 +66,7 @@ class PartOut(BaseModel):
     estimated_price: float | None  # cached unit price; None when nothing prices it
     price_partial: bool  # an assembly whose BOM has unpriced components
     in_stock: float  # Available stock on hand (debt rows net out)
+    owed: float  # what builds are owed, negative (0 if none); a stocktake's floor
     needed: float  # units builds in production still have to consume
     incoming: float  # units still to be received on open POs
     suggested_order: float  # max(0, needed - in_stock - incoming)
@@ -138,10 +139,30 @@ class StockItemOut(BaseModel):
     status: StockStatus
     unit_price: float | None  # what THIS stock is worth per item
     price_basis: PriceBasisOut
+    stocktake_at: datetime | None  # set when a stocktake wrote this row
+    stocktake_reason: str  # "" unless a stocktake wrote this row
 
 
 class StockItemIn(BaseModel):
     part_id: int
+
+
+class StocktakeIn(BaseModel):
+    part_id: int
+    # may be negative only down to what the part already owes (db.stocktake
+    # enforces the floor); creating a debt is NegativeStockIn's job
+    count: float
+    reason: str = Field(min_length=1)
+    item_id: int | None = None  # to take from when lowering; oldest if null
+    build_id: int | None = None
+    po_id: int | None = None
+
+
+class NegativeStockIn(BaseModel):
+    part_id: int
+    quantity: float = Field(gt=0)
+    build_id: int
+    reason: str = ""
 
 
 class StockItemPatch(BaseModel):
@@ -354,8 +375,23 @@ def _on_hand(s) -> dict[int, float]:
     }
 
 
+def _owed(s) -> dict[int, float]:
+    """Per part, what builds are owed (negative). See db.owed."""
+    return {
+        part_id: total
+        for part_id, total in s.execute(
+            select(StockItem.part_id, func.sum(StockItem.count))
+            .where(StockItem.status == STOCK_AVAILABLE, StockItem.count < 0)
+            .group_by(StockItem.part_id)
+        )
+    }
+
+
 def _part_out(
-    p: Part, on_hand: dict[int, float], demand: dict[int, tuple[float, float]]
+    p: Part,
+    on_hand: dict[int, float],
+    demand: dict[int, tuple[float, float]],
+    owed: dict[int, float],
 ) -> PartOut:
     stock = on_hand.get(p.id, 0.0)
     needed, incoming = demand.get(p.id, (0.0, 0.0))
@@ -370,6 +406,7 @@ def _part_out(
         estimated_price=p.estimated_price,
         price_partial=p.price_partial,
         in_stock=stock,
+        owed=owed.get(p.id, 0.0),
         needed=needed,
         incoming=incoming,
         suggested_order=max(0.0, needed - stock - incoming),
@@ -379,9 +416,9 @@ def _part_out(
 @router.get("/parts", response_model=list[PartOut])
 def list_parts() -> list[PartOut]:
     with db.session() as s:
-        on_hand, demand = _on_hand(s), db.part_demand(s)
+        on_hand, demand, owed = _on_hand(s), db.part_demand(s), _owed(s)
         return [
-            _part_out(p, on_hand, demand)
+            _part_out(p, on_hand, demand, owed)
             for p in s.scalars(select(Part).order_by(Part.id))
         ]
 
@@ -392,7 +429,7 @@ def get_part(part_id: int) -> PartOut:
         part = s.get(Part, part_id)
         if part is None:
             raise HTTPException(status_code=404, detail=f"no part {part_id}")
-        return _part_out(part, _on_hand(s), db.part_demand(s))
+        return _part_out(part, _on_hand(s), db.part_demand(s), _owed(s))
 
 
 @router.post("/parts", response_model=PartOut, status_code=201)
@@ -623,6 +660,8 @@ def _stock_out(row) -> StockItemOut:
         status=i.status,
         unit_price=i.unit_price,
         price_basis=i.price_basis,
+        stocktake_at=i.stocktake_at,
+        stocktake_reason=i.stocktake_reason or "",
     )
 
 
@@ -636,6 +675,36 @@ def list_stock() -> list[StockItemOut]:
     return _stock_rows()
 
 
+@router.post("/stock/stocktake", response_model=PartOut)
+def stocktake(body: StocktakeIn) -> PartOut:
+    """Correct a part's counted stock. Returns the part, whose in_stock now
+    reflects the count."""
+    _guard(
+        db.stocktake,
+        body.part_id,
+        body.count,
+        body.reason,
+        body.item_id,
+        body.build_id,
+        body.po_id,
+    )
+    return get_part(body.part_id)
+
+
+@router.post("/stock/negative", response_model=PartOut)
+def add_negative_stock(body: NegativeStockIn) -> PartOut:
+    """Record stock a build used that was never booked in (an import repair)."""
+    _guard(
+        db.add_negative_stock,
+        body.part_id,
+        body.quantity,
+        body.build_id,
+        body.reason,
+    )
+    return get_part(body.part_id)
+
+
+# registered after /stock/stocktake so the literal path is not read as an id
 @router.get("/stock/{item_id}", response_model=StockItemOut)
 def get_stock(item_id: int) -> StockItemOut:
     for row in _stock_rows():
@@ -1144,6 +1213,25 @@ def list_settings() -> list[SettingOut]:
 def set_setting(key: str, body: SettingIn) -> SettingOut:
     _guard(db.set_setting, key, body.value)
     return SettingOut(key=key, value=db.get_setting(key))
+
+
+class StocktakeReasonsOut(BaseModel):
+    """Reason suggestions, split by direction; the setting holds them comma
+    separated."""
+
+    add: list[str]
+    subtract: list[str]
+
+
+@router.get("/settings/stocktake-reasons", response_model=StocktakeReasonsOut)
+def stocktake_reasons() -> StocktakeReasonsOut:
+    def split(key: str) -> list[str]:
+        return [r.strip() for r in db.get_setting(key).split(",") if r.strip()]
+
+    return StocktakeReasonsOut(
+        add=split("stocktake.add_reasons"),
+        subtract=split("stocktake.subtract_reasons"),
+    )
 
 
 # -- reports ----------------------------------------------------------------
