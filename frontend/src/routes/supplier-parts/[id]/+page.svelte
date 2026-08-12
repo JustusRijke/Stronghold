@@ -239,7 +239,6 @@
 					rows={stock}
 					href={(s) => `/stock/${s.id}`}
 					storageKey={`/supplier-parts/${id}/stock`}
-					onAdd={() => goto(`/stock/new?part_id=${sp!.part_id}`)}
 				/>
 			</section>
 		</div>

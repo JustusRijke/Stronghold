@@ -10,10 +10,19 @@
 		partId: number;
 		partLabel: string;
 		currentCount: number;
+		/** what builds already owe (negative): the lowest a stocktake may count to */
+		owed: number;
 		open: boolean;
 		onsaved: () => void;
 	}
-	let { partId, partLabel, currentCount, open = $bindable(), onsaved }: Props = $props();
+	let {
+		partId,
+		partLabel,
+		currentCount,
+		owed,
+		open = $bindable(),
+		onsaved
+	}: Props = $props();
 
 	let dialog = $state<HTMLDialogElement | null>(null);
 	let count = $state(0);
@@ -25,6 +34,8 @@
 
 	const changed = $derived(count !== currentCount);
 	const lowering = $derived(count < currentCount);
+	// a stocktake empties the shelf but never deepens a debt
+	const belowFloor = $derived(count < owed);
 	// finding stock and losing it have little vocabulary in common
 	const reasonOptions = $derived(lowering ? reasons.subtract : reasons.add);
 	// oldest first, matching the default the backend picks
@@ -81,20 +92,30 @@
 
 	<label class="field req">
 		<span>Counted quantity</span>
-		<!-- a count is never negative: min alone still lets you type "-" -->
+		<!-- min alone still lets you type "-", so block it unless the part already
+		     owes stock (then counting down to that debt is legitimate) -->
 		<input
 			type="number"
-			min="0"
+			min={owed}
 			step="any"
 			bind:value={count}
 			onkeydown={(e) => {
-				if (e.key === '-') e.preventDefault();
+				if (e.key === '-' && owed >= 0) e.preventDefault();
 			}}
 			oninput={(e) => {
-				if (e.currentTarget.value.includes('-')) e.currentTarget.value = '';
+				if (owed >= 0 && e.currentTarget.value.includes('-')) e.currentTarget.value = '';
 			}}
 		/>
 	</label>
+	{#if owed < 0}
+		<p class="muted hint">
+			{-owed} already owed to build orders, so this part counts down to {owed}. Use Add negative
+			stock item to owe more.
+		</p>
+	{/if}
+	{#if belowFloor}
+		<p class="muted warn">Cannot count below {owed}: that would create a new debt.</p>
+	{/if}
 
 	{#if changed}
 		<label class="field req">
@@ -137,7 +158,7 @@
 			type="button"
 			onclick={save}
 			disabled={!changed ||
-				count < 0 ||
+				belowFloor ||
 				!reason ||
 				tooMuch ||
 				(lowering && !auto && sourceId === '')}
@@ -178,6 +199,10 @@
 	}
 	select:disabled {
 		opacity: 0.5;
+	}
+	.hint {
+		font-size: 0.85em;
+		margin-top: -6px;
 	}
 	.warn {
 		color: var(--warn, #b45309);

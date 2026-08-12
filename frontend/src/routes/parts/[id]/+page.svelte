@@ -508,7 +508,6 @@
 						rows={stockRows}
 						href={(s) => `/stock/${s.id}`}
 						storageKey={`/parts/${id}/stock`}
-						onAdd={() => goto(`/stock/new?part_id=${id}`)}
 					/>
 				</section>
 				{#if buyable}
@@ -553,6 +552,7 @@
 			partId={id}
 			partLabel={part.description}
 			currentCount={part.in_stock}
+			owed={part.owed}
 			bind:open={stocktakeOpen}
 			onsaved={load}
 		/>
