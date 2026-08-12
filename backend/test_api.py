@@ -223,7 +223,7 @@ def test_build_flow(client):
         "/api/build-orders", json={"part_id": asm, "quantity": 3}
     ).json()
     bid = build["id"]
-    assert build["status"] == "Pending"
+    assert build["status"] == "Draft"
     assert build["produced"] == 0
     # reverse lookup: the build shows up under its assembly part
     assert [b["id"] for b in client.get(f"/api/parts/{asm}/builds").json()] == [bid]
@@ -241,7 +241,7 @@ def test_build_flow(client):
     )
     # status transition rules once production has started (produced 1 of 3):
     # cannot complete before fully produced, cannot revert to a pre-production
-    # status; Production and On Hold are both allowed
+    # status; only Production remains
     assert (
         client.patch(
             f"/api/build-orders/{bid}", json={"status": "Complete"}
@@ -252,9 +252,10 @@ def test_build_flow(client):
         client.patch(f"/api/build-orders/{bid}", json={"status": "Pending"}).status_code
         == 400
     )
-    assert client.patch(
-        f"/api/build-orders/{bid}", json={"status": "On Hold"}
-    ).is_success
+    assert (
+        client.patch(f"/api/build-orders/{bid}", json={"status": "Draft"}).status_code
+        == 400
+    )
     assert client.patch(
         f"/api/build-orders/{bid}", json={"status": "Production"}
     ).is_success
@@ -829,8 +830,12 @@ def test_part_demand_and_suggested_order(client):
     build = client.post(
         "/api/build-orders", json={"part_id": asm, "quantity": 4}
     ).json()
-    # a Pending build asks for nothing yet
+    # a Draft build is a scratchpad and asks for nothing yet
+    assert build["status"] == "Draft"
     assert client.get(f"/api/parts/{comp}").json()["needed"] == 0
+    # planning it (Pending) already books the demand, before production starts
+    client.patch(f"/api/build-orders/{build['id']}", json={"status": "Pending"})
+    assert client.get(f"/api/parts/{comp}").json()["needed"] == 8
     client.patch(f"/api/build-orders/{build['id']}", json={"status": "Production"})
 
     # 4 units x 2 each = 8 needed, 3 in stock, nothing on order

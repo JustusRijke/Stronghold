@@ -13,7 +13,7 @@ Open-source inventory/stock tracking for small and medium businesses.
   detail page (left-click opens it, right-click opens it in a new tab), where all
   editing happens. Add records with the "Add" button; remove asks to confirm. The
   parts list also shows each part's total stock on hand, how many units the
-  build orders currently in production still have to consume ("Needed"), how
+  planned build orders still have to consume ("Needed"), how
   many are still to be received on open purchase orders ("On order"), and the
   resulting shortfall to buy ("To order" = needed - in stock - on order)
 - Detail pages let you edit every user-facing field (a purchase order's status,
@@ -58,8 +58,10 @@ Open-source inventory/stock tracking for small and medium businesses.
   supplier parts and purchase orders disappear from the part page, and no new
   supplier part can be created for it. Untick it only once the part has no
   supplier parts left
-- Raise build orders against an assembly and produce them in batches (once the
-  build is set to "Production"): enter how many to make and the components are
+- Raise build orders against an assembly and produce them in batches. A new
+  build starts as a "Draft" (a scratchpad: it asks for no stock); move it to
+  "Pending" once it is planned and its components show up as demand on the
+  parts overview. To produce (once the build is set to "Production"): enter how many to make and the components are
   consumed from stock per the BOM (oldest stock first); the finished units are
   produced into stock, stamped with the build. The produce dialog shows any
   component shortfall so you can decide -- you may produce anyway (short
@@ -138,7 +140,8 @@ Open-source inventory/stock tracking for small and medium businesses.
   glance over, not an undo
 - Import your part catalog, BOMs, suppliers, supplier catalogs, purchase orders,
   build orders, and current stock from an InvenTree server (read-only, one-shot
-  migration; nothing on the InvenTree side is changed)
+  migration; nothing on the InvenTree side is changed). Builds have no "On
+  Hold" status here, so a held InvenTree build is imported as "Pending"
 - Nothing is ever deleted: parts are deactivated and stock is marked consumed
   rather than removed, so your history and data stay intact
 - Your data as a readable SQL file: `inventory.sql` is kept up to date next
