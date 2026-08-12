@@ -6,6 +6,7 @@
 	import { supplierPartTabs } from '$lib/tabs.svelte';
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
+	import StocktakeDialog from '$lib/components/StocktakeDialog.svelte';
 	import type { Part, PartPurchaseOrder, POLine, PurchaseOrder, StockItem, SupplierPart } from '$lib/types';
 	import { PO_STATUS_OPTIONS } from '$lib/status';
 	import { STATUS_OPTIONS as STOCK_STATUS_OPTIONS } from '$lib/validators';
@@ -18,6 +19,13 @@
 	let supplierName = $state('');
 	let pos = $state<PartPurchaseOrder[]>([]);
 	let stock = $state<StockItem[]>([]);
+	let stocktakeOpen = $state(false);
+
+	// same definition as the backend's in_stock: Available rows only, so a
+	// build's outstanding debt (a negative row) nets out
+	const inStock = $derived(
+		stock.filter((s) => s.status === 'Available').reduce((sum, s) => sum + s.count, 0)
+	);
 
 	const sections = [
 		{ id: 'details', label: 'Details' },
@@ -175,6 +183,12 @@
 			</p>
 
 			<section id="details">
+				<p class="muted stockline">
+					<span>In stock: <strong>{inStock}</strong></span>
+					<button class="btn ghost" type="button" onclick={() => (stocktakeOpen = true)}>
+						Stocktake
+					</button>
+				</p>
 				<label class="field">
 					<span>Description</span>
 					<input value={sp.description} onblur={(e) => save({ description: e.currentTarget.value })} />
@@ -239,6 +253,14 @@
 		</div>
 	</div>
 
+	<StocktakeDialog
+		partId={sp.part_id}
+		partLabel={partLabel}
+		currentCount={inStock}
+		bind:open={stocktakeOpen}
+		onsaved={load}
+	/>
+
 	<dialog bind:this={poDialog} class="podialog">
 		<h2 class="h2">Purchase this part</h2>
 		<label class="field">
@@ -278,6 +300,12 @@
 {/if}
 
 <style>
+	.stockline {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
 	dialog.podialog {
 		border: 1px solid var(--line);
 		border-radius: 8px;

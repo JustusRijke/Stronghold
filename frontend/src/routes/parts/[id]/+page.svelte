@@ -6,6 +6,7 @@
 	import { partTabs } from '$lib/tabs.svelte';
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
+	import StocktakeDialog from '$lib/components/StocktakeDialog.svelte';
 	import type { PartBuild, Part, BomLine, BomUsage, POLine, PartPurchaseOrder, PurchaseOrder, StockItem, Supplier, SupplierPart } from '$lib/types';
 
 	type PartPO = PartPurchaseOrder & { supplier_name: string };
@@ -16,6 +17,7 @@
 
 	let part = $state<Part | null>(null);
 	let notFound = $state(false);
+	let stocktakeOpen = $state(false);
 	let bom = $state<BomLine[]>([]);
 	let activeParts = $state<Part[]>([]);
 
@@ -362,11 +364,16 @@
 					<input value={part.description} onblur={(e) => saveDescription(e.currentTarget.value)} />
 				</label>
 				{#if !part.virtual}
-					<p class="muted">
-						In stock: <strong>{part.in_stock}</strong> &middot; needed for builds:
-						<strong>{part.needed}</strong>
-						&middot; on order: <strong>{part.incoming}</strong> &middot; suggested to order:
-						<strong>{part.suggested_order}</strong>
+					<p class="muted stockline">
+						<span>
+							In stock: <strong>{part.in_stock}</strong> &middot; needed for builds:
+							<strong>{part.needed}</strong>
+							&middot; on order: <strong>{part.incoming}</strong> &middot; suggested to order:
+							<strong>{part.suggested_order}</strong>
+						</span>
+						<button class="btn ghost" type="button" onclick={() => (stocktakeOpen = true)}>
+							Stocktake
+						</button>
 					</p>
 				{/if}
 				{#if part.virtual}
@@ -536,6 +543,16 @@
 		</div>
 	</div>
 
+	{#if part}
+		<StocktakeDialog
+			partId={id}
+			partLabel={part.description}
+			currentCount={part.in_stock}
+			bind:open={stocktakeOpen}
+			onsaved={load}
+		/>
+	{/if}
+
 	<dialog bind:this={poDialog} class="podialog">
 		<h2 class="h2">Purchase this part</h2>
 		{#if part}
@@ -622,6 +639,12 @@
 {/if}
 
 <style>
+	.stockline {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
 	.hint {
 		color: var(--ink-faint);
 		font-size: 0.85em;
