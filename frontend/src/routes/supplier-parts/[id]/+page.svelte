@@ -6,7 +6,7 @@
 	import { supplierPartTabs } from '$lib/tabs.svelte';
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
-	import type { Part, POLine, PurchaseOrder, StockItem, SupplierPart } from '$lib/types';
+	import type { Part, PartPurchaseOrder, POLine, PurchaseOrder, StockItem, SupplierPart } from '$lib/types';
 	import { PO_STATUS_OPTIONS } from '$lib/status';
 	import { STATUS_OPTIONS as STOCK_STATUS_OPTIONS } from '$lib/validators';
 
@@ -16,7 +16,7 @@
 	let notFound = $state(false);
 	let parts = $state<Part[]>([]);
 	let supplierName = $state('');
-	let pos = $state<PurchaseOrder[]>([]);
+	let pos = $state<PartPurchaseOrder[]>([]);
 	let stock = $state<StockItem[]>([]);
 
 	const sections = [
@@ -123,8 +123,18 @@
 		}
 	}
 
-	const poCols: Column<PurchaseOrder>[] = [
+	const poCols: Column<PartPurchaseOrder>[] = [
 		{ key: 'reference', header: 'PO', mono: true, width: '150px' },
+		{ key: 'supplier_reference', header: 'Supplier ref', truncate: true },
+		{ key: 'quantity', header: 'Qty', mono: true, width: '90px' },
+		{
+			key: 'unit_price',
+			header: 'Unit price',
+			mono: true,
+			width: '110px',
+			format: (v) => (v === null ? '-' : (v as number).toFixed(4))
+		},
+		{ key: 'start_date', header: 'Ordered', width: '120px' },
 		{
 			key: 'status',
 			header: 'Status',
@@ -212,6 +222,7 @@
 					rows={pos}
 					href={(po) => `/purchase-orders/${po.id}`}
 					storageKey={`/supplier-parts/${id}/pos`}
+					defaultSort={{ key: 'start_date', dir: 'desc' }}
 					onAdd={addPo}
 				/>
 			</section>

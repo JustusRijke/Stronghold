@@ -98,7 +98,7 @@ export const api = {
 	supplierParts: () => get<SupplierPart[]>('/supplier-parts'),
 	supplierPart: (id: number) => get<SupplierPart>(`/supplier-parts/${id}`),
 	supplierPartPos: (id: number) =>
-		get<PurchaseOrder[]>(`/supplier-parts/${id}/purchase-orders`),
+		get<PartPurchaseOrder[]>(`/supplier-parts/${id}/purchase-orders`),
 	createSupplierPart: (b: {
 		supplier_id: number;
 		sku: string;

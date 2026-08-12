@@ -2053,7 +2053,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PurchaseOrderOut"][];
+                    "application/json": components["schemas"]["PartPurchaseOrderOut"][];
                 };
             };
             /** @description Validation Error */

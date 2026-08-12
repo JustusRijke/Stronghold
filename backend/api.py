@@ -386,18 +386,16 @@ def patch_part(part_id: int, body: PartPatch) -> PartOut:
     return get_part(part_id)
 
 
-@router.get(
-    "/parts/{part_id}/purchase-orders", response_model=list[PartPurchaseOrderOut]
-)
-def list_part_pos(part_id: int) -> list[PartPurchaseOrderOut]:
-    """POs that ordered this part, with what this part cost on each."""
+def _pos_with_qty(where) -> list[PartPurchaseOrderOut]:
+    """POs whose lines match `where`, newest first, with the units ordered and
+    the price paid per unit on each."""
     with db.session() as s:
         rows: dict[int, PartPurchaseOrderOut] = {}
         for po, line, pack_qty in s.execute(
             select(PurchaseOrder, POLine, SupplierPart.pack_qty)
             .join(POLine, POLine.po_id == PurchaseOrder.id)
             .join(SupplierPart, POLine.supplier_part_id == SupplierPart.id)
-            .where(SupplierPart.part_id == part_id)
+            .where(where)
             .order_by(PurchaseOrder.start_date.desc(), PurchaseOrder.id.desc())
         ):
             # a part can sit on several lines of one PO: sum the units, keep the last price
@@ -407,6 +405,14 @@ def list_part_pos(part_id: int) -> list[PartPurchaseOrderOut]:
             row.quantity += line.quantity * pack_qty
             row.unit_price = line.price / pack_qty if line.price else row.unit_price
         return list(rows.values())
+
+
+@router.get(
+    "/parts/{part_id}/purchase-orders", response_model=list[PartPurchaseOrderOut]
+)
+def list_part_pos(part_id: int) -> list[PartPurchaseOrderOut]:
+    """POs that ordered this part, with what this part cost on each."""
+    return _pos_with_qty(SupplierPart.part_id == part_id)
 
 
 @router.get("/parts/{part_id}/used-in", response_model=list[BomUsageOut])
@@ -752,21 +758,11 @@ def patch_supplier_part(sp_id: int, body: SupplierPartPatch) -> SupplierPartOut:
 
 
 @router.get(
-    "/supplier-parts/{sp_id}/purchase-orders", response_model=list[PurchaseOrderOut]
+    "/supplier-parts/{sp_id}/purchase-orders", response_model=list[PartPurchaseOrderOut]
 )
-def list_supplier_part_pos(sp_id: int) -> list[PurchaseOrderOut]:
+def list_supplier_part_pos(sp_id: int) -> list[PartPurchaseOrderOut]:
     """POs that have at least one line for this supplier part."""
-    with db.session() as s:
-        return [
-            _po_out(po)
-            for po in s.scalars(
-                select(PurchaseOrder)
-                .join(POLine, POLine.po_id == PurchaseOrder.id)
-                .where(POLine.supplier_part_id == sp_id)
-                .distinct()
-                .order_by(PurchaseOrder.id)
-            )
-        ]
+    return _pos_with_qty(POLine.supplier_part_id == sp_id)
 
 
 # -- purchase orders --------------------------------------------------------
