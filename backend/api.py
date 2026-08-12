@@ -288,7 +288,7 @@ class BuildOrderIn(BaseModel):
     part_id: int
     quantity: int = Field(gt=0)
     reference: str = ""
-    status: BuildStatus = BuildStatus.PENDING
+    status: BuildStatus = BuildStatus.DRAFT
     start_date: date | None = None
     end_date: date | None = None
 
