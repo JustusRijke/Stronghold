@@ -403,6 +403,25 @@ def test_stock_value_report(client):
     assert report["total"] == 135.0
     assert report["unpriced"] == 1
 
+    # a build short of a component carries the shortfall as negative stock,
+    # which is deducted from the total
+    asm = client.post(
+        "/api/parts", json={"sku": "VAL-ASM", "description": "assembly"}
+    ).json()
+    client.patch(f"/api/parts/{asm['id']}", json={"assembly": True})
+    client.post(
+        f"/api/parts/{asm['id']}/bom",
+        json={"component_part_id": part["id"], "quantity": 30.0},
+    )
+    build = client.post(
+        "/api/build-orders", json={"part_id": asm["id"], "quantity": 1}
+    ).json()
+    client.post(f"/api/build-orders/{build['id']}/produce", json={"quantity": 1})
+    report = client.get("/api/reports/stock-value").json()
+    debt = next(r for r in report["rows"] if r["count"] < 0)
+    assert debt["count"] == -3.0  # 30 needed, 27 on the shelf
+    assert (debt["basis"], debt["value"]) == ("estimate", -15.0)
+
     # a PO line with no price filled in: reported as such, not valued at 0.00
     free_part = client.post(
         "/api/parts", json={"sku": "VAL-3", "description": "free"}

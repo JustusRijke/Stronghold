@@ -214,18 +214,30 @@ def test_build_flow(database):
         db.edit_build(build_id, 2)
 
     # shortage does not block: comp-c is now empty, produce the last unit anyway.
-    # It produces the full assembly count; comp-c stays at zero (never negative).
+    # The missing unit becomes a debt: consumed at the part's estimate plus a
+    # negative Available row stamped with the build.
     db.produce_build(build_id, 1)
     with db.session() as s:
-        assert s.get(StockItem, 4).count == 0  # short comp-c drained, not negative
-        # only 3 comp-c was ever consumed despite the BOM asking for 4
+        assert s.get(StockItem, 4).count == 0  # the real comp-c stock, drained
+        # the full BOM quantity is consumed now, the last unit on credit
         cc_consumed = s.scalars(
             select(StockItem).where(
                 StockItem.status == "Consumed by build order",
                 StockItem.part_id == 4,
             )
         ).all()
-        assert sum(c.count for c in cc_consumed) == 3
+        assert sum(c.count for c in cc_consumed) == 4
+        debt = s.scalars(
+            select(StockItem).where(
+                StockItem.part_id == 4,
+                StockItem.status == "Available",
+                StockItem.count < 0,
+            )
+        ).one()
+        assert debt.count == -1
+        assert debt.consumed_by_build_id == build_id
+        # never the producing build -- that would inflate produced_qty
+        assert debt.build_id is None
         assert db.produced_qty(s, build_id) == 4
         assert db.get_build(s, build_id).status == "Complete"
 
@@ -251,6 +263,62 @@ def test_build_flow(database):
         assert {c.build_id for c in eaten} == {build_id}
     sql = database.with_suffix(".sql").read_text(encoding="utf-8")
     assert "INSERT INTO build_orders" in sql
+
+
+def test_build_shortfall_settled_by_purchase(database):
+    """A build short of a component carries the debt as negative stock. When the
+    parts are received the debt clears and the build's consumption -- and so the
+    assembly it produced -- is repriced from the estimate to what was paid."""
+    db.create_part(1, "ASM", "an assembly")
+    db.create_part(2, "COMP", "a component")
+    db.set_part_assembly(1, True)
+    db.add_bomline(db.next_bomline_id(), 1, 2, 4.0)  # 4x comp per assembly
+    db.create_supplier(1, "Acme")
+    db.create_supplier_part(1, 1, "C-1", 2, pack_qty=1)
+    db.create_po(1, 1)
+    line_id = db.next_line_id()
+    db.add_po_line(line_id, 1, 1, 10, 3.0)  # estimate for comp becomes 3.00
+
+    # only 1 of the 4 needed is on the shelf: produce anyway, 3 go on credit
+    db.create_item(1, 2)
+    db.set_count(1, 1)
+    build_id = db.next_build_id()
+    db.create_build(build_id, 1, 1)
+    db.produce_build(build_id, 1)
+    with db.session() as s:
+        debt = s.scalars(
+            select(StockItem).where(StockItem.part_id == 2, StockItem.count < 0)
+        ).one()
+        assert debt.count == -3
+        assert debt.unit_price == 3.0  # the part's estimate
+        assert debt.price_basis == "estimate"
+        # the assembly is costed in full, but on an estimate
+        assert db.build_unit_cost(s, build_id) == (12.0, False)
+
+    # the missing parts arrive, cheaper than estimated
+    db.edit_po_line(line_id, price=2.0)
+    item_id = db.next_item_id()
+    db.book_po_line(line_id, item_id, 10)
+    with db.session() as s:
+        assert s.get(StockItem, debt.id).count == 0  # debt paid off
+        # settled units went straight into the assembly, never onto the shelf
+        assert s.get(StockItem, item_id).count == 7
+        settled = s.scalars(
+            select(StockItem).where(
+                StockItem.consumed_by_build_id == build_id,
+                StockItem.po_id.is_not(None),
+            )
+        ).one()
+        assert settled.count == 3
+        assert settled.price_basis == "po"
+        assert settled.unit_price == 2.0
+        # 3 actually paid at 2.00, plus the 1 shelf unit whose estimate the
+        # repriced PO line moved to 2.00 as well
+        assert db.build_unit_cost(s, build_id) == (8.0, False)
+        produced = s.scalars(
+            select(StockItem).where(StockItem.build_id == build_id)
+        ).one()
+        assert produced.unit_price == 8.0  # the assembly repriced itself
 
 
 def test_virtual_part(database):
