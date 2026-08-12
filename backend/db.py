@@ -9,7 +9,7 @@ can live in git. Restore: fresh db (run the app once), then
 import functools
 import json
 import logging
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from models import (
@@ -760,17 +760,6 @@ def create_item(s: Session, item_id: int, part_id: int) -> None:
 
 
 @_write
-def adjust_count(s: Session, item_id: int, delta: float) -> None:
-    item = get_item(s, item_id)
-    if item.count + delta < 0:
-        raise InventoryError(
-            f"count of item {item.id} (part {item.part_id}) would become "
-            f"{item.count + delta}"
-        )
-    item.count += delta
-
-
-@_write
 def set_count(s: Session, item_id: int, count: float) -> None:
     if count < 0:
         raise InventoryError(f"count of item {item_id} cannot be {count}")
@@ -793,6 +782,140 @@ def set_count(s: Session, item_id: int, count: float) -> None:
 @_write
 def set_item_status(s: Session, item_id: int, status: str) -> None:
     get_item(s, item_id).status = status
+
+
+def on_hand(s: Session, part_id: int) -> float:
+    """Available stock for one part; negative debt rows net out."""
+    return (
+        s.scalar(
+            select(func.coalesce(func.sum(StockItem.count), 0.0)).where(
+                StockItem.part_id == part_id, StockItem.status == STOCK_AVAILABLE
+            )
+        )
+        or 0.0
+    )
+
+
+@_write
+def stocktake(
+    s: Session,
+    part_id: int,
+    count: float,
+    reason: str = "",
+    build_id: int | None = None,
+    po_id: int | None = None,
+) -> None:
+    """Correct a part's on-hand stock to a counted figure.
+
+    Counting more creates a stock item for the surplus. Counting less draws the
+    difference down FIFO, splitting off consumed rows so what left (and the
+    price it was bought at) stays traceable -- stock never just disappears.
+    A negative count is a build that ate stock we never recorded, so it needs a
+    build order and lands as a debt, exactly as a production shortage does."""
+    part = get_part(s, part_id)
+    if build_id is not None:
+        get_build(s, build_id)
+    if po_id is not None:
+        get_po(s, po_id)
+    current = on_hand(s, part_id)
+    delta = count - current
+    if abs(delta) <= 1e-9:
+        return
+    # one timestamp for every row this stocktake writes, so they group as one
+    # event. Naive local time, like Activity.at.
+    at = datetime.now()  # noqa: DTZ005
+    next_id = (s.scalar(select(func.max(StockItem.id))) or 0) + 1
+
+    if delta > 0:
+        s.add(
+            StockItem(
+                id=next_id,
+                count=delta,
+                part_id=part_id,
+                po_id=po_id,
+                build_id=build_id,
+                status=STOCK_AVAILABLE,
+                stocktake_at=at,
+                stocktake_reason=reason,
+            )
+        )
+        s.flush()
+        refresh_stock_price(s, get_item(s, next_id))
+    else:
+        if not reason:
+            raise InventoryError("a stocktake that lowers stock needs a reason")
+        # draw down what is on the shelf FIFO, then (if the count is negative)
+        # owe the rest to a build
+        need = min(-delta, max(current, 0.0))
+        for item in s.scalars(
+            select(StockItem)
+            .where(
+                StockItem.part_id == part_id,
+                StockItem.status == STOCK_AVAILABLE,
+                StockItem.count > 0,  # never draw down an outstanding debt row
+            )
+            .order_by(StockItem.id)
+        ):
+            if need <= 1e-9:
+                break
+            take = min(item.count, need)
+            item.count -= take
+            need -= take
+            s.add(
+                StockItem(
+                    id=next_id,
+                    count=take,
+                    part_id=part_id,
+                    po_id=item.po_id,  # keep the source's price provenance
+                    build_id=item.build_id,
+                    status=STOCK_CONSUMED,
+                    unit_price=item.unit_price,
+                    price_basis=item.price_basis,
+                    price_po_id=item.price_po_id,
+                    stocktake_at=at,
+                    stocktake_reason=reason,
+                )
+            )
+            next_id += 1
+        if count < 0:
+            if build_id is None:
+                raise InventoryError(
+                    "a stocktake below zero must name the build order that used "
+                    "the missing stock"
+                )
+            # same shape produce_build's shortage writes: consumed row first,
+            # debt row second, adjacent ids -- _settle_stock_debt pairs them by
+            # `debt.id - 1`, so a later receipt settles this too
+            owed = -count
+            price = part.estimated_price
+            basis = PriceBasis.ESTIMATE if price is not None else PriceBasis.NONE
+            for owed_count in (owed, -owed):
+                s.add(
+                    StockItem(
+                        id=next_id,
+                        count=owed_count,
+                        part_id=part_id,
+                        consumed_by_build_id=build_id,
+                        status=STOCK_CONSUMED if owed_count > 0 else STOCK_AVAILABLE,
+                        unit_price=price,
+                        price_basis=basis,
+                        stocktake_at=at,
+                        stocktake_reason=reason,
+                    )
+                )
+                next_id += 1
+
+    refs = [("part", part_id, part.sku)]
+    if build_id is not None:
+        build = get_build(s, build_id)
+        refs.append(("build", build_id, build.reference or f"BO-{build_id}"))
+    _activity(
+        s,
+        "stocktake",
+        f"Stocktake of {part.description}: {current:g} -> {count:g}"
+        + (f" ({reason})" if reason else ""),
+        refs,
+    )
 
 
 # -- purchasing -------------------------------------------------------------

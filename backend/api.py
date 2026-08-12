@@ -138,10 +138,20 @@ class StockItemOut(BaseModel):
     status: StockStatus
     unit_price: float | None  # what THIS stock is worth per item
     price_basis: PriceBasisOut
+    stocktake_at: datetime | None  # set when a stocktake wrote this row
+    stocktake_reason: str  # "" unless a stocktake wrote this row
 
 
 class StockItemIn(BaseModel):
     part_id: int
+
+
+class StocktakeIn(BaseModel):
+    part_id: int
+    count: float
+    reason: str = ""
+    build_id: int | None = None  # required when count is negative
+    po_id: int | None = None
 
 
 class StockItemPatch(BaseModel):
@@ -623,6 +633,8 @@ def _stock_out(row) -> StockItemOut:
         status=i.status,
         unit_price=i.unit_price,
         price_basis=i.price_basis,
+        stocktake_at=i.stocktake_at,
+        stocktake_reason=i.stocktake_reason or "",
     )
 
 
@@ -636,6 +648,22 @@ def list_stock() -> list[StockItemOut]:
     return _stock_rows()
 
 
+@router.post("/stock/stocktake", response_model=PartOut)
+def stocktake(body: StocktakeIn) -> PartOut:
+    """Correct a part's counted stock. Returns the part, whose in_stock now
+    reflects the count."""
+    _guard(
+        db.stocktake,
+        body.part_id,
+        body.count,
+        body.reason,
+        body.build_id,
+        body.po_id,
+    )
+    return get_part(body.part_id)
+
+
+# registered after /stock/stocktake so the literal path is not read as an id
 @router.get("/stock/{item_id}", response_model=StockItemOut)
 def get_stock(item_id: int) -> StockItemOut:
     for row in _stock_rows():

@@ -175,6 +175,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/stock/stocktake": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stocktake
+         * @description Correct a part's counted stock. Returns the part, whose in_stock now
+         *     reflects the count.
+         */
+        post: operations["stocktake_api_stock_stocktake_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/stock/{item_id}": {
         parameters: {
             query?: never;
@@ -1150,6 +1171,10 @@ export interface components {
              * @enum {string}
              */
             price_basis: "po" | "build" | "build_partial" | "estimate" | "virtual" | "po_no_price" | "none";
+            /** Stocktake At */
+            stocktake_at: string | null;
+            /** Stocktake Reason */
+            stocktake_reason: string;
         };
         /** StockItemPatch */
         StockItemPatch: {
@@ -1215,6 +1240,22 @@ export interface components {
             part_active: boolean;
             /** Part Assembly */
             part_assembly: boolean;
+        };
+        /** StocktakeIn */
+        StocktakeIn: {
+            /** Part Id */
+            part_id: number;
+            /** Count */
+            count: number;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+            /** Build Id */
+            build_id?: number | null;
+            /** Po Id */
+            po_id?: number | null;
         };
         /** SupplierIn */
         SupplierIn: {
@@ -1750,6 +1791,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StockItemOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stocktake_api_stock_stocktake_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StocktakeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartOut"];
                 };
             };
             /** @description Validation Error */

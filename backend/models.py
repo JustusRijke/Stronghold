@@ -156,6 +156,10 @@ class StockItem(Base):
     unit_price: Mapped[float | None] = mapped_column(default=None)
     price_basis: Mapped[str] = mapped_column(default=PriceBasis.NONE)
     price_po_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_orders.id"))
+    # set when a stocktake created this row (a correction, not a PO or build).
+    # Naive local time, like Activity.at.
+    stocktake_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    stocktake_reason: Mapped[str | None] = mapped_column(default=None)
 
 
 class Supplier(Base):

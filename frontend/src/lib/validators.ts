@@ -81,6 +81,13 @@ export const StockItemPatch = v.object({
 	count: v.optional(v.nullable(v.number())),
 	status: v.optional(v.nullable(v.picklist(["Available","Consumed by build order"]))),
 	});
+export const StocktakeIn = v.object({
+	part_id: v.pipe(v.number(), v.integer()),
+	count: v.number(),
+	reason: v.optional(v.string()),
+	build_id: v.optional(v.nullable(v.pipe(v.number(), v.integer()))),
+	po_id: v.optional(v.nullable(v.pipe(v.number(), v.integer()))),
+	});
 export const SupplierIn = v.object({
 	name: v.optional(v.string()),
 	});
