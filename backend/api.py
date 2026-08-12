@@ -30,6 +30,7 @@ from models import (
 )
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.orm import aliased
 
 router = APIRouter(prefix="/api")
 
@@ -128,6 +129,7 @@ class StockItemOut(BaseModel):
     build_id: int | None  # the build that produced this stock
     consumed_by_build_id: int | None  # the build that consumed it
     build_reference: str  # label of build_id, else consumed_by_build_id; "" if neither
+    consumed_by_reference: str  # label of consumed_by_build_id; "" when it is null
     status: StockStatus
     unit_price: float | None  # what THIS stock is worth per item
     price_basis: PriceBasisOut
@@ -493,48 +495,56 @@ def remove_bom_line(line_id: int) -> OkOut:
 # the build a stock row belongs to: its producer, else the build that owes it
 # (a shortfall debt row and its consumed placeholder have no producing build)
 _src_build = func.coalesce(StockItem.build_id, StockItem.consumed_by_build_id)
+# the consuming build needs its own join: when a row has both a producer and a
+# consumer, _src_build names the producer, so nothing else carries this label
+_eater = aliased(BuildOrder)
+
+
+_STOCK_SELECT = (
+    select(
+        StockItem,
+        Part.sku,
+        Part.description,
+        PurchaseOrder.reference,
+        _src_build,
+        BuildOrder.reference,
+        _eater.reference,
+    )
+    .join(Part, StockItem.part_id == Part.id)
+    .join(PurchaseOrder, StockItem.po_id == PurchaseOrder.id, isouter=True)
+    # the build this stock came from: the one that produced it, or
+    # (debt/consumed rows have no producer) the one that owes it
+    .join(BuildOrder, _src_build == BuildOrder.id, isouter=True)
+    .join(_eater, StockItem.consumed_by_build_id == _eater.id, isouter=True)
+    .order_by(StockItem.id)
+)
+
+
+def _stock_out(row) -> StockItemOut:
+    i, sku, desc, po_ref, src_build, build_ref, eater_ref = row
+    return StockItemOut(
+        id=i.id,
+        part_id=i.part_id,
+        sku=sku,
+        description=desc,
+        count=i.count,
+        po_id=i.po_id,
+        po_reference=po_ref or "",
+        build_id=i.build_id,
+        consumed_by_build_id=i.consumed_by_build_id,
+        build_reference=build_ref
+        or (f"BO-{src_build}" if src_build is not None else ""),
+        consumed_by_reference=eater_ref
+        or (f"BO-{i.consumed_by_build_id}" if i.consumed_by_build_id else ""),
+        status=i.status,
+        unit_price=i.unit_price,
+        price_basis=i.price_basis,
+    )
 
 
 def _stock_rows() -> list[StockItemOut]:
     with db.session() as s:
-        return [
-            StockItemOut(
-                id=i.id,
-                part_id=i.part_id,
-                sku=sku,
-                description=desc,
-                count=i.count,
-                po_id=i.po_id,
-                po_reference=po_ref or "",
-                build_id=i.build_id,
-                consumed_by_build_id=i.consumed_by_build_id,
-                build_reference=build_ref
-                or (f"BO-{src_build}" if src_build is not None else ""),
-                status=i.status,
-                unit_price=i.unit_price,
-                price_basis=i.price_basis,
-            )
-            for i, sku, desc, po_ref, src_build, build_ref in s.execute(
-                select(
-                    StockItem,
-                    Part.sku,
-                    Part.description,
-                    PurchaseOrder.reference,
-                    _src_build,
-                    BuildOrder.reference,
-                )
-                .join(Part, StockItem.part_id == Part.id)
-                .join(
-                    PurchaseOrder,
-                    StockItem.po_id == PurchaseOrder.id,
-                    isouter=True,
-                )
-                # the build this stock came from: the one that produced it, or
-                # (debt/consumed rows have no producer) the one that owes it
-                .join(BuildOrder, _src_build == BuildOrder.id, isouter=True)
-                .order_by(StockItem.id)
-            )
-        ]
+        return [_stock_out(r) for r in s.execute(_STOCK_SELECT)]
 
 
 @router.get("/stock", response_model=list[StockItemOut])
@@ -1033,45 +1043,14 @@ def list_build_stock(build_id: int) -> list[StockItemOut]:
     separate columns; status tells consumed rows from available ones."""
     with db.session() as s:
         return [
-            StockItemOut(
-                id=i.id,
-                part_id=i.part_id,
-                sku=sku,
-                description=desc,
-                count=i.count,
-                po_id=i.po_id,
-                po_reference=po_ref or "",
-                build_id=i.build_id,
-                consumed_by_build_id=i.consumed_by_build_id,
-                build_reference=build_ref
-                or (f"BO-{src_build}" if src_build is not None else ""),
-                status=i.status,
-                unit_price=i.unit_price,
-                price_basis=i.price_basis,
-            )
-            for i, sku, desc, po_ref, src_build, build_ref in s.execute(
-                select(
-                    StockItem,
-                    Part.sku,
-                    Part.description,
-                    PurchaseOrder.reference,
-                    _src_build,
-                    BuildOrder.reference,
-                )
-                .join(Part, StockItem.part_id == Part.id)
-                .join(
-                    PurchaseOrder,
-                    StockItem.po_id == PurchaseOrder.id,
-                    isouter=True,
-                )
-                .join(BuildOrder, _src_build == BuildOrder.id, isouter=True)
-                .where(
+            _stock_out(r)
+            for r in s.execute(
+                _STOCK_SELECT.where(
                     or_(
                         StockItem.build_id == build_id,
                         StockItem.consumed_by_build_id == build_id,
                     )
                 )
-                .order_by(StockItem.id)
             )
         ]
 

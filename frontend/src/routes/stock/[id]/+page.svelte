@@ -68,10 +68,21 @@
 				{/if}
 				{#if item.build_id}
 					<p>
-						Build order:
-						<a class="mono" href={`/build-orders/${item.build_id}`}>{item.build_id}</a>
+						Built by:
+						<a class="mono" href={`/build-orders/${item.build_id}`}
+							>{item.build_reference || item.build_id}</a
+						>
 					</p>
 				{/if}
+				{#if item.consumed_by_build_id}
+					<p>
+						Consumed by:
+						<a class="mono" href={`/build-orders/${item.consumed_by_build_id}`}
+							>{item.consumed_by_reference || item.consumed_by_build_id}</a
+						>
+					</p>
+				{/if}
+				<p>Status: {item.status}</p>
 				<p>
 					Value:
 					{#if item.unit_price === null}
