@@ -92,14 +92,18 @@ Open-source inventory/stock tracking for small and medium businesses.
 - Consumed stock is never destroyed -- it is recorded as a "Consumed by build
   order" item linked to the build and its source purchase, so you can trace
   exactly which stock went into each build (and what it cost)
-- Correct a counted quantity with **Stocktake**, on the part, supplier part and
-  stock pages. Counting more adds an item for the surplus; counting less draws
-  the difference down oldest-first and needs a reason (Damaged, Warranty claim
-  by customer, Unknown, or your own). Nothing is destroyed -- what left is kept
-  as a consumed item with the reason and date, so it stays traceable. Counting
-  below zero means a build used stock that was never booked, so it asks which
-  build order: the shortfall becomes a negative item that settles when the parts
-  are received, exactly like a build shortfall
+- Correct a counted quantity with **Stocktake** on the part page. Every
+  stocktake needs a reason -- click Damaged, Warranty claim by customer or Lost,
+  or type your own. Counting more adds an item for the surplus; counting less
+  comes off a stock item you pick (the oldest by default), and what left is kept
+  as a consumed item carrying the reason and date, so nothing is destroyed and
+  the price it was bought at stays traceable. Stock counts are corrected here
+  and nowhere else -- the stock page shows a count but does not edit it
+- **Add negative stock item**, also on the part page, records stock a build
+  consumed that was never booked in -- mostly a repair for imported build orders
+  completed without their stock fully allocated. It offers only the build orders
+  whose components actually include the part, and the shortfall settles itself
+  when the parts are received on a purchase order
 - Each stock item carries its own value, shown on the stock page: what the
   purchase order it came from actually paid. This is deliberately not the part's
   current price -- a batch bought last year at 0.07 stays worth 0.07 even if the
