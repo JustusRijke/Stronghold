@@ -367,9 +367,9 @@ def _po_unit_price_for(
 def build_unit_cost(s: Session, build_id: int) -> tuple[float | None, bool]:
     """(cost per produced unit, exact) for a build order, from the stock it
     actually consumed. `exact` is False when some consumed row had no price of
-    its own, or when the build consumed less than its BOM asks (a shortage: the
-    real assembly costs more than what was taken). Returns (None, False) when
-    nothing was consumed or nothing produced.
+    its own or was itself a guess -- which covers a shortage, since the missing
+    quantity is consumed at the part's estimate until the parts are received.
+    Returns (None, False) when nothing was consumed or nothing produced.
 
     Consumed rows are priced first (they are inputs), so this reads their
     already-resolved unit_price -- it does not re-derive component prices."""
@@ -1131,6 +1131,76 @@ def _check_po_line_editable(s: Session, line: POLine) -> None:
         )
 
 
+def _settle_stock_debt(s: Session, item: StockItem) -> float:
+    """Pay off outstanding build shortfalls for a part out of freshly received
+    stock. A shortfall left a negative Available row plus a placeholder consumed
+    row priced at the part's estimate; the parts have now arrived, so the debt
+    shrinks toward zero and the consumed row is stamped with this PO and
+    repriced to what was actually paid -- the build stops being costed at a
+    guess. Settled units never reach the shelf, so `item` is reduced by them.
+    Returns the quantity settled."""
+    debts = s.scalars(
+        select(StockItem)
+        .where(
+            StockItem.part_id == item.part_id,
+            StockItem.status == STOCK_AVAILABLE,
+            StockItem.count < 0,
+            StockItem.consumed_by_build_id.is_not(None),
+        )
+        .order_by(StockItem.id)
+    ).all()
+    next_id = (s.scalar(select(func.max(StockItem.id))) or 0) + 1
+    settled = 0.0
+    builds: set[int] = set()
+    for debt in debts:
+        if item.count <= 1e-9:
+            break
+        # produce_build writes the pair together, consumed row first, so the
+        # placeholder is the debt's immediate predecessor. Matching on
+        # build+part instead would pick up the rows consumed from real stock.
+        placeholder = s.get(StockItem, debt.id - 1)
+        if (
+            placeholder is None
+            or placeholder.status != STOCK_CONSUMED
+            or placeholder.consumed_by_build_id != debt.consumed_by_build_id
+            or placeholder.part_id != debt.part_id
+        ):
+            continue  # hand-edited data: no consumption to reprice, leave it
+        pay = min(-debt.count, item.count, placeholder.count)
+        if pay <= 1e-9:
+            continue
+        if pay < placeholder.count - 1e-9:
+            # partial receipt: only the settled units get this PO's price, the
+            # rest stay owed at the estimate
+            placeholder.count -= pay
+            placeholder = StockItem(
+                id=next_id,
+                count=pay,
+                part_id=debt.part_id,
+                consumed_by_build_id=debt.consumed_by_build_id,
+                status=STOCK_CONSUMED,
+            )
+            s.add(placeholder)
+            next_id += 1
+        placeholder.po_id = item.po_id
+        s.flush()
+        refresh_stock_price(s, placeholder)
+        debt.count += pay
+        item.count -= pay
+        settled += pay
+        builds.add(debt.consumed_by_build_id)  # ty: ignore[invalid-argument-type]
+    # the assemblies those builds produced were costed off the estimate; now
+    # that their inputs are real, reprice the output
+    for build_id in builds:
+        for produced in s.scalars(
+            select(StockItem).where(
+                StockItem.build_id == build_id, StockItem.status == STOCK_AVAILABLE
+            )
+        ):
+            refresh_stock_price(s, produced)
+    return settled
+
+
 @_write
 def book_po_line(s: Session, line_id: int, stock_item_id: int, quantity: float) -> None:
     """Receive `quantity` ordered units of a PO line into stock, in one
@@ -1159,7 +1229,9 @@ def book_po_line(s: Session, line_id: int, stock_item_id: int, quantity: float) 
     s.flush()  # stock item must exist before the booking FK references it
     s.add(Booking(stock_item_id=stock_item_id, po_line_id=line_id))
     s.flush()  # the booking must exist before the new stock is priced from it
-    refresh_stock_price(s, get_item(s, stock_item_id))
+    item = get_item(s, stock_item_id)
+    refresh_stock_price(s, item)
+    settled = _settle_stock_debt(s, item)
     part = get_part(s, supplier_part.part_id)
     po = get_po(s, line.po_id)
     po_label = po.reference or f"PO-{po.id}"
@@ -1173,6 +1245,13 @@ def book_po_line(s: Session, line_id: int, stock_item_id: int, quantity: float) 
             ("stock", stock_item_id, f"{count:g}x {part.description}"),
         ],
     )
+    if settled:
+        _activity(
+            s,
+            "settle_stock_debt",
+            f"{settled:g}x {part.description} went to build shortfalls",
+            [("po", po.id, po_label), ("part", part.id, part.description)],
+        )
     _complete_po_if_fully_received(s, line.po_id)
 
 
@@ -1348,10 +1427,13 @@ def produce_build(s: Session, build_id: int, quantity: int) -> None:
     one new Available item stamped build_id. When cumulative production reaches
     the order quantity the status flips to Complete.
 
-    Shortages do not block: a short component is drained to zero (never below),
-    so the consumed rows may total less than the BOM asks -- the user chose to
-    produce anyway. Available stock never goes negative. Virtual components are
-    unlimited: never consumed."""
+    Shortages do not block: a short component is drained to zero and the missing
+    quantity becomes a debt -- a consumed row at the part's estimate (so the
+    assembly is costed in full) plus a NEGATIVE Available row stamped with this
+    build, which nets out of on-hand counts and the stock value report. Booking
+    the missing parts on a PO later settles that debt and reprices the
+    consumption to what was actually paid. Virtual components are unlimited:
+    never consumed."""
     build = get_build(s, build_id)
     if build.status == BuildStatus.COMPLETE:
         raise InventoryError(f"build order {build_id} is already complete")
@@ -1397,6 +1479,7 @@ def produce_build(s: Session, build_id: int, quantity: int) -> None:
             .where(
                 StockItem.part_id == component_id,
                 StockItem.status == STOCK_AVAILABLE,
+                StockItem.count > 0,  # never "consume" an outstanding debt row
             )
             .order_by(StockItem.id)
         ).all()
@@ -1425,6 +1508,30 @@ def produce_build(s: Session, build_id: int, quantity: int) -> None:
                 )
             )
             next_id += 1
+        # FIFO left need > 0: stock ran short. The build used these parts
+        # anyway, so record them consumed at the part's estimate (so
+        # build_unit_cost costs the assembly in full, as an estimate rather
+        # than a floor) and carry the debt as a negative Available row. When
+        # the parts arrive, book_po_line settles the debt and reprices the
+        # consumed row to what was actually paid.
+        if need > 1e-9:
+            price = get_part(s, component_id).estimated_price
+            basis = PriceBasis.ESTIMATE if price is not None else PriceBasis.NONE
+            # consumed row first, debt row second, always adjacent ids:
+            # _settle_stock_debt pairs them by `debt.id - 1`
+            for count in (need, -need):
+                s.add(
+                    StockItem(
+                        id=next_id,
+                        count=count,
+                        part_id=component_id,
+                        consumed_by_build_id=build_id,
+                        status=STOCK_CONSUMED if count > 0 else STOCK_AVAILABLE,
+                        unit_price=price,
+                        price_basis=basis,
+                    )
+                )
+                next_id += 1
 
     s.add(
         StockItem(
