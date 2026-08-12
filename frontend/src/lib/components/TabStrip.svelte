@@ -19,22 +19,18 @@
 		if (activeId === id) goto(next === null ? base : `${base}/${next}`);
 	}
 
-	function closeAll() {
-		const wasOpen = activeId !== null;
-		tabs.closeAll();
-		if (wasOpen) goto(base);
-	}
+	let menuAt = $state<{ x: number; y: number; id: number } | null>(null);
 
-	let menuAt = $state<{ x: number; y: number } | null>(null);
-
-	function openMenu(e: MouseEvent) {
+	function openMenu(e: MouseEvent, id: number) {
 		e.preventDefault();
-		menuAt = { x: e.clientX, y: e.clientY };
+		menuAt = { x: e.clientX, y: e.clientY, id };
 	}
 
-	function closeAllFromMenu() {
+	// keep undefined closes everything; otherwise all but that tab
+	function closeAllFromMenu(keep?: number) {
 		menuAt = null;
-		closeAll();
+		tabs.closeAll(keep);
+		if (activeId !== null && activeId !== keep) goto(keep === undefined ? base : `${base}/${keep}`);
 	}
 </script>
 
@@ -45,7 +41,7 @@
 			href={`${base}/${t.id}`}
 			class:active={activeId === t.id}
 			class="parttab"
-			oncontextmenu={openMenu}
+			oncontextmenu={(e) => openMenu(e, t.id)}
 		>
 			<span class="tablabel">{t.label}</span>
 			<button
@@ -60,8 +56,10 @@
 
 {#if menuAt}
 	<button class="menu-overlay" aria-label="Dismiss menu" onclick={() => (menuAt = null)}></button>
+	{@const menuId = menuAt.id}
 	<div class="ctxmenu" style="left: {menuAt.x}px; top: {menuAt.y}px">
-		<button onclick={closeAllFromMenu}>Close all tabs</button>
+		<button onclick={() => closeAllFromMenu()}>Close All</button>
+		<button onclick={() => closeAllFromMenu(menuId)}>Close Others</button>
 	</div>
 {/if}
 
