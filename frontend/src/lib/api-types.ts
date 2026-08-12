@@ -49,7 +49,7 @@ export interface paths {
         };
         /**
          * List Part Pos
-         * @description POs that ordered this part (through any of its supplier parts).
+         * @description POs that ordered this part, with what this part cost on each.
          */
         get: operations["list_part_pos_api_parts__part_id__purchase_orders_get"];
         put?: never;
@@ -929,6 +929,32 @@ export interface components {
             /** Estimated Price */
             estimated_price?: number | null;
         };
+        /** PartPurchaseOrderOut */
+        PartPurchaseOrderOut: {
+            /** Id */
+            id: number;
+            /** Supplier Id */
+            supplier_id: number;
+            /** Reference */
+            reference: string;
+            /** Status */
+            status: string;
+            /**
+             * Start Date
+             * Format: date
+             */
+            start_date: string;
+            /** End Date */
+            end_date: string | null;
+            /** Delivery Cost */
+            delivery_cost: number;
+            /** Supplier Reference */
+            supplier_reference: string;
+            /** Quantity */
+            quantity: number;
+            /** Unit Price */
+            unit_price?: number | null;
+        };
         /** ProduceIn */
         ProduceIn: {
             /** Quantity */
@@ -1383,7 +1409,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PurchaseOrderOut"][];
+                    "application/json": components["schemas"]["PartPurchaseOrderOut"][];
                 };
             };
             /** @description Validation Error */

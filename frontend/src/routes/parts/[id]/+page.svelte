@@ -6,7 +6,9 @@
 	import { partTabs } from '$lib/tabs.svelte';
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
-	import type { Part, BomLine, BomUsage, POLine, PurchaseOrder, StockItem, Supplier, SupplierPart } from '$lib/types';
+	import type { Part, BomLine, BomUsage, POLine, PartPurchaseOrder, PurchaseOrder, StockItem, Supplier, SupplierPart } from '$lib/types';
+
+	type PartPO = PartPurchaseOrder & { supplier_name: string };
 	import { PO_STATUS_OPTIONS, stockOrderLabel, stockOrderUrl } from '$lib/status';
 	import { STATUS_OPTIONS as STOCK_STATUS_OPTIONS } from '$lib/validators';
 
@@ -20,7 +22,7 @@
 	// related data (cross-links)
 	let supplierParts = $state<(SupplierPart & { supplier_name: string })[]>([]);
 	let stock = $state<StockItem[]>([]);
-	let pos = $state<PurchaseOrder[]>([]);
+	let pos = $state<PartPO[]>([]);
 	let usedIn = $state<BomUsage[]>([]);
 
 	// new-bom-line inputs
@@ -81,7 +83,7 @@
 		if (await toast.run(() => api.editPoLine(line.id, { quantity: line.quantity + qty }))) {
 			poDialog?.close();
 			toast.show('Added to existing PO line', 'ok');
-			pos = await api.partPos(id);
+			load();
 		}
 	}
 	async function addAsNewLine(po: PurchaseOrder, sp: SupplierPart, qty: number) {
@@ -137,7 +139,7 @@
 			.filter((sp) => sp.part_id === id)
 			.map((sp) => ({ ...sp, supplier_name: supplierName.get(sp.supplier_id) ?? '' }));
 		stock = allStock.filter((s) => s.part_id === id);
-		pos = partPos;
+		pos = partPos.map((po) => ({ ...po, supplier_name: supplierName.get(po.supplier_id) ?? '' }));
 		usedIn = usage;
 	}
 	$effect(() => {
@@ -233,8 +235,19 @@
 			statusDefaultHide: ['Consumed by build order']
 		}
 	];
-	const poCols: Column<PurchaseOrder>[] = [
+	const poCols: Column<PartPO>[] = [
 		{ key: 'reference', header: 'PO', mono: true, width: '150px' },
+		{ key: 'supplier_name', header: 'Supplier', truncate: true },
+		{ key: 'supplier_reference', header: 'Supplier ref', truncate: true },
+		{ key: 'quantity', header: 'Qty', mono: true, width: '90px' },
+		{
+			key: 'unit_price',
+			header: 'Unit price',
+			mono: true,
+			width: '110px',
+			format: (v) => price(v as number | null)
+		},
+		{ key: 'start_date', header: 'Ordered', width: '120px' },
 		{
 			key: 'status',
 			header: 'Status',
@@ -458,6 +471,7 @@
 							rows={pos}
 							href={(po) => `/purchase-orders/${po.id}`}
 							storageKey={`/parts/${id}/pos`}
+							defaultSort={{ key: 'start_date', dir: 'desc' }}
 							onAdd={addPo}
 						/>
 					</section>

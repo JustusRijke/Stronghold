@@ -7,6 +7,7 @@ import type {
 	StockItem,
 	Supplier,
 	SupplierPart,
+	PartPurchaseOrder,
 	PurchaseOrder,
 	POLine,
 	BuildOrder,
@@ -56,7 +57,7 @@ export const api = {
 	// parts
 	parts: () => get<Part[]>('/parts'),
 	part: (id: number) => get<Part>(`/parts/${id}`),
-	partPos: (id: number) => get<PurchaseOrder[]>(`/parts/${id}/purchase-orders`),
+	partPos: (id: number) => get<PartPurchaseOrder[]>(`/parts/${id}/purchase-orders`),
 	partUsedIn: (id: number) => get<BomUsage[]>(`/parts/${id}/used-in`),
 	partBuilds: (id: number) => get<BuildOrder[]>(`/parts/${id}/builds`),
 	createPart: (b: { sku: string; description: string; virtual?: boolean }) =>
