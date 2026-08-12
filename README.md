@@ -12,7 +12,10 @@ Open-source inventory/stock tracking for small and medium businesses.
   data grid with a search box under each column header; each row is a link to its
   detail page (left-click opens it, right-click opens it in a new tab), where all
   editing happens. Add records with the "Add" button; remove asks to confirm. The
-  parts list also shows each part's total stock on hand
+  parts list also shows each part's total stock on hand, how many units the
+  build orders currently in production still have to consume ("Needed"), how
+  many are still to be received on open purchase orders ("On order"), and the
+  resulting shortfall to buy ("To order" = needed - in stock - on order)
 - Detail pages let you edit every user-facing field (a purchase order's status,
   dates, and costs, a supplier part's pack size, and so on); related records
   (a part's stock, supplier parts, and orders) appear as the same filterable,
@@ -22,8 +25,11 @@ Open-source inventory/stock tracking for small and medium businesses.
   block you, a "+" beside it creates one inline without leaving the page. Buying
   a brand-new part is therefore one page: create the part and the supplier from
   the new supplier part form, then "Purchase this part" raises the order and its
-  first line in one go, asking for the quantity and price per pack (prefilled
-  from that supplier part's own last purchase price, else the part's estimate)
+  first line in one go, asking for the quantity and price per pack (the price
+  prefilled from that supplier part's own last purchase price, else the part's
+  estimate; the quantity prefilled with enough packs to cover the shortfall,
+  rounded up per supplier part because pack sizes differ). The part page shows
+  the same in stock / needed / on order / suggested figures
 - A part's supplier parts table shows what each supplier last charged per item
   (the line price divided by the pack size, to 4 decimals) and the date of that
   order, so the cheapest source is visible at a glance. The 🛒 button on a row
