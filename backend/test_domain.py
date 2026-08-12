@@ -373,44 +373,53 @@ def test_shortfall_settled_by_whole_po_receipt(database):
 
 
 def test_stocktake_up_and_down(database):
-    """Counting more adds stock; counting less draws it down FIFO, splitting off
-    consumed rows so what left stays traceable."""
+    """Counting more adds stock; counting less comes off one item, splitting off
+    a consumed row so what left stays traceable."""
     db.create_part(1, "BOLT", "a bolt")
-    db.stocktake(1, 10, "Unknown")
+    db.stocktake(1, 10, "Lost")
     with db.session() as s:
         assert db.on_hand(s, 1) == 10
         added = s.scalars(select(StockItem).where(StockItem.part_id == 1)).one()
-        assert added.stocktake_reason == "Unknown"
+        assert added.stocktake_reason == "Lost"
         assert added.stocktake_at is not None
 
-    # a second, older row so the drawdown has two sources to walk
+    # a second row, so "oldest by default" has something to choose between
     db.create_item(db.next_item_id(), 1)
     db.set_count(2, 5)
-    db.stocktake(1, 4, "Damaged")  # 15 on hand -> 4: 11 leave, oldest first
+    db.stocktake(1, 12, "Damaged")  # 15 -> 12: 3 off the oldest item
     with db.session() as s:
-        assert db.on_hand(s, 1) == 4
-        assert s.get(StockItem, 1).count == 0  # the 10 row drained first
-        assert s.get(StockItem, 2).count == 4  # then 1 off the 5 row
+        assert db.on_hand(s, 1) == 12
+        assert s.get(StockItem, 1).count == 7  # taken off the oldest
+        assert s.get(StockItem, 2).count == 5  # untouched
         gone = s.scalars(
             select(StockItem).where(
                 StockItem.part_id == 1, StockItem.status == STOCK_CONSUMED
             )
-        ).all()
-        assert sum(g.count for g in gone) == 11
-        assert {g.stocktake_reason for g in gone} == {"Damaged"}
+        ).one()
+        assert (gone.count, gone.stocktake_reason) == (3, "Damaged")
+
+    # naming an item takes it off that one instead
+    db.stocktake(1, 10, "Damaged", item_id=2)
+    with db.session() as s:
+        assert s.get(StockItem, 1).count == 7  # still untouched
+        assert s.get(StockItem, 2).count == 3
 
 
-def test_stocktake_lower_needs_a_reason(database):
+def test_stocktake_rejects_no_reason_and_going_negative(database):
     db.create_part(1, "BOLT", "a bolt")
-    db.stocktake(1, 5, "Unknown")
+    db.stocktake(1, 5, "Lost")
     with pytest.raises(db.InventoryError):
-        db.stocktake(1, 2)
+        db.stocktake(1, 2, "")  # every stocktake needs a reason
+    with pytest.raises(db.InventoryError):
+        db.stocktake(1, -1, "Lost")  # below zero is add_negative_stock's job
+    with pytest.raises(db.InventoryError):
+        db.stocktake(1, 1, "Damaged", item_id=99)  # not this part's stock
 
 
 def test_negative_stocktake_settled_by_purchase(database):
-    """Counting below zero means a build ate stock that was never booked. The
-    debt must take the same shape produce_build's shortfall does -- adjacent
-    consumed/debt rows -- or a later receipt would not settle it."""
+    """Stock a build used but nobody booked. The debt must take the same shape
+    produce_build's shortfall does -- adjacent consumed/debt rows -- or a later
+    receipt would not settle it."""
     db.create_part(1, "ASM", "an assembly")
     db.create_part(2, "COMP", "a component")
     db.set_part_assembly(1, True)
@@ -423,9 +432,7 @@ def test_negative_stocktake_settled_by_purchase(database):
     build_id = db.next_build_id()
     db.create_build(build_id, 1, 1)
 
-    with pytest.raises(db.InventoryError):
-        db.stocktake(2, -3, "Unknown")  # below zero without naming a build
-    db.stocktake(2, -3, "Unknown", build_id=build_id)
+    db.add_negative_stock(2, 3, build_id)
     with db.session() as s:
         assert db.on_hand(s, 2) == -3
         debt = s.scalars(

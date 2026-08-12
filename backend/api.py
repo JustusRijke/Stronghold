@@ -148,10 +148,18 @@ class StockItemIn(BaseModel):
 
 class StocktakeIn(BaseModel):
     part_id: int
-    count: float
-    reason: str = ""
-    build_id: int | None = None  # required when count is negative
+    count: float = Field(ge=0)  # below zero is NegativeStockIn's job
+    reason: str = Field(min_length=1)
+    item_id: int | None = None  # to take from when lowering; oldest if null
+    build_id: int | None = None
     po_id: int | None = None
+
+
+class NegativeStockIn(BaseModel):
+    part_id: int
+    quantity: float = Field(gt=0)
+    build_id: int
+    reason: str = ""
 
 
 class StockItemPatch(BaseModel):
@@ -657,8 +665,22 @@ def stocktake(body: StocktakeIn) -> PartOut:
         body.part_id,
         body.count,
         body.reason,
+        body.item_id,
         body.build_id,
         body.po_id,
+    )
+    return get_part(body.part_id)
+
+
+@router.post("/stock/negative", response_model=PartOut)
+def add_negative_stock(body: NegativeStockIn) -> PartOut:
+    """Record stock a build used that was never booked in (an import repair)."""
+    _guard(
+        db.add_negative_stock,
+        body.part_id,
+        body.quantity,
+        body.build_id,
+        body.reason,
     )
     return get_part(body.part_id)
 

@@ -28,6 +28,12 @@ export const BuildOrderPatch = v.object({
 	start_date: v.optional(v.nullable(v.string())),
 	end_date: v.optional(v.nullable(v.string())),
 	});
+export const NegativeStockIn = v.object({
+	part_id: v.pipe(v.number(), v.integer()),
+	quantity: v.pipe(v.number(), v.gtValue(0, 'must be greater than 0')),
+	build_id: v.pipe(v.number(), v.integer()),
+	reason: v.optional(v.string()),
+	});
 export const POLineIn = v.object({
 	supplier_part_id: v.pipe(v.number(), v.integer()),
 	quantity: v.pipe(v.number(), v.integer(), v.gtValue(0, 'must be greater than 0')),
@@ -83,8 +89,9 @@ export const StockItemPatch = v.object({
 	});
 export const StocktakeIn = v.object({
 	part_id: v.pipe(v.number(), v.integer()),
-	count: v.number(),
-	reason: v.optional(v.string()),
+	count: v.pipe(v.number(), v.minValue(0)),
+	reason: v.string(),
+	item_id: v.optional(v.nullable(v.pipe(v.number(), v.integer()))),
 	build_id: v.optional(v.nullable(v.pipe(v.number(), v.integer()))),
 	po_id: v.optional(v.nullable(v.pipe(v.number(), v.integer()))),
 	});

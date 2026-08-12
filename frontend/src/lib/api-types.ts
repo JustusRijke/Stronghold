@@ -196,6 +196,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/stock/negative": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Negative Stock
+         * @description Record stock a build used that was never booked in (an import repair).
+         */
+        post: operations["add_negative_stock_api_stock_negative_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/stock/{item_id}": {
         parameters: {
             query?: never;
@@ -869,6 +889,20 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** NegativeStockIn */
+        NegativeStockIn: {
+            /** Part Id */
+            part_id: number;
+            /** Quantity */
+            quantity: number;
+            /** Build Id */
+            build_id: number;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
         /** OkOut */
         OkOut: {
             /**
@@ -1247,11 +1281,10 @@ export interface components {
             part_id: number;
             /** Count */
             count: number;
-            /**
-             * Reason
-             * @default
-             */
+            /** Reason */
             reason: string;
+            /** Item Id */
+            item_id?: number | null;
             /** Build Id */
             build_id?: number | null;
             /** Po Id */
@@ -1814,6 +1847,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["StocktakeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_negative_stock_api_stock_negative_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NegativeStockIn"];
             };
         };
         responses: {
