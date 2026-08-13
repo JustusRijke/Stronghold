@@ -23,6 +23,8 @@
 	let stockLog = $state<StockLogEntry[]>([]);
 	let bom = $state<BomLine[]>([]);
 	let activeParts = $state<Part[]>([]);
+	// label for the part a build makes -- inactive ones included, history still shows them
+	let partLabel = $state(new Map<number, string>());
 
 	// related data (cross-links)
 	let supplierParts = $state<(SupplierPart & { supplier_name: string })[]>([]);
@@ -171,6 +173,7 @@
 		stockLog = log;
 		bom = bomLines;
 		activeParts = allParts.filter((p) => p.active);
+		partLabel = new Map(allParts.map((p) => [p.id, p.description || p.sku || `Part ${p.id}`]));
 		const supplierName = new Map(allSuppliers.map((s) => [s.id, s.name]));
 		supplierParts = allSupplierParts
 			.filter((sp) => sp.part_id === id)
@@ -347,6 +350,19 @@
 	function buildColumns(mine: boolean): Column<PartBuild>[] {
 		return [
 			{ key: 'reference', header: 'Build', mono: true, width: '150px' },
+			// which part the build makes -- only worth a column when the table lists
+			// other parts' builds; "mine" is this part, in every row
+			...(mine
+				? []
+				: ([
+						{
+							key: 'part_id',
+							header: 'Builds',
+							truncate: true,
+							format: (v) => partLabel.get(v as number) ?? `Part ${v}`,
+							cellHref: (b) => `/parts/${b.part_id}`
+						}
+					] as Column<PartBuild>[])),
 			{ key: 'description', header: 'Description', truncate: true },
 			{ key: 'quantity', header: 'Qty', mono: true, width: '90px' },
 			...(mine
@@ -369,7 +385,7 @@
 		];
 	}
 	const buildCols = $derived(buildColumns(!!part?.assembly));
-	const consumedByCols = buildColumns(false);
+	const consumedByCols = $derived(buildColumns(false));
 	const usedInCols: Column<BomUsage>[] = [
 		{ key: 'parent_sku', header: 'Assembly', mono: true, width: '150px' },
 		{ key: 'parent_description', header: 'Description', truncate: true },
