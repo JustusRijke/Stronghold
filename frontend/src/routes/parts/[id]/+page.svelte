@@ -582,7 +582,7 @@
 					<DataTable
 						columns={logCols}
 						rows={logRows}
-						href={(r) => `/stock/${r.item_id}#${r.kind}`}
+						href={(r) => (r.item_id ? `/stock/${r.item_id}#${r.kind}` : r.order_url)}
 						storageKey={`/parts/${id}/stock-log-v2`}
 						defaultSort={{ key: 'when', dir: 'desc' }}
 					/>
