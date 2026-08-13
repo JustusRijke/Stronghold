@@ -206,16 +206,35 @@ This matters when you later change the rate. Put your labour rate up from 10 to
 15 and nothing already built moves: past builds stay costed at 10, because
 that is what they actually cost. Only builds produced from then on use 15.
 
-The freeze is deliberate and absolute -- no repricing anywhere in the app will
-overwrite an already-recorded virtual rate, including the "Recalculate all part
-prices" maintenance action. It is the one price that is never recomputed.
+Nothing overwrites an already-recorded virtual rate -- not even the
+"Recalculate all part prices" maintenance action.
 
-The single exception is a virtual part that had **no** price at all when the
-build was produced. There was nothing to freeze, so it shows as "No price
-known", and giving the part a price will fill it in.
+### But changing the rate does move some figures
 
-Historical builds brought in from an InvenTree import work the same way, with
-one caveat: InvenTree keeps no record of what labour cost at the time, so those
-builds are baselined at the rate the part had on the day of the import. That
-figure is a starting point, not history -- but once imported it is frozen like
-any other.
+The freeze covers what a build **actually consumed**. It does not cover
+estimates, and the difference is worth understanding, because changing a labour
+rate visibly moves the stock value report.
+
+Raising the rate changes the **estimated price** of every assembly that has that
+virtual part anywhere in its recipe. Estimates are recalculated from the current
+recipe at the current rate -- that is what makes them estimates. Stock priced
+that way therefore revalues:
+
+| Stock priced by | Effect of changing the rate |
+| --- | --- |
+| Build order (`Build order`, `Build order (partly estimated)`) | **Unchanged.** Costed from what the build really consumed, at the frozen rate. |
+| Part price estimate | **Revalues.** It was never built, so it is valued at what it *would* cost today. |
+
+So a rate change moves the value of assembly stock you never actually built,
+and leaves everything you did build alone. If the report jumps after a rate
+change, filter "Priced by" to `Part price estimate` to see exactly which rows
+moved.
+
+Two footnotes:
+
+- A virtual part with **no** price when the build was produced had nothing to
+  freeze. It shows as "No price known", and giving the part a price fills it in.
+- Historical builds from an InvenTree import are baselined at the rate the part
+  had on the day of the import, because InvenTree keeps no record of what labour
+  cost at the time. That figure is a starting point rather than real history --
+  but it is frozen from then on, exactly like a build produced here.
