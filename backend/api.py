@@ -154,7 +154,9 @@ class StockLogEntryOut(BaseModel):
     left behind. Rows are the log: consuming stock splits a row rather than
     destroying it, so every event survives as its own row."""
 
-    item_id: int
+    # null for imported production: InvenTree deleted the stock, so the event is
+    # reconstructed from the build's own count and has no row to link to
+    item_id: int | None
     kind: StockEventKind
     at: datetime | None  # exact only for stocktakes; else the order's date
     at_approx: bool  # True when `at` came from a PO/build date, not the event
@@ -664,6 +666,49 @@ def _stock_log_entries(
     return entries
 
 
+def _imported_production_entries(part_id: int) -> list[StockLogEntryOut]:
+    """Production the stock rows cannot show: InvenTree deletes fully-used
+    stock, so a migrated build's output often left no row behind and the log
+    read empty for a part with a decade of builds.
+
+    `BuildOrder.imported_produced` is what InvenTree said the build made; the
+    surviving rows are what we can still see. The difference is the missing
+    history, emitted as one synthetic entry per build -- same `max(...)`
+    baseline `db.produced_qty` uses, so the log agrees with the build page."""
+    with db.session() as s:
+        rows = s.execute(
+            select(
+                BuildOrder,
+                func.coalesce(func.sum(StockItem.count), 0.0),
+            )
+            .join(StockItem, StockItem.build_id == BuildOrder.id, isouter=True)
+            .where(BuildOrder.part_id == part_id, BuildOrder.imported_produced > 0)
+            .group_by(BuildOrder.id)
+        ).all()
+    entries = []
+    for b, from_stock in rows:
+        missing = float(b.imported_produced) - (from_stock or 0.0)
+        if missing < 1e-9:
+            continue
+        entries.append(
+            StockLogEntryOut(
+                item_id=None,  # the stock row is gone; nothing to link to
+                kind="produced",
+                at=b.start_date,
+                at_approx=b.start_date is not None,
+                quantity=missing,
+                drawn_down=False,
+                reason="",
+                order_label=b.reference or f"BO-{b.id}",
+                order_url=f"/build-orders/{b.id}",
+                # the stock is gone, so nothing records what it cost
+                unit_price=None,
+                price_basis="none",
+            )
+        )
+    return entries
+
+
 @router.get("/parts/{part_id}/stock-log", response_model=list[StockLogEntryOut])
 def list_part_stock_log(part_id: int) -> list[StockLogEntryOut]:
     """What happened to this part's stock, oldest first (the table shows it
@@ -715,15 +760,20 @@ def list_part_stock_log(part_id: int) -> list[StockLogEntryOut]:
         if r[0].po_id in reported_pos or r[0].build_id in reported_builds
     }
     entries = [e for r in rows for e in _stock_log_entries(r, booked, split_of)]
+    entries += _imported_production_entries(part_id)
     # ids are strictly max+1, so they order events that share a date -- which
     # whole batches do, every row of one order carrying that order's date.
     # Pydantic has widened every `at` to datetime, so order dates (midnight)
     # and a stocktake's exact time compare cleanly.
+    # a reconstructed event has no stock row; sort it alongside id 0, which is
+    # below every real id, so it leads the batch it belongs to
     dated = [e for e in entries if e.at is not None]
-    dated.sort(key=lambda e: (e.at, e.item_id))
+    dated.sort(key=lambda e: (e.at, e.item_id or 0))
     # rows with no order and no stocktake carry no date at all; keep them last,
     # in id order, rather than inventing a position for them
-    return dated + sorted((e for e in entries if e.at is None), key=lambda e: e.item_id)
+    return dated + sorted(
+        (e for e in entries if e.at is None), key=lambda e: e.item_id or 0
+    )
 
 
 @router.get("/parts/{part_id}/consumed-by", response_model=list[PartBuildOut])

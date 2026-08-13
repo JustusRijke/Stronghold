@@ -1182,3 +1182,31 @@ def test_order_references_default_and_stay_unique(client):
         ).status_code
         == 200
     )
+
+
+def test_stock_log_reconstructs_deleted_production(client):
+    """InvenTree deletes fully-used stock, so a migrated build can leave no row
+    behind; the log reconstructs it from imported_produced without
+    double-counting the units whose rows did survive."""
+    asm = client.post("/api/parts", json={"sku": "A", "description": "asm"}).json()[
+        "id"
+    ]
+    client.patch(f"/api/parts/{asm}", json={"assembly": True})
+    bid = client.post(
+        "/api/build-orders", json={"description": "d", "part_id": asm, "quantity": 10}
+    ).json()["id"]
+    # only the importer sets this, so there is no route to go through
+    with db.session() as s:
+        db.get_build(s, bid).imported_produced = 10
+        s.commit()
+
+    def produced():
+        rows = client.get(f"/api/parts/{asm}/stock-log").json()
+        return [e for e in rows if e["kind"] == "produced"]
+
+    # nothing survived: the whole batch is reconstructed, with no row to link to
+    assert [(e["quantity"], e["item_id"]) for e in produced()] == [(10.0, None)]
+
+    # a surviving row reports itself, so only the remainder is reconstructed
+    client.post("/api/stock", json={"part_id": asm, "count": 4, "build_id": bid})
+    assert sum(e["quantity"] for e in produced()) == 10.0

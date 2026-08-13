@@ -1286,7 +1286,7 @@ export interface components {
          */
         StockLogEntryOut: {
             /** Item Id */
-            item_id: number;
+            item_id: number | null;
             /**
              * Kind
              * @enum {string}
