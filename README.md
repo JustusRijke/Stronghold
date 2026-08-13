@@ -11,7 +11,9 @@ Open-source inventory/stock tracking for small and medium businesses.
   orders) is a
   data grid with a search box under each column header; each row is a link to its
   detail page (left-click opens it, right-click opens it in a new tab), where all
-  editing happens. Add records with the "Add" button; remove asks to confirm. The
+  editing happens. Below each table a count reads "X of N rows": how many the
+  filters let through, out of how many there are. Add records with the "Add"
+  button; remove asks to confirm. The
   parts list also shows each part's total stock on hand, how many units the
   planned build orders still have to consume ("Needed"), how
   many are still to be received on open purchase orders ("On order"), and the

@@ -348,7 +348,7 @@
 			</section>
 
 			<section id="stock">
-				<h2 class="h2">Stock received ({stock.length})</h2>
+				<h2 class="h2">Stock received</h2>
 				<DataTable
 					columns={stockCols}
 					rows={stock}

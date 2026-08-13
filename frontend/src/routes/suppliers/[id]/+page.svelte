@@ -93,7 +93,7 @@
 			</section>
 
 			<section id="supplier-parts">
-				<h2 class="h2">Supplier parts ({parts.length})</h2>
+				<h2 class="h2">Supplier parts</h2>
 				<DataTable
 					columns={partCols}
 					rows={parts}
@@ -103,7 +103,7 @@
 				/>
 			</section>
 			<section id="purchase-orders">
-				<h2 class="h2">Purchase orders ({pos.length})</h2>
+				<h2 class="h2">Purchase orders</h2>
 				<DataTable
 					columns={poCols}
 					rows={pos}

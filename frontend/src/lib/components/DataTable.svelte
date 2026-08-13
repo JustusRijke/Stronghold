@@ -441,7 +441,11 @@
 		</tbody>
 	</table>
 </div>
-<div class="rowcount">{filtered.length} row{filtered.length === 1 ? '' : 's'}</div>
+<!-- both numbers: the header used to show the unfiltered total next to a filtered
+     table, and nobody could tell which was which -->
+<div class="rowcount">
+	{filtered.length} of {rows.length} row{rows.length === 1 ? '' : 's'}
+</div>
 
 <style>
 	.toolbar {

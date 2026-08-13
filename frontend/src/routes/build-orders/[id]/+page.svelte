@@ -334,7 +334,7 @@
 			</section>
 
 			<section id="consumed">
-				<h2 class="h2">Stock consumed ({consumed.length})</h2>
+				<h2 class="h2">Stock consumed</h2>
 				{#if consumed.length === 0}
 					<p class="muted">This build has not consumed any stock yet.</p>
 				{:else}
@@ -354,7 +354,7 @@
 			</section>
 
 			<section id="produced">
-				<h2 class="h2">Stock produced ({produced.length})</h2>
+				<h2 class="h2">Stock produced</h2>
 				<DataTable
 					columns={stockCols}
 					rows={produced}

@@ -516,7 +516,7 @@
 			{#if part.assembly}
 				<section id="bom">
 					<h2 class="h2">
-						BOM ({bom.length})
+						BOM
 						{#if part.estimated_price !== null}
 							<span class="hint">
 								total {part.estimated_price.toFixed(4)}
@@ -550,7 +550,7 @@
 			{#if !part.virtual}
 				{#if buyable}
 					<section id="supplier-parts">
-						<h2 class="h2">Supplier parts ({supplierParts.length})</h2>
+						<h2 class="h2">Supplier parts</h2>
 						<DataTable
 							columns={spCols}
 							rows={supplierParts}
@@ -562,7 +562,7 @@
 					</section>
 				{/if}
 				<section id="stock">
-					<h2 class="h2">Stock items ({stock.length})</h2>
+					<h2 class="h2">Stock items</h2>
 					<DataTable
 						columns={stockCols}
 						rows={stockRows}
@@ -572,7 +572,7 @@
 				</section>
 				<section id="stock-log">
 					<h2 class="h2">
-						Stock log ({logRows.length})
+						Stock log
 						<span class="hint">what happened to this part's stock, newest first</span>
 					</h2>
 					<p class="muted hint">
@@ -589,7 +589,7 @@
 				</section>
 				{#if buyable}
 					<section id="purchase-orders">
-						<h2 class="h2">Purchase orders ({pos.length})</h2>
+						<h2 class="h2">Purchase orders</h2>
 						<DataTable
 							columns={poCols}
 							rows={pos}
@@ -602,7 +602,7 @@
 				{/if}
 			{/if}
 			<section id="used-in">
-				<h2 class="h2">Used in assemblies ({usedIn.length})</h2>
+				<h2 class="h2">Used in assemblies</h2>
 				<DataTable
 					columns={usedInCols}
 					rows={usedIn}
@@ -611,7 +611,7 @@
 				/>
 			</section>
 			<section id="build-orders">
-				<h2 class="h2">Build orders ({builds.length})</h2>
+				<h2 class="h2">Build orders</h2>
 				<DataTable
 					columns={buildCols}
 					rows={builds}

@@ -228,7 +228,7 @@
 			</section>
 
 			<section id="purchase-orders">
-				<h2 class="h2">Purchase orders ({pos.length})</h2>
+				<h2 class="h2">Purchase orders</h2>
 				<DataTable
 					columns={poCols}
 					rows={pos}
@@ -239,7 +239,7 @@
 				/>
 			</section>
 			<section id="stock">
-				<h2 class="h2">Stock (this part) ({stock.length})</h2>
+				<h2 class="h2">Stock (this part)</h2>
 				<DataTable
 					columns={stockCols}
 					rows={stock}
