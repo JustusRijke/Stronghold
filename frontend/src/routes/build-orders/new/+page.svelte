@@ -50,7 +50,10 @@
 	<label class="field req">
 		<span>Description</span><input required bind:value={description} />
 	</label>
-	<label class="field"><span>Reference</span><input bind:value={reference} /></label>
+	<label class="field">
+		<span>Reference</span>
+		<input bind:value={reference} placeholder="BO-… (auto if left blank)" />
+	</label>
 	<div><button class="btn" type="submit">Create</button></div>
 	{#if assemblies.length === 0}
 		<p class="muted">No assembly parts yet. Mark a part as an assembly and give it a BOM first.</p>
