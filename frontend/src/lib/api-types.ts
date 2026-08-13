@@ -242,6 +242,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/stock/{item_id}/settle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Settle Debt
+         * @description Pay off a build shortfall out of stock already on the shelf.
+         */
+        post: operations["settle_debt_api_stock__item_id__settle_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/stock/{item_id}": {
         parameters: {
             query?: never;
@@ -1225,6 +1245,13 @@ export interface components {
             /** Value */
             value: string;
         };
+        /** SettleDebtIn */
+        SettleDebtIn: {
+            /** Quantity */
+            quantity: number;
+            /** Item Id */
+            item_id?: number | null;
+        };
         /** StockItemIn */
         StockItemIn: {
             /** Part Id */
@@ -2019,6 +2046,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["NegativeStockIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    settle_debt_api_stock__item_id__settle_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettleDebtIn"];
             };
         };
         responses: {

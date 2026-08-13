@@ -337,6 +337,61 @@ def test_build_shortfall_settled_by_purchase(database):
         ]
 
 
+def test_shortfall_settled_from_stock(database):
+    """A part holding both a debt and available stock settles the two by hand,
+    repricing the build off the stock that actually paid for it."""
+    db.create_part(1, "ASM", "an assembly")
+    db.create_part(2, "COMP", "a component")
+    db.set_part_assembly(1, True)
+    db.add_bomline(db.next_bomline_id(), 1, 2, 4.0)
+    db.create_supplier(1, "Acme")
+    db.create_supplier_part(1, 1, "C-1", 2, pack_qty=1)
+    db.create_po(1, 1)
+    line_id = db.next_line_id()
+    db.add_po_line(line_id, 1, 1, 10, 3.0)  # comp estimate 3.00
+
+    build_id = db.next_build_id()
+    db.create_build(build_id, 1, 1)
+    db.produce_build(build_id, 1)  # nothing on the shelf: all 4 on credit
+    with db.session() as s:
+        debt_id = (
+            s.scalars(
+                select(StockItem).where(StockItem.part_id == 2, StockItem.count < 0)
+            )
+            .one()
+            .id
+        )
+
+    # the stock turns up on a PO after the fact, at a real price
+    db.edit_po_line(line_id, price=2.0)
+    db.book_po_line(line_id, db.next_item_id(), 10)  # settlement needs a debt
+    with db.session() as s:
+        assert s.get(StockItem, debt_id).count == 0
+
+    # a second shortfall, this time settled from what is already on the shelf
+    db.add_negative_stock(2, 2.0, build_id)
+    with db.session() as s:
+        debt2 = s.scalars(
+            select(StockItem).where(StockItem.part_id == 2, StockItem.count < 0)
+        ).one()
+        debt2_id, shelf_before = debt2.id, db.on_hand(s, 2)
+    db.settle_debt_from_stock(debt2_id, 2.0)
+    with db.session() as s:
+        assert s.get(StockItem, debt2_id).count == 0
+        # the debt row nets out of on_hand, so settling it leaves the sum alone;
+        # what moved is real stock off the shelf into the build
+        assert db.on_hand(s, 2) == shelf_before
+        settled = s.scalars(
+            select(StockItem).where(
+                StockItem.consumed_by_build_id == build_id,
+                StockItem.count == 2.0,
+                StockItem.po_id.is_not(None),
+            )
+        ).one()
+        assert settled.unit_price == 2.0  # what the shelf stock cost
+        assert settled.price_basis == "po"
+
+
 def test_shortfall_settled_by_whole_po_receipt(database):
     """Receiving a whole PO settles shortfalls exactly like booking its lines
     one at a time -- the two receive paths must not drift apart."""

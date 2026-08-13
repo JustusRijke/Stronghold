@@ -3,11 +3,17 @@
 	import { api } from '$lib/api';
 	import { stockTabs } from '$lib/tabs.svelte';
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
+	import SettleDebtDialog from '$lib/components/SettleDebtDialog.svelte';
 	import type { StockItem } from '$lib/types';
 
 	const id = $derived(Number($page.params.id));
 	let item = $state<StockItem | null>(null);
 	let notFound = $state(false);
+	let settling = $state(false);
+	// an outstanding shortfall: negative available stock owed to a build
+	const isDebt = $derived(
+		!!item && item.status === 'Available' && item.count < 0 && !!item.consumed_by_build_id
+	);
 
 	const sections = [{ id: 'details', label: 'Details' }];
 
@@ -50,6 +56,11 @@
 			<div class="head">
 				<h1 class="h1">Stock item {item.id}</h1>
 				<span class="badge">{item.status}</span>
+				{#if isDebt}
+					<button class="btn" type="button" onclick={() => (settling = true)}>
+						Settle from stock
+					</button>
+				{/if}
 			</div>
 
 			<section id="details">
@@ -109,6 +120,9 @@
 			</section>
 		</div>
 	</div>
+	{#if isDebt}
+		<SettleDebtDialog debt={item} bind:open={settling} onsaved={load} />
+	{/if}
 {/if}
 
 <style>

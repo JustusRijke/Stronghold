@@ -88,6 +88,8 @@ export const api = {
 	createStock: (b: { part_id: number }) => post<StockItem>('/stock', b),
 	patchStock: (id: number, b: Partial<Pick<StockItem, 'count' | 'status'>>) =>
 		patch<StockItem>(`/stock/${id}`, b),
+	settleDebt: (id: number, b: { quantity: number; item_id?: number | null }) =>
+		post<Part>(`/stock/${id}/settle`, b),
 	stocktakeReasons: () =>
 		get<{ add: string[]; subtract: string[] }>('/settings/stocktake-reasons'),
 	stocktake: (b: {
