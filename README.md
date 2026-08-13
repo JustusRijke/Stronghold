@@ -93,7 +93,7 @@ Open-source inventory/stock tracking for small and medium businesses.
   order" item linked to the build and its source purchase, so you can trace
   exactly which stock went into each build (and what it cost)
 - The part page carries a **Stock log**: what happened to that part's stock,
-  oldest first -- received, produced, consumed by a build, owed to a build, or
+  newest first -- received, produced, consumed by a build, owed to a build, or
   corrected by a stocktake, each linking to the stock item and the order behind
   it. It is derived from the stock rows themselves rather than a separate event
   table, which is why dates are marked `~`: a receipt or consumption is dated by

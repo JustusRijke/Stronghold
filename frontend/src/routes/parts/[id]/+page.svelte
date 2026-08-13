@@ -253,19 +253,29 @@
 		debt: 'Owed to build',
 		unknown: 'Unknown'
 	};
-	// dates from an order are the order's date, not the moment stock moved --
-	// only a stocktake records the real time, so mark the rest approximate
+	// `when` keeps the raw ISO value so the column sorts chronologically; the ~
+	// prefix is display only. Dates from an order are the order's date, not the
+	// moment stock moved -- only a stocktake records the real time.
 	const logRows = $derived(
 		stockLog.map((e) => ({
 			...e,
-			when: e.at ? (e.at_approx ? `~ ${e.at.slice(0, 10)}` : e.at.replace('T', ' ').slice(0, 16)) : '',
+			when: e.at ?? '',
 			event: EVENT_LABEL[e.kind],
 			qty: e.drawn_down ? `${e.quantity} (left)` : String(e.quantity)
 		}))
 	);
 	type LogRow = (typeof logRows)[number];
+	// storageKey is versioned: `when` used to hold a display string, so a sort
+	// saved against the old column would order the ISO dates wrongly
 	const logCols: Column<LogRow>[] = [
-		{ key: 'when', header: 'When', mono: true, width: '150px' },
+		{
+			key: 'when',
+			header: 'When',
+			mono: true,
+			width: '150px',
+			format: (v, r) =>
+				!v ? '' : r.at_approx ? `~ ${String(v).slice(0, 10)}` : String(v).replace('T', ' ').slice(0, 16)
+		},
 		{ key: 'event', header: 'Event', width: '130px' },
 		{ key: 'qty', header: 'Quantity', mono: true, width: '110px' },
 		{
@@ -556,7 +566,7 @@
 				<section id="stock-log">
 					<h2 class="h2">
 						Stock log ({logRows.length})
-						<span class="hint">what happened to this part's stock, oldest first</span>
+						<span class="hint">what happened to this part's stock, newest first</span>
 					</h2>
 					<p class="muted hint">
 						Dates marked ~ come from the purchase or build order, not the moment stock moved. Only a
@@ -566,7 +576,8 @@
 						columns={logCols}
 						rows={logRows}
 						href={(r) => `/stock/${r.item_id}#${r.kind}`}
-						storageKey={`/parts/${id}/stock-log`}
+						storageKey={`/parts/${id}/stock-log-v2`}
+						defaultSort={{ key: 'when', dir: 'desc' }}
 					/>
 				</section>
 				{#if buyable}

@@ -109,7 +109,8 @@ export interface paths {
         };
         /**
          * List Part Stock Log
-         * @description What happened to this part's stock, oldest first.
+         * @description What happened to this part's stock, oldest first (the table shows it
+         *     newest first -- sorting is the frontend's).
          *
          *     Derived from the stock rows themselves -- no event table. ponytail: so
          *     mutations that overwrite a row in place (set_count, set_item_status, the
