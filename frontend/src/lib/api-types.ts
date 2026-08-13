@@ -100,6 +100,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/parts/{part_id}/stock-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Part Stock Log
+         * @description What happened to this part's stock, oldest first (the table shows it
+         *     newest first -- sorting is the frontend's).
+         *
+         *     Derived from the stock rows themselves -- no event table. ponytail: so
+         *     mutations that overwrite a row in place (set_count, set_item_status, the
+         *     count drawdown during consumption or debt settlement) show only the current
+         *     value, not the steps; add a real event table the day that matters.
+         */
+        get: operations["list_part_stock_log_api_parts__part_id__stock_log_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/parts/{part_id}/consumed-by": {
         parameters: {
             query?: never;
@@ -1236,6 +1262,42 @@ export interface components {
             /** Status */
             status?: ("Available" | "Consumed by build order") | null;
         };
+        /**
+         * StockLogEntryOut
+         * @description One thing that happened to a part's stock, derived from the stock row it
+         *     left behind. Rows are the log: consuming stock splits a row rather than
+         *     destroying it, so every event survives as its own row.
+         */
+        StockLogEntryOut: {
+            /** Item Id */
+            item_id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "received" | "produced" | "consumed" | "stocktake" | "debt" | "unknown";
+            /** At */
+            at: string | null;
+            /** At Approx */
+            at_approx: boolean;
+            /** Quantity */
+            quantity: number;
+            /** Drawn Down */
+            drawn_down: boolean;
+            /** Reason */
+            reason: string;
+            /** Order Label */
+            order_label: string;
+            /** Order Url */
+            order_url: string;
+            /** Unit Price */
+            unit_price: number | null;
+            /**
+             * Price Basis
+             * @enum {string}
+             */
+            price_basis: "po" | "build" | "build_partial" | "estimate" | "virtual" | "po_no_price" | "none";
+        };
         /** StockValueReport */
         StockValueReport: {
             /** Rows */
@@ -1638,6 +1700,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BuildOrderOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_part_stock_log_api_parts__part_id__stock_log_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                part_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockLogEntryOut"][];
                 };
             };
             /** @description Validation Error */

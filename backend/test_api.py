@@ -55,6 +55,184 @@ def test_stock_flow(client):
     )
 
 
+def test_part_stock_log(client):
+    """The log classifies each stock row as the event that made it, oldest
+    first. A consumed row carries both the PO it was bought on and the build
+    that ate it -- it must be dated by the build, or the log claims the stock
+    was used before it was ordered."""
+    asm = client.post("/api/parts", json={"sku": "ASM", "description": "asm"}).json()[
+        "id"
+    ]
+    comp = client.post("/api/parts", json={"sku": "C1", "description": "comp"}).json()[
+        "id"
+    ]
+    client.patch(f"/api/parts/{asm}", json={"assembly": True})
+    client.post(
+        f"/api/parts/{asm}/bom", json={"component_part_id": comp, "quantity": 2}
+    )
+    sup = client.post("/api/suppliers", json={"name": "Acme"}).json()["id"]
+    sp = client.post(
+        "/api/supplier-parts",
+        json={"supplier_id": sup, "sku": "A-1", "part_id": comp, "pack_qty": 1},
+    ).json()["id"]
+    # the PO is ordered well before the build that eats its stock
+    po = client.post(
+        "/api/purchase-orders", json={"supplier_id": sup, "start_date": "2024-01-01"}
+    ).json()["id"]
+    line = client.post(
+        f"/api/purchase-orders/{po}/lines",
+        json={"supplier_part_id": sp, "quantity": 10, "price": 1.0},
+    ).json()[0]["id"]
+    client.post(f"/api/po-lines/{line}/book", json={"quantity": 10})
+
+    build = client.post(
+        "/api/build-orders",
+        json={"part_id": asm, "quantity": 3, "start_date": "2024-06-01"},
+    ).json()["id"]
+    client.patch(f"/api/build-orders/{build}", json={"status": "Production"})
+    client.post(f"/api/build-orders/{build}/produce", json={"quantity": 3})
+    client.post(
+        "/api/stock/stocktake",
+        json={"part_id": comp, "count": 1, "reason": "Damaged"},
+    )
+
+    log = client.get(f"/api/parts/{comp}/stock-log").json()
+    kinds = [e["kind"] for e in log]
+    assert kinds == ["received", "consumed", "stocktake"]
+
+    received, consumed, stocktake = log
+    # the consumption is dated by the build, NOT by the PO that supplied it
+    assert received["at"].startswith("2024-01-01")
+    assert consumed["at"].startswith("2024-06-01")
+    assert consumed["order_label"] == received["order_label"].replace("PO", "BO") or (
+        consumed["order_url"] == f"/build-orders/{build}"
+    )
+    # order dates are approximate; a stocktake carries the real moment
+    assert received["at_approx"] and consumed["at_approx"]
+    assert stocktake["at_approx"] is False
+    assert stocktake["reason"] == "Damaged"
+    # signed like a ledger: in positive, out negative
+    assert consumed["quantity"] == -6  # 2 per assembly x 3
+    assert stocktake["quantity"] == -3  # 4 left on the shelf, counted 1
+    # the receipt booked 10 but later events ate into that row, so it reads as
+    # the 1 remaining and says so rather than claiming 10 arrived
+    assert received["quantity"] == 1
+    assert received["drawn_down"] is True
+    assert consumed["drawn_down"] is False
+
+    # the assembly's own log shows what the build produced
+    assert [e["kind"] for e in client.get(f"/api/parts/{asm}/stock-log").json()] == [
+        "produced"
+    ]
+
+    # add_negative_stock stamps stocktake_at too, but a build owing the stock is
+    # the real event -- the pair must read as consumed + debt, not as stocktakes
+    client.post(
+        "/api/stock/negative",
+        json={"part_id": comp, "quantity": 2, "build_id": build},
+    )
+    after = client.get(f"/api/parts/{comp}/stock-log").json()
+    assert [e["kind"] for e in after if e["item_id"] > stocktake["item_id"]] == [
+        "consumed",
+        "debt",
+    ]
+    debt = next(e for e in after if e["kind"] == "debt")
+    assert debt["quantity"] == -2 and debt["order_url"] == f"/build-orders/{build}"
+
+    # the consumed row here was split off a surviving receipt, so that receipt
+    # is reported once -- not again by the slice that carries the same po_id
+    assert [e["kind"] for e in after].count("received") == 1
+
+
+def test_stock_log_reports_imported_receipts(client):
+    """Imported consumed stock carries a po_id but has no surviving row to
+    report that receipt (InvenTree writes the consumed row directly). Such a row
+    is two events: it arrived on that PO, and a build ate it. Without this the
+    receipt is invisible -- 2075 of them on the real dataset."""
+    part = client.post("/api/parts", json={"sku": "C", "description": "comp"}).json()[
+        "id"
+    ]
+    sup = client.post("/api/suppliers", json={"name": "Acme"}).json()["id"]
+    client.post(
+        "/api/supplier-parts",
+        json={"supplier_id": sup, "sku": "A-1", "part_id": part, "pack_qty": 1},
+    )
+    po = client.post(
+        "/api/purchase-orders", json={"supplier_id": sup, "start_date": "2024-01-01"}
+    ).json()["id"]
+    asm = client.post("/api/parts", json={"sku": "A", "description": "asm"}).json()[
+        "id"
+    ]
+    client.patch(f"/api/parts/{asm}", json={"assembly": True})
+    build = client.post(
+        "/api/build-orders",
+        json={"part_id": asm, "quantity": 1, "start_date": "2024-06-01"},
+    ).json()["id"]
+
+    # the shape the InvenTree import writes: consumed, stamped with its PO,
+    # with no Available row of its own
+    with db.session() as s:
+        s.add(
+            StockItem(
+                id=db.next_item_id(),
+                part_id=part,
+                count=7,
+                po_id=po,
+                consumed_by_build_id=build,
+                status="Consumed by build order",
+            )
+        )
+        s.commit()
+
+    log = client.get(f"/api/parts/{part}/stock-log").json()
+    assert [e["kind"] for e in log] == ["received", "consumed"]
+    assert log[0]["at"].startswith("2024-01-01") and log[0]["quantity"] == 7
+    assert log[1]["at"].startswith("2024-06-01") and log[1]["quantity"] == -7
+
+
+def test_stock_log_reports_imported_production(client):
+    """The same for an assembly: imported stock that one build made and another
+    ate carries both build ids, and nothing else records the production. The
+    row is two events -- built, then consumed -- so an assembly's log is not
+    only the builds that ate it."""
+    asm = client.post("/api/parts", json={"sku": "A", "description": "asm"}).json()[
+        "id"
+    ]
+    client.patch(f"/api/parts/{asm}", json={"assembly": True})
+    made = client.post(
+        "/api/build-orders",
+        json={"part_id": asm, "quantity": 5, "start_date": "2024-01-01"},
+    ).json()["id"]
+    bigger = client.post("/api/parts", json={"sku": "B", "description": "big"}).json()[
+        "id"
+    ]
+    client.patch(f"/api/parts/{bigger}", json={"assembly": True})
+    ate = client.post(
+        "/api/build-orders",
+        json={"part_id": bigger, "quantity": 1, "start_date": "2024-06-01"},
+    ).json()["id"]
+
+    with db.session() as s:
+        s.add(
+            StockItem(
+                id=db.next_item_id(),
+                part_id=asm,
+                count=5,
+                build_id=made,
+                consumed_by_build_id=ate,
+                status="Consumed by build order",
+            )
+        )
+        s.commit()
+
+    log = client.get(f"/api/parts/{asm}/stock-log").json()
+    assert [e["kind"] for e in log] == ["produced", "consumed"]
+    assert log[0]["at"].startswith("2024-01-01") and log[0]["quantity"] == 5
+    assert log[0]["order_url"] == f"/build-orders/{made}"
+    assert log[1]["at"].startswith("2024-06-01") and log[1]["quantity"] == -5
+    assert log[1]["order_url"] == f"/build-orders/{ate}"
+
+
 def test_purchasing_and_booking(client):
     pid = client.post("/api/parts", json={"sku": "BOLT", "description": "bolt"}).json()[
         "id"
