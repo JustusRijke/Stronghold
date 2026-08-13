@@ -9,6 +9,7 @@
 	let partId = $state<number | ''>(Number($page.url.searchParams.get('part_id')) || '');
 	let quantity = $state(1);
 	let reference = $state('');
+	let description = $state('');
 	let assemblies = $state<Part[]>([]);
 	$effect(() => {
 		api.parts().then((p) => (assemblies = p.filter((x) => x.assembly && x.active)));
@@ -17,7 +18,12 @@
 	async function create(e: SubmitEvent) {
 		e.preventDefault();
 		try {
-			const build = await api.createBuild({ part_id: Number(partId), quantity, reference });
+			const build = await api.createBuild({
+				part_id: Number(partId),
+				quantity,
+				reference,
+				description
+			});
 			goto(`/build-orders/${build.id}`);
 		} catch (e) {
 			toast.show(e instanceof Error ? e.message : String(e), 'err');
@@ -40,6 +46,9 @@
 	<label class="field req">
 		<span>Quantity</span>
 		<input type="number" min="1" step="1" required bind:value={quantity} />
+	</label>
+	<label class="field req">
+		<span>Description</span><input required bind:value={description} />
 	</label>
 	<label class="field"><span>Reference</span><input bind:value={reference} /></label>
 	<div><button class="btn" type="submit">Create</button></div>

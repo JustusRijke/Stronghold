@@ -9,6 +9,7 @@
 
 	let supplierId = $state<number | ''>(Number($page.url.searchParams.get('supplier_id')) || '');
 	let reference = $state('');
+	let description = $state('');
 	// the order date drives "latest price"; default to today
 	let startDate = $state(new Date().toISOString().slice(0, 10));
 	let suppliers = $state<Supplier[]>([]);
@@ -44,6 +45,7 @@
 			const po = await api.createPo({
 				supplier_id: Number(supplierId),
 				reference,
+				description,
 				start_date: startDate
 			});
 			goto(`/purchase-orders/${po.id}`);
@@ -65,6 +67,10 @@
 	<PickerNew title="New supplier" bind:open={newSupplier} onsave={createSupplier}>
 		<label class="field req"><span>Name</span><input bind:value={newSupplierName} /></label>
 	</PickerNew>
+	<label class="field req">
+		<span>Description</span>
+		<input required bind:value={description} />
+	</label>
 	<label class="field">
 		<span>Reference</span>
 		<input bind:value={reference} placeholder="PO-… (auto if left blank)" />

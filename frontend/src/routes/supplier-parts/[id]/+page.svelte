@@ -119,7 +119,11 @@
 	}
 	async function addAsNewPo(qty: number) {
 		try {
-			const po = await api.createPo({ supplier_id: sp!.supplier_id });
+			// quick-create has no description box; name it after what it orders
+			const po = await api.createPo({
+				supplier_id: sp!.supplier_id,
+				description: sp!.part_description || sp!.part_sku || sp!.sku
+			});
 			await api.addPoLine(po.id, { supplier_part_id: id, quantity: qty, price: poPrice });
 			poDialog?.close();
 			goto(`/purchase-orders/${po.id}`);
@@ -130,6 +134,7 @@
 
 	const poCols: Column<PartPurchaseOrder>[] = [
 		{ key: 'reference', header: 'PO', mono: true, width: '150px' },
+		{ key: 'description', header: 'Description', truncate: true },
 		{ key: 'supplier_reference', header: 'Supplier ref', truncate: true },
 		{ key: 'quantity', header: 'Qty', mono: true, width: '90px' },
 		{

@@ -239,6 +239,13 @@
 
 			<section id="details">
 				<label class="field">
+					<span>Description</span>
+					<input
+						value={build.description}
+						onblur={(e) => save({ description: e.currentTarget.value })}
+					/>
+				</label>
+				<label class="field">
 					<span>Reference</span>
 					<input value={build.reference} onblur={(e) => save({ reference: e.currentTarget.value })} />
 				</label>

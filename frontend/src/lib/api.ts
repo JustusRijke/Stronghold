@@ -138,7 +138,12 @@ export const api = {
 	// purchase orders
 	pos: () => get<PurchaseOrder[]>('/purchase-orders'),
 	po: (id: number) => get<PurchaseOrder>(`/purchase-orders/${id}`),
-	createPo: (b: { supplier_id: number; reference?: string; start_date?: string }) =>
+	createPo: (b: {
+		supplier_id: number;
+		description: string;
+		reference?: string;
+		start_date?: string;
+	}) =>
 		post<PurchaseOrder>('/purchase-orders', b),
 	patchPo: (id: number, b: Partial<Omit<PurchaseOrder, 'id' | 'supplier_id'>>) =>
 		patch<PurchaseOrder>(`/purchase-orders/${id}`, b),
@@ -155,7 +160,12 @@ export const api = {
 	// build orders
 	builds: () => get<BuildOrder[]>('/build-orders'),
 	build: (id: number) => get<BuildOrder>(`/build-orders/${id}`),
-	createBuild: (b: { part_id: number; quantity: number; reference?: string }) =>
+	createBuild: (b: {
+		part_id: number;
+		quantity: number;
+		description: string;
+		reference?: string;
+	}) =>
 		post<BuildOrder>('/build-orders', b),
 	patchBuild: (id: number, b: Partial<Omit<BuildOrder, 'id' | 'part_id'>>) =>
 		patch<BuildOrder>(`/build-orders/${id}`, b),
