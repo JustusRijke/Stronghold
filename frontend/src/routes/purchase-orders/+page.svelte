@@ -10,6 +10,7 @@
 	type Row = {
 		id: number;
 		reference: string;
+		description: string;
 		supplier: string;
 		status: string;
 		end_date: string;
@@ -21,6 +22,7 @@
 		rows = (await api.pos()).map((po) => ({
 			id: po.id,
 			reference: po.reference,
+			description: po.description,
 			supplier: suppliers.get(po.supplier_id) ?? String(po.supplier_id),
 			status: po.status,
 			end_date: po.end_date ?? ''
@@ -32,6 +34,7 @@
 
 	const columns: Column<Row>[] = [
 		{ key: 'reference', header: 'PO', mono: true, width: '160px' },
+		{ key: 'description', header: 'Description', truncate: true },
 		{ key: 'supplier', header: 'Supplier', width: '160px', truncate: true },
 		{
 			key: 'status',

@@ -182,6 +182,7 @@ def migrate(url: str, username: str, password: str, db_path: Path) -> None:
                     id=b["id"],
                     part_id=b["part"],
                     reference=b["reference"],
+                    description=b["description"],
                     # we have no On Hold for builds: a held build is still
                     # planned, so it lands on Pending
                     status=BuildStatus.PENDING
@@ -265,6 +266,7 @@ def migrate(url: str, username: str, password: str, db_path: Path) -> None:
                     supplier_id=po["supplier"],
                     reference=po["reference"].strip() or f"PO-{po['id']:04d}",
                     supplier_reference=po["supplier_reference"],
+                    description=po["description"],
                     status=po["status_text"],
                     start_date=start,
                     end_date=_parse_date(po["end_date"]),

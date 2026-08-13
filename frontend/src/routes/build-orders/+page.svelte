@@ -8,6 +8,7 @@
 	type Row = {
 		id: number;
 		reference: string;
+		description: string;
 		part: string;
 		quantity: number;
 		produced: number;
@@ -21,6 +22,7 @@
 		rows = (await api.builds()).map((b) => ({
 			id: b.id,
 			reference: b.reference,
+			description: b.description,
 			part: parts.get(b.part_id) ?? String(b.part_id),
 			quantity: b.quantity,
 			produced: b.produced,
@@ -34,6 +36,7 @@
 
 	const columns: Column<Row>[] = [
 		{ key: 'reference', header: 'Build', mono: true, width: '160px' },
+		{ key: 'description', header: 'Description', truncate: true },
 		{ key: 'part', header: 'Assembly', width: '180px', truncate: true },
 		{ key: 'quantity', header: 'Qty', mono: true, width: '90px' },
 		{ key: 'produced', header: 'Produced', mono: true, width: '100px' },

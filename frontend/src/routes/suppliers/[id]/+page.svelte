@@ -54,6 +54,7 @@
 	];
 	const poCols: Column<PurchaseOrder>[] = [
 		{ key: 'reference', header: 'PO', mono: true, width: '150px' },
+		{ key: 'description', header: 'Description', truncate: true },
 		{
 			key: 'status',
 			header: 'Status',

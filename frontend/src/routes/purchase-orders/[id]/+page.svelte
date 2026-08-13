@@ -169,6 +169,13 @@
 			</p>
 
 			<section id="details">
+				<label class="field">
+					<span>Description</span>
+					<input
+						value={po.description}
+						onblur={(e) => save({ description: e.currentTarget.value })}
+					/>
+				</label>
 				<label class="field req">
 					<span>Reference</span>
 					<input

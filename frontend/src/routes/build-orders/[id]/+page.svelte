@@ -239,8 +239,23 @@
 
 			<section id="details">
 				<label class="field">
+					<span>Description</span>
+					<input
+						value={build.description}
+						onblur={(e) => save({ description: e.currentTarget.value })}
+					/>
+				</label>
+				<label class="field req">
 					<span>Reference</span>
-					<input value={build.reference} onblur={(e) => save({ reference: e.currentTarget.value })} />
+					<input
+						required
+						value={build.reference}
+						onblur={(e) => {
+							// required: an emptied box snaps back to the stored reference
+							if (e.currentTarget.value.trim()) save({ reference: e.currentTarget.value });
+							else e.currentTarget.value = build!.reference;
+						}}
+					/>
 				</label>
 				<label class="field">
 					<span>Quantity</span>

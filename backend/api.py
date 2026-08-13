@@ -257,6 +257,7 @@ class PurchaseOrderOut(BaseModel):
     end_date: date | None
     delivery_cost: float
     supplier_reference: str
+    description: str
 
 
 class PartPurchaseOrderOut(PurchaseOrderOut):
@@ -273,6 +274,7 @@ class PurchaseOrderIn(BaseModel):
     end_date: date | None = None
     delivery_cost: float = 0.0
     supplier_reference: str = ""
+    description: str = Field(min_length=1)
 
 
 class PurchaseOrderPatch(BaseModel):
@@ -282,6 +284,7 @@ class PurchaseOrderPatch(BaseModel):
     end_date: date | None = None
     delivery_cost: float | None = None
     supplier_reference: str | None = None
+    description: str | None = None
 
 
 class POLineOut(BaseModel):
@@ -311,6 +314,7 @@ class BuildOrderOut(BaseModel):
     quantity: int
     reference: str
     status: str
+    description: str
     start_date: date | None
     end_date: date | None
     produced: int  # whole assemblies already produced into stock
@@ -346,6 +350,7 @@ class BuildOrderIn(BaseModel):
     quantity: int = Field(gt=0)
     reference: str = ""
     status: BuildStatus = BuildStatus.DRAFT
+    description: str = Field(min_length=1)
     start_date: date | None = None
     end_date: date | None = None
 
@@ -354,6 +359,7 @@ class BuildOrderPatch(BaseModel):
     quantity: int | None = Field(default=None, gt=0)
     reference: str | None = None
     status: BuildStatus | None = None
+    description: str | None = None
     start_date: date | None = None
     end_date: date | None = None
 
@@ -1112,6 +1118,7 @@ def _po_out(po: PurchaseOrder) -> PurchaseOrderOut:
         end_date=po.end_date,
         delivery_cost=po.delivery_cost,
         supplier_reference=po.supplier_reference,
+        description=po.description,
     )
 
 
@@ -1146,6 +1153,7 @@ def create_po(body: PurchaseOrderIn) -> PurchaseOrderOut:
         end_date=body.end_date,
         delivery_cost=body.delivery_cost,
         supplier_reference=body.supplier_reference,
+        description=body.description,
     )
     return get_po(new_id)
 
@@ -1163,6 +1171,7 @@ def patch_po(po_id: int, body: PurchaseOrderPatch) -> PurchaseOrderOut:
         "end_date",
         "delivery_cost",
         "supplier_reference",
+        "description",
     }:
         cur = get_po(po_id)
         _guard(
@@ -1178,6 +1187,7 @@ def patch_po(po_id: int, body: PurchaseOrderPatch) -> PurchaseOrderOut:
             supplier_reference=body.supplier_reference
             if "supplier_reference" in sent
             else cur.supplier_reference,
+            description=body.description if "description" in sent else cur.description,
         )
     return get_po(po_id)
 
@@ -1265,6 +1275,7 @@ def _build_out(s, b: BuildOrder) -> BuildOrderOut:
         quantity=b.quantity,
         reference=b.reference,
         status=b.status,
+        description=b.description,
         start_date=b.start_date,
         end_date=b.end_date,
         produced=round(db.produced_qty(s, b.id)),
@@ -1300,6 +1311,7 @@ def create_build(body: BuildOrderIn) -> BuildOrderOut:
         body.quantity,
         reference=body.reference,
         status=body.status,
+        description=body.description,
         start_date=body.start_date,
         end_date=body.end_date,
     )
@@ -1311,7 +1323,14 @@ def patch_build(build_id: int, body: BuildOrderPatch) -> BuildOrderOut:
     # dates can be cleared to null, so "field present in payload" (model_fields_set),
     # not "is not None", decides whether to overwrite.
     sent = body.model_fields_set
-    if sent & {"quantity", "reference", "status", "start_date", "end_date"}:
+    if sent & {
+        "quantity",
+        "reference",
+        "status",
+        "description",
+        "start_date",
+        "end_date",
+    }:
         cur = get_build(build_id)
         _guard(
             db.edit_build,
@@ -1319,6 +1338,7 @@ def patch_build(build_id: int, body: BuildOrderPatch) -> BuildOrderOut:
             body.quantity if "quantity" in sent else cur.quantity,
             reference=body.reference if "reference" in sent else cur.reference,
             status=body.status if "status" in sent else cur.status,
+            description=body.description if "description" in sent else cur.description,
             start_date=body.start_date if "start_date" in sent else cur.start_date,
             end_date=body.end_date if "end_date" in sent else cur.end_date,
         )

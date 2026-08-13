@@ -879,6 +879,8 @@ export interface components {
             reference: string;
             /** @default Draft */
             status: components["schemas"]["BuildStatus"];
+            /** Description */
+            description: string;
             /** Start Date */
             start_date?: string | null;
             /** End Date */
@@ -896,6 +898,8 @@ export interface components {
             reference: string;
             /** Status */
             status: string;
+            /** Description */
+            description: string;
             /** Start Date */
             start_date: string | null;
             /** End Date */
@@ -912,6 +916,8 @@ export interface components {
             /** Reference */
             reference?: string | null;
             status?: components["schemas"]["BuildStatus"] | null;
+            /** Description */
+            description?: string | null;
             /** Start Date */
             start_date?: string | null;
             /** End Date */
@@ -1013,6 +1019,8 @@ export interface components {
             reference: string;
             /** Status */
             status: string;
+            /** Description */
+            description: string;
             /** Start Date */
             start_date: string | null;
             /** End Date */
@@ -1110,6 +1118,8 @@ export interface components {
             delivery_cost: number;
             /** Supplier Reference */
             supplier_reference: string;
+            /** Description */
+            description: string;
             /** Quantity */
             quantity: number;
             /** Unit Price */
@@ -1148,6 +1158,8 @@ export interface components {
              * @default
              */
             supplier_reference: string;
+            /** Description */
+            description: string;
         };
         /** PurchaseOrderOut */
         PurchaseOrderOut: {
@@ -1170,6 +1182,8 @@ export interface components {
             delivery_cost: number;
             /** Supplier Reference */
             supplier_reference: string;
+            /** Description */
+            description: string;
         };
         /** PurchaseOrderPatch */
         PurchaseOrderPatch: {
@@ -1184,6 +1198,8 @@ export interface components {
             delivery_cost?: number | null;
             /** Supplier Reference */
             supplier_reference?: string | null;
+            /** Description */
+            description?: string | null;
         };
         /** SearchResult */
         SearchResult: {

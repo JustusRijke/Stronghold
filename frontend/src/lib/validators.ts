@@ -18,6 +18,7 @@ export const BuildOrderIn = v.object({
 	quantity: v.pipe(v.number(), v.integer(), v.gtValue(0, 'must be greater than 0')),
 	reference: v.optional(v.string()),
 	status: v.optional(v.picklist(["Draft","Pending","Production","Cancelled","Complete"])),
+	description: v.string(),
 	start_date: v.optional(v.nullable(v.string())),
 	end_date: v.optional(v.nullable(v.string())),
 	});
@@ -25,6 +26,7 @@ export const BuildOrderPatch = v.object({
 	quantity: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.gtValue(0, 'must be greater than 0')))),
 	reference: v.optional(v.nullable(v.string())),
 	status: v.optional(v.nullable(v.picklist(["Draft","Pending","Production","Cancelled","Complete"]))),
+	description: v.optional(v.nullable(v.string())),
 	start_date: v.optional(v.nullable(v.string())),
 	end_date: v.optional(v.nullable(v.string())),
 	});
@@ -68,6 +70,7 @@ export const PurchaseOrderIn = v.object({
 	end_date: v.optional(v.nullable(v.string())),
 	delivery_cost: v.optional(v.number()),
 	supplier_reference: v.optional(v.string()),
+	description: v.string(),
 	});
 export const PurchaseOrderPatch = v.object({
 	reference: v.optional(v.nullable(v.string())),
@@ -76,6 +79,7 @@ export const PurchaseOrderPatch = v.object({
 	end_date: v.optional(v.nullable(v.string())),
 	delivery_cost: v.optional(v.nullable(v.number())),
 	supplier_reference: v.optional(v.nullable(v.string())),
+	description: v.optional(v.nullable(v.string())),
 	});
 export const SettingIn = v.object({
 	value: v.string(),

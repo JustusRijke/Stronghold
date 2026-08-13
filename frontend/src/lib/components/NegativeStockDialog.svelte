@@ -77,7 +77,8 @@
 			<select bind:value={buildId}>
 				{#each builds as b (b.id)}
 					<option value={b.id}>
-						{b.reference || `BO-${b.id}`} &middot; {b.start_date || 'no date'}
+						{b.reference || `BO-${b.id}`}{b.description ? ` - ${b.description}` : ''} &middot; {b.start_date ||
+							'no date'}
 					</option>
 				{/each}
 			</select>

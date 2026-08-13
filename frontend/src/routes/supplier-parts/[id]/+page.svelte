@@ -80,6 +80,7 @@
 	let poDialog = $state<HTMLDialogElement | null>(null);
 	let poQty = $state(1);
 	let poPrice = $state(0);
+	let poDescription = $state('');
 	let poCandidates = $state<{ po: PurchaseOrder; line: POLine | null }[]>([]);
 	const OPEN_STATUSES = new Set(['Pending', 'Placed', 'On Hold']);
 
@@ -97,6 +98,7 @@
 		// a line is priced per pack; the part estimate is per unit
 		const est = parts.find((p) => p.id === sp!.part_id)?.estimated_price ?? 0;
 		poPrice = Number((est * (sp!.pack_qty || 1)).toFixed(4));
+		poDescription = sp!.part_description || sp!.part_sku || sp!.sku;
 		poDialog?.showModal();
 	}
 	async function addToExistingLine(line: POLine, qty: number) {
@@ -119,7 +121,10 @@
 	}
 	async function addAsNewPo(qty: number) {
 		try {
-			const po = await api.createPo({ supplier_id: sp!.supplier_id });
+			const po = await api.createPo({
+				supplier_id: sp!.supplier_id,
+				description: poDescription
+			});
 			await api.addPoLine(po.id, { supplier_part_id: id, quantity: qty, price: poPrice });
 			poDialog?.close();
 			goto(`/purchase-orders/${po.id}`);
@@ -130,6 +135,7 @@
 
 	const poCols: Column<PartPurchaseOrder>[] = [
 		{ key: 'reference', header: 'PO', mono: true, width: '150px' },
+		{ key: 'description', header: 'Description', truncate: true },
 		{ key: 'supplier_reference', header: 'Supplier ref', truncate: true },
 		{ key: 'quantity', header: 'Qty', mono: true, width: '90px' },
 		{
@@ -275,9 +281,15 @@
 			</ul>
 			<p class="muted">Or start a new purchase order:</p>
 		{/if}
+		<label class="field req">
+			<span>New PO description</span>
+			<input required bind:value={poDescription} placeholder="What this order is for" />
+		</label>
 		<div class="actions">
 			<button class="btn ghost" onclick={() => poDialog?.close()}>Cancel</button>
-			<button class="btn" onclick={() => addAsNewPo(poQty)}>New PO</button>
+			<button class="btn" disabled={!poDescription.trim()} onclick={() => addAsNewPo(poQty)}
+				>New PO</button
+			>
 		</div>
 	</dialog>
 {/if}
