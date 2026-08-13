@@ -166,8 +166,9 @@ def fetch_po_lines(base_url: str, username: str, password: str) -> list[dict]:
 
 
 def fetch_build_orders(base_url: str, username: str, password: str) -> list[dict]:
-    """Build orders as {id, part, reference, status, quantity, start_date,
-    end_date}. part is the assembly's InvenTree pk, resolved by the migration.
+    """Build orders as {id, part, reference, description, status, quantity,
+    start_date, end_date}. part is the assembly's InvenTree pk, resolved by the
+    migration; description comes from InvenTree's "title".
     Cancelled builds (status 30) are dropped. start_date falls back to
     creation_date; end_date is InvenTree's target_date."""
     rows = _fetch_all(
@@ -179,7 +180,8 @@ def fetch_build_orders(base_url: str, username: str, password: str) -> list[dict
             "id": b["pk"],
             "part": b["part"],
             "reference": b["reference"] or "",
-            "description": b["description"] or "",
+            # InvenTree calls a build's description "title" (POs use "description")
+            "description": b["title"] or "",
             "status": b["status"],
             "status_text": b["status_text"] or "",
             "quantity": b["quantity"],
