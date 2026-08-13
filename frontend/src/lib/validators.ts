@@ -84,6 +84,10 @@ export const PurchaseOrderPatch = v.object({
 export const SettingIn = v.object({
 	value: v.string(),
 	});
+export const SettleDebtIn = v.object({
+	quantity: v.pipe(v.number(), v.gtValue(0, 'must be greater than 0')),
+	item_id: v.optional(v.nullable(v.pipe(v.number(), v.integer()))),
+	});
 export const StockItemIn = v.object({
 	part_id: v.pipe(v.number(), v.integer()),
 	});

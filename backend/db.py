@@ -980,6 +980,113 @@ def add_negative_stock(
     )
 
 
+@_write
+def settle_debt_from_stock(
+    s: Session, debt_id: int, quantity: float, item_id: int | None = None
+) -> None:
+    """Pay off a build shortfall out of stock already on the shelf.
+
+    The receipt path (_settle_stock_debt) does the same when parts arrive on a
+    PO; this is the manual version for a part that ended up with both a debt row
+    and available stock. The debt shrinks, the sources are drawn down FIFO (or
+    off one named item) and the build's placeholder consumption is repriced to
+    what that stock actually cost, so the assembly stops being costed at a
+    guess."""
+    debt = get_item(s, debt_id)
+    if debt.status != STOCK_AVAILABLE or debt.count >= 0:
+        raise InventoryError(f"stock item {debt_id} is not an outstanding debt")
+    if quantity <= 0:
+        raise InventoryError("quantity must be positive")
+    if quantity > -debt.count + 1e-9:
+        raise InventoryError(f"stock item {debt_id} only owes {-debt.count:g}")
+    build_id = debt.consumed_by_build_id
+    if build_id is None:
+        raise InventoryError(f"stock item {debt_id} is not linked to a build order")
+    # the debt's immediate predecessor, same pairing contract produce_build and
+    # add_negative_stock write and _settle_stock_debt relies on
+    placeholder = s.get(StockItem, debt_id - 1)
+    if (
+        placeholder is None
+        or placeholder.status != STOCK_CONSUMED
+        or placeholder.consumed_by_build_id != build_id
+        or placeholder.part_id != debt.part_id
+    ):
+        raise InventoryError(f"stock item {debt_id} has no consumption to settle")
+    if item_id is None:
+        sources = s.scalars(
+            select(StockItem)
+            .where(
+                StockItem.part_id == debt.part_id,
+                StockItem.status == STOCK_AVAILABLE,
+                StockItem.count > 0,  # never settle a debt out of another debt
+            )
+            .order_by(StockItem.id)
+        ).all()
+    else:
+        named = get_item(s, item_id)
+        if (
+            named.part_id != debt.part_id
+            or named.status != STOCK_AVAILABLE
+            or named.count <= 0
+        ):
+            raise InventoryError(
+                f"stock item {item_id} is not available stock of part {debt.part_id}"
+            )
+        sources = [named]
+    available = sum(i.count for i in sources)
+    if quantity > available + 1e-9:
+        raise InventoryError(f"only {available:g} in stock, cannot settle {quantity:g}")
+
+    next_id = (s.scalar(select(func.max(StockItem.id))) or 0) + 1
+    need = quantity
+    for source in sources:
+        if need <= 1e-9:
+            break
+        take = min(source.count, need)
+        source.count -= take
+        need -= take
+        debt.count += take
+        # one consumed row per source, so each keeps its own price provenance;
+        # the placeholder shrinks by what the real stock now covers
+        placeholder.count -= take
+        s.add(
+            StockItem(
+                id=next_id,
+                count=take,
+                part_id=debt.part_id,
+                po_id=source.po_id,
+                build_id=source.build_id,
+                consumed_by_build_id=build_id,
+                status=STOCK_CONSUMED,
+                unit_price=source.unit_price,
+                price_basis=source.price_basis,
+                price_po_id=source.price_po_id,
+            )
+        )
+        next_id += 1
+    s.flush()
+    # the assembly was costed off the estimate; its inputs are real now
+    for produced in s.scalars(
+        select(StockItem).where(
+            StockItem.build_id == build_id, StockItem.status == STOCK_AVAILABLE
+        )
+    ):
+        refresh_stock_price(s, produced)
+    part = get_part(s, debt.part_id)
+    build = get_build(s, build_id)
+    label = build.reference or f"BO-{build_id}"
+    _activity(
+        s,
+        "settle_debt_from_stock",
+        f"{quantity:g}x {part.description} settled a shortfall on {label} from stock",
+        [
+            ("stock", debt_id, f"{debt.count:g}x {part.description}"),
+            ("build", build_id, label),
+            ("part", part.id, part.sku),
+        ],
+    )
+
+
 # -- purchasing -------------------------------------------------------------
 
 

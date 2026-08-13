@@ -195,6 +195,11 @@ class NegativeStockIn(BaseModel):
     reason: str = ""
 
 
+class SettleDebtIn(BaseModel):
+    quantity: float = Field(gt=0)
+    item_id: int | None = None  # stock to settle from; oldest first if null
+
+
 class StockItemPatch(BaseModel):
     count: float | None = None
     status: StockStatus | None = None
@@ -956,6 +961,14 @@ def add_negative_stock(body: NegativeStockIn) -> PartOut:
         body.reason,
     )
     return get_part(body.part_id)
+
+
+@router.post("/stock/{item_id}/settle", response_model=PartOut)
+def settle_debt(item_id: int, body: SettleDebtIn) -> PartOut:
+    """Pay off a build shortfall out of stock already on the shelf."""
+    part_id = get_stock(item_id).part_id
+    _guard(db.settle_debt_from_stock, item_id, body.quantity, body.item_id)
+    return get_part(part_id)
 
 
 # registered after /stock/stocktake so the literal path is not read as an id
