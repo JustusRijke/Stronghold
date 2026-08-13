@@ -1022,6 +1022,18 @@ def next_supplier_part_id() -> int:
         return (s.scalar(select(func.max(SupplierPart.id))) or 0) + 1
 
 
+def _check_reference_free(s: Session, model, reference: str, own_id: int) -> None:
+    """A reference is the order's human code -- refuse to hand the same one to
+    two orders. Case-insensitive: PO-0007 and po-0007 are the same code."""
+    clash = s.scalar(
+        select(model.id).where(
+            func.lower(model.reference) == reference.lower(), model.id != own_id
+        )
+    )
+    if clash is not None:
+        raise InventoryError(f"reference {reference} is already used by order {clash}")
+
+
 def next_po_id() -> int:
     with session() as s:
         return (s.scalar(select(func.max(PurchaseOrder.id))) or 0) + 1
@@ -1158,6 +1170,7 @@ def create_po(
     # every order carries a human code; default to the pk in the same
     # zero-padded shape the InvenTree import produced (PO-0042)
     reference = reference.strip() or f"PO-{po_id:04d}"
+    _check_reference_free(s, PurchaseOrder, reference, po_id)
     s.add(
         PurchaseOrder(
             id=po_id,
@@ -1204,6 +1217,8 @@ def edit_po(
         raise InventoryError("purchase order start date is required")
     if not reference.strip():
         raise InventoryError("purchase order reference is required")
+    reference = reference.strip()
+    _check_reference_free(s, PurchaseOrder, reference, po_id)
     reprice = status != po.status or start_date != po.start_date
     po.reference = reference
     po.status = status
@@ -1543,6 +1558,10 @@ def create_build(
     part = get_part(s, part_id)
     if not part.assembly:
         raise InventoryError(f"part {part_id} is not an assembly")
+    # every order carries a human code; default to the pk in the same
+    # zero-padded shape the InvenTree import produced (BO-0042), as create_po does
+    reference = reference.strip() or f"BO-{build_id:04d}"
+    _check_reference_free(s, BuildOrder, reference, build_id)
     s.add(
         BuildOrder(
             id=build_id,
@@ -1556,7 +1575,7 @@ def create_build(
         )
     )
     _snapshot_build_lines(s, build_id, part_id)
-    label = reference or f"BO-{build_id}"
+    label = reference
     _activity(
         s,
         "create_build",
@@ -1597,6 +1616,10 @@ def edit_build(
             f"build {build_id}: {already} already produced; status must be "
             "Production or Complete"
         )
+    # a build always has a code (create_build defaults one); an omitted or
+    # blanked reference keeps the stored one rather than clearing it
+    reference = reference.strip() or build.reference
+    _check_reference_free(s, BuildOrder, reference, build_id)
     build.quantity = quantity
     build.reference = reference
     build.status = status

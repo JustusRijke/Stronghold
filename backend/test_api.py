@@ -1120,3 +1120,65 @@ def test_part_demand_and_suggested_order(client):
     row = client.get(f"/api/parts/{comp}").json()
     assert (row["needed"], row["in_stock"]) == (6, 1)
     assert row["suggested_order"] == 1
+
+
+def test_order_references_default_and_stay_unique(client):
+    """Both order types get a BO-/PO-<pk> code when none is given, and no two
+    orders may carry the same code (case-insensitively)."""
+    sup = client.post("/api/suppliers", json={"name": "Acme"}).json()["id"]
+    asm = client.post("/api/parts", json={"sku": "ASM", "description": "a"}).json()[
+        "id"
+    ]
+    client.patch(f"/api/parts/{asm}", json={"assembly": True})
+
+    po = client.post(
+        "/api/purchase-orders", json={"description": "d", "supplier_id": sup}
+    ).json()
+    build = client.post(
+        "/api/build-orders",
+        json={"description": "d", "part_id": asm, "quantity": 1},
+    ).json()
+    assert po["reference"] == f"PO-{po['id']:04d}"
+    assert build["reference"] == f"BO-{build['id']:04d}"
+
+    # a second order cannot claim a code already in use, in either direction
+    dup = client.post(
+        "/api/purchase-orders",
+        json={"description": "d", "supplier_id": sup, "reference": po["reference"]},
+    )
+    assert dup.status_code == 400 and "already used" in dup.json()["detail"]
+    dup_build = client.post(
+        "/api/build-orders",
+        json={
+            "description": "d",
+            "part_id": asm,
+            "quantity": 1,
+            "reference": build["reference"].lower(),
+        },
+    )
+    assert dup_build.status_code == 400
+
+    # editing onto a taken code is rejected too; blanking keeps the stored code
+    other = client.post(
+        "/api/build-orders",
+        json={"description": "d", "part_id": asm, "quantity": 1},
+    ).json()
+    assert (
+        client.patch(
+            f"/api/build-orders/{other['id']}", json={"reference": build["reference"]}
+        ).status_code
+        == 400
+    )
+    assert (
+        client.patch(
+            f"/api/build-orders/{other['id']}", json={"reference": " "}
+        ).json()["reference"]
+        == other["reference"]
+    )
+    # keeping its own code is fine (the check must skip the row itself)
+    assert (
+        client.patch(
+            f"/api/build-orders/{other['id']}", json={"reference": other["reference"]}
+        ).status_code
+        == 200
+    )
