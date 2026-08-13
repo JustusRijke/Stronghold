@@ -135,7 +135,10 @@ Open-source inventory/stock tracking for small and medium businesses.
   from your stock value -- so an almost-complete assembly becomes available
   without the shortfall going untracked. Receiving those parts on a purchase
   order clears the negative item automatically, reprices the build at what you
-  actually paid, and says so in the activity feed. A settled shortfall and a
+  actually paid, and says so in the activity feed. If the stock is already on
+  the shelf instead, **Settle from stock** on the negative item's page pays the
+  shortfall off by hand: it asks how many, and which stock to take them from
+  (oldest first by default, like a stocktake). A settled shortfall and a
   receipt that went straight into a build both end at zero count, so stock
   tables hide zero-count rows by default -- flip the "In stock" filter to see
   them
