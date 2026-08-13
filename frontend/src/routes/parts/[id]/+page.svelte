@@ -46,6 +46,7 @@
 	let poQty = $state<Record<number, number>>({});
 	// price per pack, defaulted per supplier part (pack size differs between them)
 	let poPrice = $state<Record<number, number>>({});
+	let poDescription = $state('');
 	// candidates for the part's active supplier parts: existing open PO + line (if any)
 	let poCandidates = $state<
 		{ po: PurchaseOrder; supplierPart: SupplierPart & { supplier_name: string }; line: POLine | null }[]
@@ -89,6 +90,7 @@
 				Number(((sp.last_price ?? est) * (sp.pack_qty || 1)).toFixed(4))
 			])
 		);
+		poDescription = part ? part.description || part.sku : '';
 		poDialog?.showModal();
 	}
 
@@ -112,10 +114,9 @@
 	}
 	async function addAsNewPo(sp: SupplierPart, qty: number) {
 		try {
-			// quick-create has no description box; name it after what it orders
 			const po = await api.createPo({
 				supplier_id: sp.supplier_id,
-				description: sp.part_description || sp.part_sku || sp.sku
+				description: poDescription
 			});
 			await api.addPoLine(po.id, {
 				supplier_part_id: sp.id,
@@ -695,6 +696,10 @@
 			</ul>
 			<p class="muted">Or start a new purchase order:</p>
 		{/if}
+		<label class="field req">
+			<span>New PO description</span>
+			<input required bind:value={poDescription} placeholder="What this order is for" />
+		</label>
 		<ul>
 			{#each poOffered as sp (sp.id)}
 				<li>
@@ -715,7 +720,11 @@
 						title="Price per pack"
 						bind:value={poPrice[sp.id]}
 					/>
-					<button class="btn" onclick={() => addAsNewPo(sp, poQty[sp.id])}>New PO</button>
+					<button
+						class="btn"
+						disabled={!poDescription.trim()}
+						onclick={() => addAsNewPo(sp, poQty[sp.id])}>New PO</button
+					>
 				</li>
 			{/each}
 		</ul>
