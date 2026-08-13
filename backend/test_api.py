@@ -139,6 +139,56 @@ def test_part_stock_log(client):
     debt = next(e for e in after if e["kind"] == "debt")
     assert debt["quantity"] == -2 and debt["order_url"] == f"/build-orders/{build}"
 
+    # the consumed row here was split off a surviving receipt, so that receipt
+    # is reported once -- not again by the slice that carries the same po_id
+    assert [e["kind"] for e in after].count("received") == 1
+
+
+def test_stock_log_reports_imported_receipts(client):
+    """Imported consumed stock carries a po_id but has no surviving row to
+    report that receipt (InvenTree writes the consumed row directly). Such a row
+    is two events: it arrived on that PO, and a build ate it. Without this the
+    receipt is invisible -- 2075 of them on the real dataset."""
+    part = client.post("/api/parts", json={"sku": "C", "description": "comp"}).json()[
+        "id"
+    ]
+    sup = client.post("/api/suppliers", json={"name": "Acme"}).json()["id"]
+    client.post(
+        "/api/supplier-parts",
+        json={"supplier_id": sup, "sku": "A-1", "part_id": part, "pack_qty": 1},
+    )
+    po = client.post(
+        "/api/purchase-orders", json={"supplier_id": sup, "start_date": "2024-01-01"}
+    ).json()["id"]
+    asm = client.post("/api/parts", json={"sku": "A", "description": "asm"}).json()[
+        "id"
+    ]
+    client.patch(f"/api/parts/{asm}", json={"assembly": True})
+    build = client.post(
+        "/api/build-orders",
+        json={"part_id": asm, "quantity": 1, "start_date": "2024-06-01"},
+    ).json()["id"]
+
+    # the shape the InvenTree import writes: consumed, stamped with its PO,
+    # with no Available row of its own
+    with db.session() as s:
+        s.add(
+            StockItem(
+                id=db.next_item_id(),
+                part_id=part,
+                count=7,
+                po_id=po,
+                consumed_by_build_id=build,
+                status="Consumed by build order",
+            )
+        )
+        s.commit()
+
+    log = client.get(f"/api/parts/{part}/stock-log").json()
+    assert [e["kind"] for e in log] == ["received", "consumed"]
+    assert log[0]["at"].startswith("2024-01-01") and log[0]["quantity"] == 7
+    assert log[1]["at"].startswith("2024-06-01") and log[1]["quantity"] == -7
+
 
 def test_purchasing_and_booking(client):
     pid = client.post("/api/parts", json={"sku": "BOLT", "description": "bolt"}).json()[

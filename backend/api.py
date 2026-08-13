@@ -550,13 +550,21 @@ def list_part_builds(part_id: int) -> list[BuildOrderOut]:
         ]
 
 
-def _stock_log_entry(row, booked: dict[int, float]) -> StockLogEntryOut:
-    """Classify one stock row as the event that created it.
+def _stock_log_entries(
+    row, booked: dict[int, float], split_of: set[int]
+) -> list[StockLogEntryOut]:
+    """The events one stock row records -- usually one, sometimes two.
 
     A consumed row carries both the PO it was bought on and the build that ate
     it, so precedence matters: the event is what happened *to* the stock, and
     its date follows the same order. Dating a consumption by its PO would show
-    when the stock was bought, not when it was used."""
+    when the stock was bought, not when it was used.
+
+    Such a row is two events when nothing else records the receipt: the stock
+    arrived on that PO and was later consumed. It is one event when the row was
+    split off a surviving parent (produce_build copies po_id onto the consumed
+    slice for pricing) -- the parent already reports the receipt, so reporting
+    it again would double-count what arrived."""
     i, po_ref, po_date, prod_ref, prod_date, eat_ref, eat_date = row
     label, url, at, approx = "", "", None, True
     # a receipt's booking records what actually arrived, so a smaller count now
@@ -592,19 +600,40 @@ def _stock_log_entry(row, booked: dict[int, float]) -> StockLogEntryOut:
         quantity = i.count
     else:
         kind, quantity = "unknown", i.count
-    return StockLogEntryOut(
-        item_id=i.id,
-        kind=kind,
-        at=at,
-        at_approx=approx and at is not None,
-        quantity=quantity,
-        drawn_down=drawn_down,
-        reason=i.stocktake_reason or "",
-        order_label=label,
-        order_url=url,
-        unit_price=i.unit_price,
-        price_basis=i.price_basis,
+    entries = []
+    # the receipt this row also records, when no surviving row reports it
+    if kind in ("consumed", "debt") and i.po_id is not None and i.id not in split_of:
+        entries.append(
+            StockLogEntryOut(
+                item_id=i.id,
+                kind="received",
+                at=po_date,
+                at_approx=po_date is not None,
+                quantity=abs(i.count),
+                drawn_down=False,
+                reason="",
+                order_label=po_ref or f"PO-{i.po_id}",
+                order_url=f"/purchase-orders/{i.po_id}",
+                unit_price=i.unit_price,
+                price_basis=i.price_basis,
+            )
+        )
+    entries.append(
+        StockLogEntryOut(
+            item_id=i.id,
+            kind=kind,
+            at=at,
+            at_approx=approx and at is not None,
+            quantity=quantity,
+            drawn_down=drawn_down,
+            reason=i.stocktake_reason or "",
+            order_label=label,
+            order_url=url,
+            unit_price=i.unit_price,
+            price_basis=i.price_basis,
+        )
     )
+    return entries
 
 
 @router.get("/parts/{part_id}/stock-log", response_model=list[StockLogEntryOut])
@@ -644,7 +673,14 @@ def list_part_stock_log(part_id: int) -> list[StockLogEntryOut]:
                 .where(StockItem.part_id == part_id)
             )
         }
-    entries = [_stock_log_entry(r, booked) for r in rows]
+    # POs whose receipt is still reported by a row of its own. A consumed row
+    # sharing that PO is a slice of it (produce_build copies po_id onto the
+    # split), so it must not report the receipt a second time.
+    reported = {
+        r[0].po_id for r in rows if r[0].po_id and r[0].consumed_by_build_id is None
+    }
+    split_of = {r[0].id for r in rows if r[0].po_id in reported}
+    entries = [e for r in rows for e in _stock_log_entries(r, booked, split_of)]
     # ids are strictly max+1, so they order events that share a date -- which
     # whole batches do, every row of one order carrying that order's date.
     # Pydantic has widened every `at` to datetime, so order dates (midnight)
