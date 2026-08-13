@@ -1150,6 +1150,7 @@ def create_po(
     end_date: date | None = None,
     delivery_cost: float = 0.0,
     supplier_reference: str = "",
+    description: str = "",
 ) -> None:
     get_supplier(s, supplier_id)
     if s.get(PurchaseOrder, po_id) is not None:
@@ -1169,6 +1170,7 @@ def create_po(
             end_date=end_date,
             delivery_cost=delivery_cost,
             supplier_reference=supplier_reference,
+            description=description,
         )
     )
     _activity(s, "create_po", f"Created {reference}", [("po", po_id, reference)])
@@ -1184,6 +1186,7 @@ def edit_po(
     end_date: date | None = None,
     delivery_cost: float = 0.0,
     supplier_reference: str = "",
+    description: str = "",
 ) -> None:
     po = get_po(s, po_id)
     # status transition rules: Complete/Cancelled are dead ends (mirrors builds);
@@ -1208,6 +1211,7 @@ def edit_po(
     po.end_date = end_date
     po.delivery_cost = delivery_cost
     po.supplier_reference = supplier_reference
+    po.description = description
     if reprice:
         # cancelling drops this order's prices; the date decides which order is
         # "latest" -- either way every part on it may be repriced
@@ -1528,6 +1532,7 @@ def create_build(
     quantity: int,
     reference: str = "",
     status: str = "",
+    description: str = "",
     start_date: date | None = None,
     end_date: date | None = None,
 ) -> None:
@@ -1545,6 +1550,7 @@ def create_build(
             quantity=quantity,
             reference=reference,
             status=status,
+            description=description,
             start_date=start_date,
             end_date=end_date,
         )
@@ -1566,6 +1572,7 @@ def edit_build(
     quantity: int,
     reference: str = "",
     status: str = "",
+    description: str = "",
     start_date: date | None = None,
     end_date: date | None = None,
 ) -> None:
@@ -1593,6 +1600,7 @@ def edit_build(
     build.quantity = quantity
     build.reference = reference
     build.status = status
+    build.description = description
     build.start_date = start_date
     build.end_date = end_date
 

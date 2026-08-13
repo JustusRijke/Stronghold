@@ -73,11 +73,18 @@ def test_part_stock_log(client):
     sup = client.post("/api/suppliers", json={"name": "Acme"}).json()["id"]
     sp = client.post(
         "/api/supplier-parts",
-        json={"supplier_id": sup, "sku": "A-1", "part_id": comp, "pack_qty": 1},
+        json={
+            "description": "d",
+            "supplier_id": sup,
+            "sku": "A-1",
+            "part_id": comp,
+            "pack_qty": 1,
+        },
     ).json()["id"]
     # the PO is ordered well before the build that eats its stock
     po = client.post(
-        "/api/purchase-orders", json={"supplier_id": sup, "start_date": "2024-01-01"}
+        "/api/purchase-orders",
+        json={"description": "d", "supplier_id": sup, "start_date": "2024-01-01"},
     ).json()["id"]
     line = client.post(
         f"/api/purchase-orders/{po}/lines",
@@ -87,7 +94,12 @@ def test_part_stock_log(client):
 
     build = client.post(
         "/api/build-orders",
-        json={"part_id": asm, "quantity": 3, "start_date": "2024-06-01"},
+        json={
+            "description": "d",
+            "part_id": asm,
+            "quantity": 3,
+            "start_date": "2024-06-01",
+        },
     ).json()["id"]
     client.patch(f"/api/build-orders/{build}", json={"status": "Production"})
     client.post(f"/api/build-orders/{build}/produce", json={"quantity": 3})
@@ -155,10 +167,17 @@ def test_stock_log_reports_imported_receipts(client):
     sup = client.post("/api/suppliers", json={"name": "Acme"}).json()["id"]
     client.post(
         "/api/supplier-parts",
-        json={"supplier_id": sup, "sku": "A-1", "part_id": part, "pack_qty": 1},
+        json={
+            "description": "d",
+            "supplier_id": sup,
+            "sku": "A-1",
+            "part_id": part,
+            "pack_qty": 1,
+        },
     )
     po = client.post(
-        "/api/purchase-orders", json={"supplier_id": sup, "start_date": "2024-01-01"}
+        "/api/purchase-orders",
+        json={"description": "d", "supplier_id": sup, "start_date": "2024-01-01"},
     ).json()["id"]
     asm = client.post("/api/parts", json={"sku": "A", "description": "asm"}).json()[
         "id"
@@ -166,7 +185,12 @@ def test_stock_log_reports_imported_receipts(client):
     client.patch(f"/api/parts/{asm}", json={"assembly": True})
     build = client.post(
         "/api/build-orders",
-        json={"part_id": asm, "quantity": 1, "start_date": "2024-06-01"},
+        json={
+            "description": "d",
+            "part_id": asm,
+            "quantity": 1,
+            "start_date": "2024-06-01",
+        },
     ).json()["id"]
 
     # the shape the InvenTree import writes: consumed, stamped with its PO,
@@ -201,7 +225,12 @@ def test_stock_log_reports_imported_production(client):
     client.patch(f"/api/parts/{asm}", json={"assembly": True})
     made = client.post(
         "/api/build-orders",
-        json={"part_id": asm, "quantity": 5, "start_date": "2024-01-01"},
+        json={
+            "description": "d",
+            "part_id": asm,
+            "quantity": 5,
+            "start_date": "2024-01-01",
+        },
     ).json()["id"]
     bigger = client.post("/api/parts", json={"sku": "B", "description": "big"}).json()[
         "id"
@@ -209,7 +238,12 @@ def test_stock_log_reports_imported_production(client):
     client.patch(f"/api/parts/{bigger}", json={"assembly": True})
     ate = client.post(
         "/api/build-orders",
-        json={"part_id": bigger, "quantity": 1, "start_date": "2024-06-01"},
+        json={
+            "description": "d",
+            "part_id": bigger,
+            "quantity": 1,
+            "start_date": "2024-06-01",
+        },
     ).json()["id"]
 
     with db.session() as s:
@@ -244,7 +278,7 @@ def test_purchasing_and_booking(client):
     ).json()["id"]
     po = client.post(
         "/api/purchase-orders",
-        json={"supplier_id": sup_id, "end_date": "2026-03-01"},
+        json={"description": "d", "supplier_id": sup_id, "end_date": "2026-03-01"},
     ).json()
     po_id = po["id"]
     assert po["end_date"] == "2026-03-01"  # dates round-trip as ISO strings
@@ -310,9 +344,9 @@ def test_receive_all_and_sku_edit(client):
         "/api/supplier-parts",
         json={"supplier_id": sup_id, "sku": "SP", "part_id": pid, "pack_qty": 2},
     ).json()["id"]
-    po_id = client.post("/api/purchase-orders", json={"supplier_id": sup_id}).json()[
-        "id"
-    ]
+    po_id = client.post(
+        "/api/purchase-orders", json={"description": "d", "supplier_id": sup_id}
+    ).json()["id"]
     for qty in (5, 3):
         client.post(
             f"/api/purchase-orders/{po_id}/lines",
@@ -385,20 +419,22 @@ def test_build_flow(client):
     # building a non-assembly part is rejected
     assert (
         client.post(
-            "/api/build-orders", json={"part_id": comp, "quantity": 1}
+            "/api/build-orders",
+            json={"description": "d", "part_id": comp, "quantity": 1},
         ).status_code
         == 400
     )
     # invalid status is rejected by the schema
     assert (
         client.post(
-            "/api/build-orders", json={"part_id": asm, "quantity": 3, "status": "Bogus"}
+            "/api/build-orders",
+            json={"description": "d", "part_id": asm, "quantity": 3, "status": "Bogus"},
         ).status_code
         == 422
     )
 
     build = client.post(
-        "/api/build-orders", json={"part_id": asm, "quantity": 3}
+        "/api/build-orders", json={"description": "d", "part_id": asm, "quantity": 3}
     ).json()
     bid = build["id"]
     assert build["status"] == "Draft"
@@ -472,9 +508,9 @@ def test_build_flow(client):
 
     # shortage does not block: components are exhausted, but producing anyway
     # succeeds -- it produces the full assembly count and consumes what exists
-    big = client.post("/api/build-orders", json={"part_id": asm, "quantity": 5}).json()[
-        "id"
-    ]
+    big = client.post(
+        "/api/build-orders", json={"description": "d", "part_id": asm, "quantity": 5}
+    ).json()["id"]
     r = client.post(f"/api/build-orders/{big}/produce", json={"quantity": 5})
     assert r.is_success and r.json()["produced"] == 5
     assert r.json()["status"] == "Complete"
@@ -516,7 +552,7 @@ def test_search(client):
     sup = client.post("/api/suppliers", json={"name": "SrchCo"}).json()
     po = client.post(
         "/api/purchase-orders",
-        json={"supplier_id": sup["id"], "reference": "SRCH-PO-1"},
+        json={"description": "d", "supplier_id": sup["id"], "reference": "SRCH-PO-1"},
     ).json()
 
     hits = client.get("/api/search", params={"q": "srch"}).json()
@@ -561,7 +597,9 @@ def test_stock_value_report(client):
             "pack_qty": 10,
         },
     ).json()
-    po = client.post("/api/purchase-orders", json={"supplier_id": sup["id"]}).json()
+    po = client.post(
+        "/api/purchase-orders", json={"description": "d", "supplier_id": sup["id"]}
+    ).json()
     line = client.post(
         f"/api/purchase-orders/{po['id']}/lines",
         json={"supplier_part_id": sp["id"], "quantity": 2, "price": 50.0},
@@ -614,7 +652,8 @@ def test_stock_value_report(client):
         json={"component_part_id": part["id"], "quantity": 30.0},
     )
     build = client.post(
-        "/api/build-orders", json={"part_id": asm["id"], "quantity": 1}
+        "/api/build-orders",
+        json={"description": "d", "part_id": asm["id"], "quantity": 1},
     ).json()
     client.post(f"/api/build-orders/{build['id']}/produce", json={"quantity": 1})
     report = client.get("/api/reports/stock-value").json()
@@ -639,7 +678,7 @@ def test_stock_value_report(client):
         },
     ).json()
     free_po = client.post(
-        "/api/purchase-orders", json={"supplier_id": sup["id"]}
+        "/api/purchase-orders", json={"description": "d", "supplier_id": sup["id"]}
     ).json()
     free_line = client.post(
         f"/api/purchase-orders/{free_po['id']}/lines",
@@ -659,7 +698,7 @@ def test_stock_value_report(client):
     # from it rather than left unpriced
     later_po = client.post(
         "/api/purchase-orders",
-        json={"supplier_id": sup["id"], "reference": "PO-LATER"},
+        json={"description": "d", "supplier_id": sup["id"], "reference": "PO-LATER"},
     ).json()
     client.patch(
         f"/api/purchase-orders/{later_po['id']}", json={"start_date": "2030-01-01"}
@@ -682,7 +721,7 @@ def test_stock_value_report(client):
     # "latest" means the most recent order date, not the highest id: this PO is
     # created last but dated earlier, so it must not win the estimate
     older_po = client.post(
-        "/api/purchase-orders", json={"supplier_id": sup["id"]}
+        "/api/purchase-orders", json={"description": "d", "supplier_id": sup["id"]}
     ).json()
     client.patch(
         f"/api/purchase-orders/{older_po['id']}", json={"start_date": "2020-01-01"}
@@ -713,7 +752,9 @@ def _priced_part(client, sup, sku, price, pack_qty=1, date="2026-01-01"):
             "pack_qty": pack_qty,
         },
     ).json()
-    po = client.post("/api/purchase-orders", json={"supplier_id": sup["id"]}).json()
+    po = client.post(
+        "/api/purchase-orders", json={"description": "d", "supplier_id": sup["id"]}
+    ).json()
     client.patch(f"/api/purchase-orders/{po['id']}", json={"start_date": date})
     client.post(
         f"/api/purchase-orders/{po['id']}/lines",
@@ -743,7 +784,9 @@ def test_part_price_cache(client):
             "pack_qty": 1,
         },
     ).json()
-    po2 = client.post("/api/purchase-orders", json={"supplier_id": sup["id"]}).json()
+    po2 = client.post(
+        "/api/purchase-orders", json={"description": "d", "supplier_id": sup["id"]}
+    ).json()
     client.patch(f"/api/purchase-orders/{po2['id']}", json={"start_date": "2026-06-01"})
     client.post(
         f"/api/purchase-orders/{po2['id']}/lines",
@@ -781,7 +824,9 @@ def test_part_price_cache(client):
     ] == pytest.approx(3 * 1.1)
 
     # a change deep in the tree propagates up to every ancestor
-    po3 = client.post("/api/purchase-orders", json={"supplier_id": sup["id"]}).json()
+    po3 = client.post(
+        "/api/purchase-orders", json={"description": "d", "supplier_id": sup["id"]}
+    ).json()
     client.patch(f"/api/purchase-orders/{po3['id']}", json={"start_date": "2026-09-01"})
     client.post(
         f"/api/purchase-orders/{po3['id']}/lines",
@@ -827,7 +872,9 @@ def test_stock_keeps_its_own_purchase_price(client):
     ).json()
 
     def receive(price, date, qty):
-        po = client.post("/api/purchase-orders", json={"supplier_id": sup["id"]}).json()
+        po = client.post(
+            "/api/purchase-orders", json={"description": "d", "supplier_id": sup["id"]}
+        ).json()
         client.patch(f"/api/purchase-orders/{po['id']}", json={"start_date": date})
         line = client.post(
             f"/api/purchase-orders/{po['id']}/lines",
@@ -916,7 +963,9 @@ def test_build_produced_stock_costed_from_consumption(client):
     def stock(part, qty, price, date):
         sp = client.get("/api/supplier-parts").json()
         spid = next(x["id"] for x in sp if x["part_id"] == part["id"])
-        po = client.post("/api/purchase-orders", json={"supplier_id": sup["id"]}).json()
+        po = client.post(
+            "/api/purchase-orders", json={"description": "d", "supplier_id": sup["id"]}
+        ).json()
         client.patch(f"/api/purchase-orders/{po['id']}", json={"start_date": date})
         line = client.post(
             f"/api/purchase-orders/{po['id']}/lines",
@@ -941,7 +990,8 @@ def test_build_produced_stock_costed_from_consumption(client):
     )
 
     build = client.post(
-        "/api/build-orders", json={"part_id": asm["id"], "quantity": 3}
+        "/api/build-orders",
+        json={"description": "d", "part_id": asm["id"], "quantity": 3},
     ).json()
     client.patch(f"/api/build-orders/{build['id']}", json={"status": "Production"})
     r = client.post(f"/api/build-orders/{build['id']}/produce", json={"quantity": 3})
@@ -970,7 +1020,8 @@ def test_build_produced_stock_costed_from_consumption(client):
         json={"component_part_id": a["id"], "quantity": 100},  # far more than stocked
     )
     sb = client.post(
-        "/api/build-orders", json={"part_id": short_asm["id"], "quantity": 1}
+        "/api/build-orders",
+        json={"description": "d", "part_id": short_asm["id"], "quantity": 1},
     ).json()
     client.patch(f"/api/build-orders/{sb['id']}", json={"status": "Production"})
     client.post(f"/api/build-orders/{sb['id']}/produce", json={"quantity": 1})
@@ -1027,7 +1078,7 @@ def test_part_demand_and_suggested_order(client):
     client.patch(f"/api/stock/{item['id']}", json={"count": 3})
 
     build = client.post(
-        "/api/build-orders", json={"part_id": asm, "quantity": 4}
+        "/api/build-orders", json={"description": "d", "part_id": asm, "quantity": 4}
     ).json()
     # a Draft build is a scratchpad and asks for nothing yet
     assert build["status"] == "Draft"
@@ -1046,9 +1097,17 @@ def test_part_demand_and_suggested_order(client):
     sup = client.post("/api/suppliers", json={"name": "S"}).json()["id"]
     sp = client.post(
         "/api/supplier-parts",
-        json={"supplier_id": sup, "sku": "SP", "part_id": comp, "pack_qty": 2},
+        json={
+            "description": "d",
+            "supplier_id": sup,
+            "sku": "SP",
+            "part_id": comp,
+            "pack_qty": 2,
+        },
     ).json()["id"]
-    po = client.post("/api/purchase-orders", json={"supplier_id": sup}).json()["id"]
+    po = client.post(
+        "/api/purchase-orders", json={"description": "d", "supplier_id": sup}
+    ).json()["id"]
     client.post(
         f"/api/purchase-orders/{po}/lines",
         json={"supplier_part_id": sp, "quantity": 2, "price": 1.0},

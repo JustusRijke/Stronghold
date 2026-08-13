@@ -209,6 +209,7 @@ class PurchaseOrder(Base):
     end_date: Mapped[date | None] = mapped_column(default=None)  # target arrival
     delivery_cost: Mapped[float] = mapped_column(default=0.0)
     supplier_reference: Mapped[str] = mapped_column(default="")
+    description: Mapped[str] = mapped_column(default="")
 
 
 class POLine(Base):
@@ -240,6 +241,7 @@ class BuildOrder(Base):
     imported_produced: Mapped[int] = mapped_column(default=0)
     reference: Mapped[str] = mapped_column(default="")
     status: Mapped[str] = mapped_column(default="")
+    description: Mapped[str] = mapped_column(default="")
     start_date: Mapped[date | None] = mapped_column(default=None)
     end_date: Mapped[date | None] = mapped_column(default=None)  # target completion
 
