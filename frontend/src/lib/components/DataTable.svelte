@@ -205,12 +205,25 @@
 
 	let statusMenuOpen = $state<string | null>(null);
 	// the menu is position:fixed so `.table-scroll`'s overflow cannot clip it;
-	// that costs it its anchor, so pin it to the button's rect on open
-	let statusMenuPos = $state({ top: 0, right: 0 });
-	function openStatusMenu(key: string, e: MouseEvent) {
+	// that costs it its anchor, so pin it to the button's rect on open. Anchor
+	// the near edge (top below the button, or bottom above it) and let the far
+	// edge fall where it may -- max-height keeps it on screen either way.
+	let statusMenuPos = $state({ top: 'auto', bottom: 'auto', right: 0, maxHeight: 0 });
+	const MENU_ROW_PX = 25; // one .menu-item; enough of an estimate to pick a side
+	function openStatusMenu(key: string, e: MouseEvent, rows: number) {
 		if (statusMenuOpen === key) return (statusMenuOpen = null);
 		const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		statusMenuPos = { top: r.bottom + 4, right: window.innerWidth - r.right };
+		const below = window.innerHeight - r.bottom - 8;
+		const above = r.top - 8;
+		// flip up only when below cannot hold it and above is roomier
+		const wanted = rows * MENU_ROW_PX + 36;
+		const up = below < wanted && above > below;
+		statusMenuPos = {
+			top: up ? 'auto' : `${r.bottom + 4}px`,
+			bottom: up ? `${window.innerHeight - r.top + 4}px` : 'auto',
+			right: window.innerWidth - r.right,
+			maxHeight: (up ? above : below) - 4
+		};
 		statusMenuOpen = key;
 	}
 	function setText(key: string, v: string) {
@@ -318,7 +331,7 @@
 								<button
 									class="tool statusfilter"
 									title="Filter which statuses to show"
-									onclick={(e) => openStatusMenu(c.key, e)}
+									onclick={(e) => openStatusMenu(c.key, e, statusValues(c).length)}
 									>&#9660;</button
 								>
 								{#if statusMenuOpen === c.key}
@@ -330,7 +343,7 @@
 									<div
 										class="menu fixed"
 										role="menu"
-										style="top:{statusMenuPos.top}px; right:{statusMenuPos.right}px"
+										style="top:{statusMenuPos.top}; bottom:{statusMenuPos.bottom}; right:{statusMenuPos.right}px; max-height:{statusMenuPos.maxHeight}px"
 									>
 										<div class="menu-title">Show</div>
 										{#each statusValues(c) as v (v)}
@@ -501,6 +514,7 @@
 	/* escapes `.table-scroll`'s overflow clip; positioned inline from the button */
 	.menu.fixed {
 		position: fixed;
+		overflow-y: auto; /* max-height is set inline; scroll rather than run off-screen */
 	}
 	.menu-title {
 		font-size: 11px;
