@@ -192,7 +192,30 @@ what that build consumed.
 ## Virtual parts
 
 A part can be marked **virtual** -- something with unlimited supply that has a
-cost but no physical stock, typically labour. Virtual parts never have stock
-items and are never drawn down by a build. They exist so an assembly can be
+cost but no physical stock, typically labour. Virtual parts hold no stock on the
+shelf and are never drawn down by a build. They exist so an assembly can be
 costed properly: their rate shows up in what a build consumed and in the
 assembly's unit cost, but they never appear in your stock value.
+
+### The rate is frozen at the moment you build
+
+When a build consumes a virtual component, Stronghold records a consumed stock
+row for it, at the rate in force at that moment. **That rate is then frozen.**
+
+This matters when you later change the rate. Put your labour rate up from 10 to
+15 and nothing already built moves: past builds stay costed at 10, because
+that is what they actually cost. Only builds produced from then on use 15.
+
+The freeze is deliberate and absolute -- no repricing anywhere in the app will
+overwrite an already-recorded virtual rate, including the "Recalculate all part
+prices" maintenance action. It is the one price that is never recomputed.
+
+The single exception is a virtual part that had **no** price at all when the
+build was produced. There was nothing to freeze, so it shows as "No price
+known", and giving the part a price will fill it in.
+
+Historical builds brought in from an InvenTree import work the same way, with
+one caveat: InvenTree keeps no record of what labour cost at the time, so those
+builds are baselined at the rate the part had on the day of the import. That
+figure is a starting point, not history -- but once imported it is frozen like
+any other.
