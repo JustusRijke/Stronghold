@@ -381,6 +381,7 @@
 				// filter unhides them
 				statusDefaultHide: BUILD_DONE
 			},
+			{ key: 'start_date', header: 'Start', width: '140px' },
 			{ key: 'end_date', header: 'Target', width: '140px' }
 		];
 	}

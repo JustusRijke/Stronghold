@@ -13,6 +13,7 @@
 		quantity: number;
 		produced: number;
 		status: string;
+		start_date: string;
 		end_date: string;
 	};
 	let rows = $state<Row[]>([]);
@@ -27,6 +28,7 @@
 			quantity: b.quantity,
 			produced: b.produced,
 			status: b.status,
+			start_date: b.start_date ?? '',
 			end_date: b.end_date ?? ''
 		}));
 	}
@@ -48,6 +50,7 @@
 			statusOptions: BUILD_STATUS_OPTIONS,
 			statusDefaultHide: BUILD_DONE
 		},
+		{ key: 'start_date', header: 'Start', width: '140px' },
 		{ key: 'end_date', header: 'Target', width: '140px' }
 	];
 </script>
