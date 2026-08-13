@@ -73,9 +73,11 @@ Open-source inventory/stock tracking for small and medium businesses.
   these are the builds that make it (with how many each has produced, and a
   button to raise a new one); for any other part they are the builds that
   consume it, showing how much each requires of it ("Required") and how much
-  stock it has actually taken so far ("Consumed"). Like the build orders
-  overview, the list shows open builds and hides finished ones until you unhide
-  them with the status filter
+  stock it has actually taken so far ("Consumed"). A sub-assembly is both built
+  and consumed, so an assembly page also has a "Used in build orders" section
+  with the consumed-by table. Like the build orders overview, the lists show
+  open builds and hide finished ones until you unhide them with the status
+  filter
 - A build order keeps its own copy of the assembly's BOM, taken when the order
   was created, so editing the BOM later does not change what an existing build
   is set to consume. If the two drift apart the build page says so and offers

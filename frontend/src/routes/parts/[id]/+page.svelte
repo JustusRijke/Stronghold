@@ -32,6 +32,9 @@
 	// an assembly lists the builds that make it; any other part lists the builds
 	// that consume it (with what they require of it and have consumed so far)
 	let builds = $state<PartBuild[]>([]);
+	// a sub-assembly is both built and consumed, so an assembly gets the
+	// consumed-by table as its own section as well
+	let consumedBy = $state<PartBuild[]>([]);
 
 	// new-bom-line inputs
 	let newComp = $state<number | ''>('');
@@ -150,7 +153,8 @@
 			usage,
 			allSuppliers,
 			partBuilds,
-			log
+			log,
+			usedInBuilds
 		] = await Promise.all([
 			part.assembly ? api.bom(id) : Promise.resolve([]),
 			api.parts(),
@@ -160,8 +164,10 @@
 			api.partUsedIn(id),
 			api.suppliers(),
 			part.assembly ? (api.partBuilds(id) as Promise<PartBuild[]>) : api.partConsumedBy(id),
-			api.partStockLog(id)
+			api.partStockLog(id),
+			part.assembly ? api.partConsumedBy(id) : Promise.resolve([])
 		]);
+		consumedBy = usedInBuilds;
 		stockLog = log;
 		bom = bomLines;
 		activeParts = allParts.filter((p) => p.active);
@@ -196,7 +202,8 @@
 					...(buyable ? [{ id: 'purchase-orders', label: 'Purchase orders' }] : [])
 				]),
 		{ id: 'used-in', label: 'Used in' },
-		{ id: 'build-orders', label: 'Build orders' }
+		{ id: 'build-orders', label: 'Build orders' },
+		...(part?.assembly ? [{ id: 'used-in-builds', label: 'Used in build orders' }] : [])
 	]);
 
 	function label(p: Part) {
@@ -335,28 +342,34 @@
 		},
 		{ key: 'end_date', header: 'Target', width: '140px' }
 	];
-	const buildCols: Column<PartBuild>[] = $derived([
-		{ key: 'reference', header: 'Build', mono: true, width: '150px' },
-		{ key: 'description', header: 'Description', truncate: true },
-		{ key: 'quantity', header: 'Qty', mono: true, width: '90px' },
-		...(part?.assembly
-			? ([{ key: 'produced', header: 'Produced', mono: true, width: '100px' }] as Column<PartBuild>[])
-			: ([
-					{ key: 'required', header: 'Required', mono: true, width: '100px' },
-					{ key: 'consumed', header: 'Consumed', mono: true, width: '100px' }
-				] as Column<PartBuild>[])),
-		{
-			key: 'status',
-			header: 'Status',
-			width: '120px',
-			statusFilter: true,
-			statusOptions: BUILD_STATUS_OPTIONS,
-			// finished builds are history and outnumber the open ones; the status
-			// filter unhides them
-			statusDefaultHide: BUILD_DONE
-		},
-		{ key: 'end_date', header: 'Target', width: '140px' }
-	]);
+	// same table twice: "produced" for builds that make this part, "required /
+	// consumed" for builds that eat it (a sub-assembly gets both sections)
+	function buildColumns(mine: boolean): Column<PartBuild>[] {
+		return [
+			{ key: 'reference', header: 'Build', mono: true, width: '150px' },
+			{ key: 'description', header: 'Description', truncate: true },
+			{ key: 'quantity', header: 'Qty', mono: true, width: '90px' },
+			...(mine
+				? ([{ key: 'produced', header: 'Produced', mono: true, width: '100px' }] as Column<PartBuild>[])
+				: ([
+						{ key: 'required', header: 'Required', mono: true, width: '100px' },
+						{ key: 'consumed', header: 'Consumed', mono: true, width: '100px' }
+					] as Column<PartBuild>[])),
+			{
+				key: 'status',
+				header: 'Status',
+				width: '120px',
+				statusFilter: true,
+				statusOptions: BUILD_STATUS_OPTIONS,
+				// finished builds are history and outnumber the open ones; the status
+				// filter unhides them
+				statusDefaultHide: BUILD_DONE
+			},
+			{ key: 'end_date', header: 'Target', width: '140px' }
+		];
+	}
+	const buildCols = $derived(buildColumns(!!part?.assembly));
+	const consumedByCols = buildColumns(false);
 	const usedInCols: Column<BomUsage>[] = [
 		{ key: 'parent_sku', header: 'Assembly', mono: true, width: '150px' },
 		{ key: 'parent_description', header: 'Description', truncate: true },
@@ -621,6 +634,21 @@
 					onAdd={part.assembly ? () => goto(`/build-orders/new?part_id=${id}`) : undefined}
 				/>
 			</section>
+			{#if part.assembly}
+				<section id="used-in-builds">
+					<h2 class="h2">
+						Used in build orders
+						<span class="hint">builds that consume this assembly as a component</span>
+					</h2>
+					<DataTable
+						columns={consumedByCols}
+						rows={consumedBy}
+						href={(b) => `/build-orders/${b.id}`}
+						storageKey={`/parts/${id}/used-in-builds`}
+						defaultSort={{ key: 'end_date', dir: 'desc' }}
+					/>
+				</section>
+			{/if}
 		</div>
 	</div>
 
