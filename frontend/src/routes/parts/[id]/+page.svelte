@@ -565,7 +565,7 @@
 					<DataTable
 						columns={logCols}
 						rows={logRows}
-						href={(r) => `/stock/${r.item_id}`}
+						href={(r) => `/stock/${r.item_id}#${r.kind}`}
 						storageKey={`/parts/${id}/stock-log`}
 					/>
 				</section>
