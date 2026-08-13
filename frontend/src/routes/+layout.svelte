@@ -143,6 +143,19 @@
 		</svg>
 	</a>
 	<a
+		href="/help"
+		class="help"
+		class:active={isActive('/help')}
+		title="Help"
+		aria-label="Help"
+	>
+		<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+			<circle cx="12" cy="12" r="9" />
+			<path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4" />
+			<path d="M12 17h.01" />
+		</svg>
+	</a>
+	<a
 		href="/settings"
 		class="settings"
 		class:active={isActive('/settings')}
@@ -218,6 +231,7 @@
 		background: rgba(127, 127, 127, 0.15);
 	}
 	.activity,
+	.help,
 	.settings {
 		display: flex;
 		align-items: center;
