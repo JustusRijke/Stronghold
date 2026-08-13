@@ -601,23 +601,45 @@ def _stock_log_entries(
     else:
         kind, quantity = "unknown", i.count
     entries = []
-    # the receipt this row also records, when no surviving row reports it
-    if kind in ("consumed", "debt") and i.po_id is not None and i.id not in split_of:
-        entries.append(
-            StockLogEntryOut(
-                item_id=i.id,
-                kind="received",
-                at=po_date,
-                at_approx=po_date is not None,
-                quantity=abs(i.count),
-                drawn_down=False,
-                reason="",
-                order_label=po_ref or f"PO-{i.po_id}",
-                order_url=f"/purchase-orders/{i.po_id}",
-                unit_price=i.unit_price,
-                price_basis=i.price_basis,
+    # How this stock came to exist, when no surviving row reports it: a
+    # consumed row keeps the PO it was bought on or the build that made it, and
+    # for imported stock that row is all there is.
+    if kind in ("consumed", "debt") and i.id not in split_of:
+        if i.po_id is not None:
+            origin = (
+                "received",
+                po_date,
+                po_ref or f"PO-{i.po_id}",
+                "purchase-orders",
+                i.po_id,
             )
-        )
+        elif i.build_id is not None:
+            origin = (
+                "produced",
+                prod_date,
+                prod_ref or f"BO-{i.build_id}",
+                "build-orders",
+                i.build_id,
+            )
+        else:
+            origin = None
+        if origin is not None:
+            origin_kind, origin_at, origin_label, route, order_id = origin
+            entries.append(
+                StockLogEntryOut(
+                    item_id=i.id,
+                    kind=origin_kind,
+                    at=origin_at,
+                    at_approx=origin_at is not None,
+                    quantity=abs(i.count),
+                    drawn_down=False,
+                    reason="",
+                    order_label=origin_label,
+                    order_url=f"/{route}/{order_id}",
+                    unit_price=i.unit_price,
+                    price_basis=i.price_basis,
+                )
+            )
     entries.append(
         StockLogEntryOut(
             item_id=i.id,
@@ -673,13 +695,18 @@ def list_part_stock_log(part_id: int) -> list[StockLogEntryOut]:
                 .where(StockItem.part_id == part_id)
             )
         }
-    # POs whose receipt is still reported by a row of its own. A consumed row
-    # sharing that PO is a slice of it (produce_build copies po_id onto the
-    # split), so it must not report the receipt a second time.
-    reported = {
-        r[0].po_id for r in rows if r[0].po_id and r[0].consumed_by_build_id is None
+    # Orders whose receipt/production is still reported by a row of its own. A
+    # consumed row sharing that order is a slice of it (produce_build copies
+    # po_id and build_id onto the split), so it must not report that origin a
+    # second time.
+    survivors = [r[0] for r in rows if r[0].consumed_by_build_id is None]
+    reported_pos = {i.po_id for i in survivors if i.po_id is not None}
+    reported_builds = {i.build_id for i in survivors if i.build_id is not None}
+    split_of = {
+        r[0].id
+        for r in rows
+        if r[0].po_id in reported_pos or r[0].build_id in reported_builds
     }
-    split_of = {r[0].id for r in rows if r[0].po_id in reported}
     entries = [e for r in rows for e in _stock_log_entries(r, booked, split_of)]
     # ids are strictly max+1, so they order events that share a date -- which
     # whole batches do, every row of one order carrying that order's date.

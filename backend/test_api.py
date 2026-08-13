@@ -190,6 +190,49 @@ def test_stock_log_reports_imported_receipts(client):
     assert log[1]["at"].startswith("2024-06-01") and log[1]["quantity"] == -7
 
 
+def test_stock_log_reports_imported_production(client):
+    """The same for an assembly: imported stock that one build made and another
+    ate carries both build ids, and nothing else records the production. The
+    row is two events -- built, then consumed -- so an assembly's log is not
+    only the builds that ate it."""
+    asm = client.post("/api/parts", json={"sku": "A", "description": "asm"}).json()[
+        "id"
+    ]
+    client.patch(f"/api/parts/{asm}", json={"assembly": True})
+    made = client.post(
+        "/api/build-orders",
+        json={"part_id": asm, "quantity": 5, "start_date": "2024-01-01"},
+    ).json()["id"]
+    bigger = client.post("/api/parts", json={"sku": "B", "description": "big"}).json()[
+        "id"
+    ]
+    client.patch(f"/api/parts/{bigger}", json={"assembly": True})
+    ate = client.post(
+        "/api/build-orders",
+        json={"part_id": bigger, "quantity": 1, "start_date": "2024-06-01"},
+    ).json()["id"]
+
+    with db.session() as s:
+        s.add(
+            StockItem(
+                id=db.next_item_id(),
+                part_id=asm,
+                count=5,
+                build_id=made,
+                consumed_by_build_id=ate,
+                status="Consumed by build order",
+            )
+        )
+        s.commit()
+
+    log = client.get(f"/api/parts/{asm}/stock-log").json()
+    assert [e["kind"] for e in log] == ["produced", "consumed"]
+    assert log[0]["at"].startswith("2024-01-01") and log[0]["quantity"] == 5
+    assert log[0]["order_url"] == f"/build-orders/{made}"
+    assert log[1]["at"].startswith("2024-06-01") and log[1]["quantity"] == -5
+    assert log[1]["order_url"] == f"/build-orders/{ate}"
+
+
 def test_purchasing_and_booking(client):
     pid = client.post("/api/parts", json={"sku": "BOLT", "description": "bolt"}).json()[
         "id"
