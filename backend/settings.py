@@ -26,7 +26,10 @@ DEFAULTS = {
 
 class Settings:
     def __init__(self, path: Path) -> None:
-        self._data = {} if not path.exists() else tomllib.loads(path.read_text("utf-8"))
+        self.path = path.resolve()
+        self.found = path.exists()
+        self.text = path.read_text("utf-8") if self.found else ""
+        self._data = tomllib.loads(self.text) if self.found else {}
 
     def get(self, section: str, key: str):
         """A setting's value, or its default. Unknown section/key fails loudly."""

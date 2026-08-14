@@ -180,6 +180,8 @@ export const api = {
 
 	// settings
 	settings: () => get<Setting[]>('/settings'),
+	deploymentSettings: () =>
+		get<{ path: string; found: boolean; text: string; db_path: string }>('/settings/deployment'),
 	setSetting: (key: string, value: string) => put<Setting>(`/settings/${enc(key)}`, { value }),
 
 	// reports

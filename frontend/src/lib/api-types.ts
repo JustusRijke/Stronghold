@@ -671,6 +671,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/deployment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Deployment Settings */
+        get: operations["deployment_settings_api_settings_deployment_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/stocktake-reasons": {
         parameters: {
             query?: never;
@@ -953,6 +970,21 @@ export interface components {
          * @enum {string}
          */
         BuildStatus: "Draft" | "Pending" | "Production" | "Cancelled" | "Complete";
+        /**
+         * DeploymentSettingsOut
+         * @description The settings.toml actually in use, shown read-only on the settings page.
+         *     `found` false means no file was there and defaults are in force.
+         */
+        DeploymentSettingsOut: {
+            /** Path */
+            path: string;
+            /** Found */
+            found: boolean;
+            /** Text */
+            text: string;
+            /** Db Path */
+            db_path: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -3116,6 +3148,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deployment_settings_api_settings_deployment_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentSettingsOut"];
                 };
             };
         };
