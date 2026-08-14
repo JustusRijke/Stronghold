@@ -3,7 +3,9 @@ booking -> export -> restore."""
 
 import json
 import sqlite3
+import subprocess
 from datetime import date
+from pathlib import Path
 
 import db
 import pytest
@@ -754,6 +756,33 @@ def test_suspended_export_still_persists_on_force(database):
     db.init(database)
     db.create_part(2, "AFTER", "written after re-init")
     assert "AFTER" in database.read_text(encoding="utf-8")
+
+
+def test_auto_commit(tmp_path):
+    """With auto_commit on and the data file in a git repo, every write lands as
+    a commit named after its activity record."""
+
+    def git(*args):
+        command = ["git", *args]
+        run = subprocess.run(  # noqa: S603
+            command, cwd=tmp_path, capture_output=True, text=True, check=True
+        )
+        return run.stdout
+
+    git("init", "-q")
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "T")
+    db.init(tmp_path / "inventory.sql", auto_commit=True)
+    db.create_part(1, "BOLT-M3", "M3 bolt")
+    db.set_setting("gui.title", "Warehouse")  # no activity record
+
+    log = git("log", "--format=%s").splitlines()
+    assert log[0] == db._NO_ACTIVITY_MESSAGE
+    assert log[1] == "Created part M3 bolt"
+
+    # committing the data into the app's own repo is never what the user meant
+    with pytest.raises(ValueError, match="app repo"):
+        db.init(Path(db.__file__).parent / "inventory.sql", auto_commit=True)
 
 
 def test_non_purchasable_part(database):

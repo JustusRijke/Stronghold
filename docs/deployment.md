@@ -70,6 +70,29 @@ git init
 git add inventory.sql && git commit -m "stock as of today"
 ```
 
+### Committing automatically
+
+You can let Stronghold do that commit for you, after every single change:
+
+```toml
+[db]
+auto_commit = true
+```
+
+Each write commits the data file with the activity-log entry it produced as
+the commit message ("Created part M3 bolt"), so `git log` reads as your
+inventory's history. A change that produced no activity entry is still
+committed, with a message saying so -- that is a gap in the app, worth
+reporting.
+
+Nothing happens if the data folder is not a git repository (or has no commit
+identity configured); the write still succeeds. The one thing that is refused
+is pointing `auto_commit` at a data file *inside* the Stronghold application
+folder -- the server stops at startup with an error, rather than filling the
+app's own history with your stock. Keep your data in a repository of its own.
+
+Default is `false`.
+
 ### Rolling back
 
 Because the `.sql` is the truth, undoing a mistake is a checkout and a

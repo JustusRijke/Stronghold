@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+import subprocess
 import tempfile
 from datetime import date, datetime
 from pathlib import Path
@@ -45,6 +46,8 @@ _log = logging.getLogger(__name__)
 _engine = None
 _export_path = None
 _export_enabled = True
+_auto_commit = False
+_committed_activity_id = None
 _db_path = None
 
 # domain settings: data, editable in the GUI, stored in the settings table
@@ -74,14 +77,23 @@ def suspend_export() -> None:
     _export_enabled = False
 
 
-def init(sql_path: Path) -> None:
+def init(sql_path: Path, auto_commit: bool = False) -> None:
     """Open the data in `sql_path`. That file is the truth (tracked in git,
     restorable by checking out an older commit); SQLite is only how we query
     it, so the .db is rebuilt from scratch in a temp directory on every
     startup and never has to be looked after."""
-    global _engine, _export_path, _db_path, _export_enabled
+    global _engine, _export_path, _db_path, _export_enabled, _auto_commit
+    global _committed_activity_id
     _export_path = sql_path
     _export_enabled = True  # a previous suspend_export must not leak in here
+    _auto_commit = auto_commit
+    _committed_activity_id = None
+    if auto_commit and Path(__file__).parent.parent in sql_path.resolve().parents:
+        raise ValueError(
+            f"db.auto_commit is on but the data file lives inside the Stronghold "
+            f"app repo ({sql_path}): the data belongs in a repo of its own, or "
+            f"every write would commit to the application's history"
+        )
     _db_path = _working_db_path(sql_path)
     _db_path.unlink(missing_ok=True)
     _engine = create_engine(f"sqlite:///{_db_path}")
@@ -182,6 +194,48 @@ def export(force: bool = False) -> None:
     tmp = _export_path.with_name(_export_path.name + ".tmp")
     tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
     tmp.replace(_export_path)
+    _commit_export()
+
+
+_NO_ACTIVITY_MESSAGE = (
+    "(no activity log record for this change -- the write that caused it does "
+    "not call db._activity; worth reporting to the developers)"
+)
+
+
+def _commit_export() -> None:
+    """Commit the exported data file, if it lives in a git repo and
+    db.auto_commit is on. The newest activity row is the message; a write that
+    logged nothing gets a message saying so, rather than being left uncommitted.
+
+    ponytail: shells out to git and ignores its exit code -- no repo, nothing
+    staged, or a missing identity all just mean "no commit today". Inspect the
+    output only when someone actually needs to debug it."""
+    global _committed_activity_id
+    if not _auto_commit:
+        return
+    with Session(_engine) as s:
+        row = s.scalars(select(Activity).order_by(Activity.id.desc()).limit(1)).first()
+    # a row we already used as a message says nothing about *this* write
+    fresh = row if row and row.id != _committed_activity_id else None
+    message = fresh.message if fresh else _NO_ACTIVITY_MESSAGE
+    _committed_activity_id = row.id if row else None
+    for command in (
+        ["git", "add", "--", _export_path.name],
+        ["git", "commit", "--only", "--message", message, "--", _export_path.name],
+    ):
+        result = subprocess.run(  # noqa: S603
+            command,
+            cwd=_export_path.parent,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode:
+            _log.debug(
+                "auto commit skipped: %s", (result.stderr or result.stdout).strip()
+            )
+            return
 
 
 def _write(fn):
