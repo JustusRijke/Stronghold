@@ -240,5 +240,25 @@ gh pr create                   # open a PR against main
   but it is opt-in per clone: `git config core.hooksPath .githooks`.
 - Update the README in the same PR as any feature change.
 
-Stronghold is pre-1.0, so breaking changes to the API, CLI flags and output
-formats are allowed -- call them out in the PR description.
+From 1.0 on, breaking changes to the API, CLI flags and output formats need a
+major version bump -- call them out in the PR description either way.
+
+### Releases
+
+The git tag *is* the version: `backend/version.py` reads it through
+`hatch-vcs`, so there is no version number to bump by hand.
+
+```bash
+git tag -a v1.0.0 -m "Stronghold 1.0.0"   # on main, after the PR is merged
+git push origin v1.0.0
+uv sync                                    # required: the version is resolved
+                                           # at install time, not read live
+```
+
+Between tags the version reports as e.g. `1.0.1.dev3+g1aebf96` -- expected for
+a development build. Only the `X.Y.Z` part is written into data files.
+
+Changing the *shape* of the data is a separate decision: bump `SCHEMA_VERSION`
+in `backend/version.py` and add the matching step to `db._MIGRATIONS`, so data
+files written by older versions are upgraded on open. See
+[ARCHITECTURE.md](ARCHITECTURE.md) "Data versioning".
