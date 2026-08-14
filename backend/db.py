@@ -97,7 +97,7 @@ def init(sql_path: Path, auto_commit: bool = False) -> None:
     it, so the .db is rebuilt from scratch in a temp directory on every
     startup and never has to be looked after."""
     global _engine, _export_path, _db_path, _export_enabled, _auto_commit
-    global _committed_activity_id
+    global _committed_activity_id, _startup_message
     _export_path = sql_path
     _export_enabled = True  # a previous suspend_export must not leak in here
     _auto_commit = auto_commit
@@ -115,12 +115,19 @@ def init(sql_path: Path, auto_commit: bool = False) -> None:
     Base.metadata.create_all(_engine)
     # before the replay: startup ends in an export that overwrites this file
     _commit_pending_changes()
+    was = None
     if _export_path.exists():
         _import_sql()
+        was = _read_stamps()
         _migrate()
     _export_path.parent.mkdir(parents=True, exist_ok=True)
     _stamp_versions()
-    export()
+    # startup's export is not a domain write, so it says what it actually did
+    _startup_message = _startup_commit_message(was)
+    try:
+        export()
+    finally:
+        _startup_message = None
 
 
 def _working_db_path(sql_path: Path) -> Path:
@@ -156,6 +163,35 @@ def session() -> Session:
 # Empty at 1.0: nothing has changed shape yet. The first entry arrives with the
 # first change that makes an older file wrong.
 _MIGRATIONS = {}
+
+
+def _read_stamps() -> tuple[int, str | None]:
+    """The schema version and app version the data file carried when opened."""
+    with session() as s:
+        app = s.get(Setting, APP_VERSION_KEY)
+        return _read_schema_version(s), app.value if app else None
+
+
+def _startup_commit_message(was: tuple[int, str | None] | None) -> str:
+    """Say what startup actually changed. Startup rewrites the file whether or
+    not anything moved, so this is also the message on a no-op commit -- git
+    just finds nothing staged and skips it."""
+    if was is None:
+        return f"Created by Stronghold {RELEASE_VERSION} (data schema {SCHEMA_VERSION})"
+    schema, app = was
+    if schema != SCHEMA_VERSION:
+        return (
+            f"Migrated data from schema {schema} to {SCHEMA_VERSION} "
+            f"(Stronghold {RELEASE_VERSION})"
+        )
+    if app is None:
+        return (
+            f"Recorded the Stronghold version in the data file "
+            f"(Stronghold {RELEASE_VERSION}, data schema {SCHEMA_VERSION})"
+        )
+    if app != RELEASE_VERSION:
+        return f"Opened with Stronghold {RELEASE_VERSION} (was {app})"
+    return f"Opened with Stronghold {RELEASE_VERSION}"
 
 
 def _read_schema_version(s: Session) -> int:
@@ -292,6 +328,13 @@ _UNCOMMITTED_MESSAGE = (
     "commit). Roll back to the previous commit to undo them."
 )
 
+# Startup's own export. It is not a domain write, so the newest Activity row
+# describes some *earlier* session's change, not this one -- using it produced
+# a duplicate "Received PO-0289 into stock" whose only content was the version
+# stamp. Set while init runs and cleared after, so writes go back to their own
+# activity messages.
+_startup_message = None
+
 _NO_ACTIVITY_MESSAGE = (
     "(no activity log record for this change -- the write that caused it does "
     "not call db._activity; worth reporting to the developers)"
@@ -336,6 +379,12 @@ def _commit_export() -> None:
         return
     with Session(_engine) as s:
         row = s.scalars(select(Activity).order_by(Activity.id.desc()).limit(1)).first()
+    # startup is not a domain write: the newest activity row belongs to an
+    # earlier session and would misdescribe this commit
+    if _startup_message:
+        _committed_activity_id = row.id if row else None
+        _commit(_startup_message)
+        return
     # a row we already used as a message says nothing about *this* write
     fresh = row if row and row.id != _committed_activity_id else None
     message = fresh.message if fresh else _NO_ACTIVITY_MESSAGE
