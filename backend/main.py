@@ -6,6 +6,7 @@ Run prod:  build the frontend first (see frontend/), then `uv run main.py`.
 """
 
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import api
@@ -20,7 +21,24 @@ from version import APP_VERSION, SCHEMA_VERSION
 # built SvelteKit output (adapter-static) lives here after `npm run build`
 _FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "build"
 
-app = FastAPI(title="Stronghold API", version=APP_VERSION)
+_log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """Write the data file out once more on the way down.
+
+    Normally a no-op: every write exports (and commits) as it happens, so a
+    clean stop -- and even a SIGKILL -- loses nothing. It is here so that a
+    stop is always a known-good write, whatever left the database dirty."""
+    yield
+    if db._engine is None:  # startup failed before db.init
+        return
+    _log.info("shutting down: writing %s", db._export_path)
+    db.export()
+
+
+app = FastAPI(title="Stronghold API", version=APP_VERSION, lifespan=_lifespan)
 app.include_router(api.router)
 
 # dev: the SvelteKit dev server runs on :5173 and calls the API on :8080
