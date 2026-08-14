@@ -57,16 +57,20 @@ and recovery story. It is self-contained (schema included), so restoring is
 just `sqlite3 inventory.db < inventory.sql` into an empty database, no prior
 app run needed.
 
-**The `.sql` is the source of truth, not the `.db`.** `db.init` drops the
-database and replays the `.sql` into it on every startup, so the `.db` is a
-disposable working copy (and stays gitignored). Rolling back is therefore
-`git checkout <commit>` on the data folder plus a restart -- no export/import
-step, no chance of the two files disagreeing. A `.db` with no `.sql` beside it
-is refused rather than silently blessed as the truth, since that combination
-means the real data went missing.
+**The `.sql` is the source of truth, and the only file the user names.**
+`settings.toml` configures `db.data_file` (the `.sql`); SQLite is an internal
+detail. `db.init` builds a working `.db` from scratch under
+`tempfile.gettempdir()/stronghold/`, named `<stem>-<hash of the .sql's
+absolute path>.db` so two datasets never collide, and replays the `.sql` into
+it on every startup. Nothing but the `.sql` ever appears in the data folder.
+Rolling back is therefore `git checkout <commit>` on that folder plus a
+restart -- no export/import step, and no second file that can disagree.
 
-Two consequences worth knowing:
+Three consequences worth knowing:
 
+- Rebuilding costs ~0.4s for a 1.8MB dataset, against the ~1.9s
+  `refresh_all_prices` already spends at startup. Cheap enough that caching
+  the working copy would buy nothing.
 - The export is written atomically (temp file + `replace`), because it is now
   the only copy of the data.
 - `INSERT`s omit NULL columns and the stock price caches
@@ -166,7 +170,7 @@ only if not booked.
 Two kinds, split by one test: does a wrong value stop the app running or
 being reachable?
 
-- **Deployment** (`settings.py`): db path, GUI port, logging --
+- **Deployment** (`settings.py`): data file, GUI port, logging --
   read once at startup from optional `settings.toml` (stdlib `tomllib`), each
   key falling back to a default. See `settings.toml.example`. The whole
   InvenTree connection (url, username, password) lives here: `inventory.sql`

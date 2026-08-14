@@ -22,7 +22,7 @@ prints which settings file, database and log file it is using -- read those
 three lines, they are the quickest way to spot a settings file that is not
 being picked up.
 
-## Choosing the production database
+## Pointing at your production data
 
 Settings live in `settings.toml`, read from the **directory you start the
 server in**. Running from the repository root means the file at the repository
@@ -30,31 +30,33 @@ root is used, and any relative path inside it is resolved from there too.
 
 ```toml
 [db]
-db_path = "../Stronghold_DB/inventory.db"
+data_file = "../Stronghold_DB/inventory.sql"
 ```
 
-Point `db_path` at wherever your production data should live -- keeping it in
-its own folder outside the repository (as above) means updating Stronghold
-never touches your data. The files are created if they do not exist. An
-absolute path works too and removes any doubt about the working directory:
+Point `data_file` at wherever your data should live -- keeping it in its own
+folder outside the repository (as above) means updating Stronghold never
+touches your data. The file is created if it does not exist. An absolute path
+works too and removes any doubt about the working directory:
 
 ```toml
-db_path = "/srv/stronghold/inventory.db"
+data_file = "/srv/stronghold/inventory.sql"
 ```
 
 Every key in `settings.toml` is optional and falls back to a default, so the
 file only needs the values you actually want to change.
 
-## Your data lives in the .sql file
+## Your data is one readable file
 
-Two files sit side by side: `inventory.db` (the SQLite database the app reads
-and writes) and `inventory.sql` (the same data as plain, readable text).
+`inventory.sql` is your entire inventory as plain, readable text: one line per
+row, no binary format to decode. It is the only file you need to back up, copy
+to another machine, or keep in version control.
 
-**The `.sql` file is the real one.** Every write rewrites it, and on every
-startup the app throws the `.db` away and rebuilds it from the `.sql`. The
-database is a working copy; the text file is your data.
+Stronghold uses SQLite internally to query that data, but the database is not
+your data -- it is a scratch copy, rebuilt from the `.sql` in your system's
+temp directory every time the app starts. You never have to name it, back it
+up, or clean it up. Deleting it costs nothing.
 
-That is what makes the backup story work: put the data folder in git, commit
+That is what makes the backup story simple: put the data folder in git, commit
 after a day's work, and you have the complete history of your stock in a
 format you can read, diff and restore anywhere.
 
@@ -63,9 +65,6 @@ cd ../Stronghold_DB
 git init
 git add inventory.sql && git commit -m "stock as of today"
 ```
-
-Add `inventory.db` to that folder's `.gitignore` -- it is rebuilt anyway, and
-being binary it bloats the repository without adding anything.
 
 ### Rolling back
 
@@ -78,14 +77,9 @@ git log --oneline           # find the commit you want
 git checkout <commit> -- inventory.sql
 ```
 
-Restart the server and it comes up on exactly that state. No import step and
-no way for the two files to disagree.
-
-One safety rule follows from this: if the app finds a `.db` with no `.sql`
-next to it, it refuses to start. A missing `.sql` means your source of truth
-went astray, and quietly carrying on from the working copy would bless a stale
-copy as the real thing. Restore the `.sql` (or move the `.db` aside if you
-really do want to start fresh).
+Restart the server and it comes up on exactly that state. There is no import
+step and nothing else to clean up: the scratch database is rebuilt from
+whatever the file now says.
 
 ## Reaching it from the local network
 
