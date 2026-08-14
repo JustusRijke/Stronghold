@@ -55,7 +55,27 @@ database: for each table (in foreign-key dependency order) a
 readable and diff-friendly, so the data can live in git -- this is the backup
 and recovery story. It is self-contained (schema included), so restoring is
 just `sqlite3 inventory.db < inventory.sql` into an empty database, no prior
-app run needed. The export can be turned off with the `export_sql` setting.
+app run needed.
+
+**The `.sql` is the source of truth, not the `.db`.** `db.init` drops the
+database and replays the `.sql` into it on every startup, so the `.db` is a
+disposable working copy (and stays gitignored). Rolling back is therefore
+`git checkout <commit>` on the data folder plus a restart -- no export/import
+step, no chance of the two files disagreeing. A `.db` with no `.sql` beside it
+is refused rather than silently blessed as the truth, since that combination
+means the real data went missing.
+
+Two consequences worth knowing:
+
+- The export is written atomically (temp file + `replace`), because it is now
+  the only copy of the data.
+- `INSERT`s omit NULL columns and the stock price caches
+  (`_DERIVED_COLUMNS`; `refresh_all_prices` rebuilds them at startup), which
+  cuts the file by about a quarter and keeps the rows readable. Only NULLable
+  columns may be omitted -- our NOT NULL defaults are Python-side, so SQLite
+  has nothing to fall back on -- and a module-level check enforces that.
+  `Part.estimated_price` and `BuildLine.unit_price` are deliberately kept:
+  both are hand-set for virtual parts and cannot be recomputed.
 
 ## Domain model
 
@@ -146,7 +166,7 @@ only if not booked.
 Two kinds, split by one test: does a wrong value stop the app running or
 being reachable?
 
-- **Deployment** (`settings.py`): db path, `export_sql`, GUI port, logging --
+- **Deployment** (`settings.py`): db path, GUI port, logging --
   read once at startup from optional `settings.toml` (stdlib `tomllib`), each
   key falling back to a default. See `settings.toml.example`. The whole
   InvenTree connection (url, username, password) lives here: `inventory.sql`
