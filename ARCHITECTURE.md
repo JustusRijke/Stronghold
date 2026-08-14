@@ -80,6 +80,60 @@ Three consequences worth knowing:
   has nothing to fall back on -- and a module-level check enforces that.
   `Part.estimated_price` and `BuildLine.unit_price` are deliberately kept:
   both are hand-set for virtual parts and cannot be recomputed.
+- The file opens with two `--` comment lines: the restore hint, and
+  `-- Written by Stronghold <version>, data schema version <n>` (see below).
+
+## Data versioning
+
+The `.sql` records what wrote it, in two places written together by
+`db.export`: a header comment for whoever opens the file, and two rows in the
+`settings` table (`schema.version`, `app.version`) that the app reads back. The
+rows are the authority -- a comment cannot survive a `sqlite3 < file` restore.
+Both keys are app metadata, deliberately *not* in `db.DOMAIN_DEFAULTS`, so
+`get_setting`/`set_setting` reject them and they never appear on the settings
+page. `db._stamp_versions` writes them straight to the table rather than via
+`set_setting`, which is `@_write`-decorated and would re-export from inside
+`init`.
+
+Two numbers, because they move at different rates:
+
+- **`app.version`** -- the git tag (see Releases in the README), informational,
+  answering "which Stronghold do I install to open this?". Only the bare
+  `X.Y.Z` is stamped: `hatch-vcs` appends a `.devN+g<hash>.d<date>` suffix to
+  untagged builds, which would otherwise rewrite (and, with `auto_commit`,
+  re-commit) the data file on every developer build.
+- **`schema.version`** -- a hand-maintained integer in `backend/version.py`,
+  bumped only when the shape of the data changes. It is what decides whether a
+  file needs migrating, so it must not move just because a release was cut.
+
+### Why migration is about the file, not the database
+
+`db.init` deletes the working `.db`, runs `create_all` (so the schema is always
+the *current* code's), and only then replays the `.sql`. The schema therefore
+never needs altering -- which is also why Alembic buys nothing here. What can
+be wrong is the replayed **data**:
+
+| Change since the file was written | Replaying it into the current schema |
+|---|---|
+| Column added | Succeeds, and the new column silently takes its default |
+| Column removed or renamed | Fails loudly: `table parts has no column named ...` |
+
+The added-column case is the dangerous one precisely because it is silent, and
+it is reached by a documented, routine operation: rolling back with
+`git checkout` on an older `.sql` (see docs/deployment.md).
+
+### The two directions
+
+`db._migrate` runs after the replay:
+
+- **Older file** -- each `db._MIGRATIONS[n]` runs in ascending order, then
+  `init`'s own `export()` writes the upgraded file back, re-stamped. Steps
+  transform replayed data; the tables are already current. A file with no
+  stamp at all predates stamping and is treated as version 1.
+- **Newer file** -- refused with `DataVersionError`, and `main` exits 1. This
+  is a data-loss guard, not tidiness: this app exports only the columns it
+  knows, so the first write would drop the newer ones and `auto_commit` would
+  commit that loss over the only copy of the data.
 
 ## Domain model
 
@@ -203,12 +257,5 @@ Known ceilings, with their upgrade paths, deferred until they actually hurt
   setting appears.
 - In-memory substring filter on the parts page; add an index when parts grow
   large.
-- **No schema migrations (alpha).** `db.init` calls `Base.metadata.create_all`,
-  which only creates *missing tables* -- it never alters an existing one. So
-  changing a model's columns (e.g. adding `Part.assembly`) does NOT update an
-  existing `inventory.db`; the next query fails with `no such column`. During
-  this rapid-prototyping phase the fix is to throw the old database away: delete
-  `inventory.db` and let the app recreate it, or restore data from an
-  `inventory.sql` that was exported *after* the schema change. A real migration
-  path (Alembic, or a hand-written `ALTER TABLE` step) is 1.0 work, deferred
-  until the data on disk is worth preserving.
+- `_MIGRATIONS` is empty at 1.0: the mechanism ships, the first step arrives
+  with the first change that makes an older file wrong. See "Data versioning".

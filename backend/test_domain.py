@@ -2,6 +2,7 @@
 booking -> export -> restore."""
 
 import json
+import re
 import sqlite3
 import subprocess
 from datetime import date
@@ -21,6 +22,7 @@ from models import (
     StockItem,
 )
 from sqlalchemy import select
+from version import RELEASE_VERSION, SCHEMA_VERSION
 
 
 def test_parts_and_stock_flow(database):
@@ -756,6 +758,79 @@ def test_suspended_export_still_persists_on_force(database):
     db.init(database)
     db.create_part(2, "AFTER", "written after re-init")
     assert "AFTER" in database.read_text(encoding="utf-8")
+
+
+def test_data_file_is_version_stamped(database):
+    """The data file records what wrote it: a comment for whoever opens the
+    file, and settings rows the app reads back."""
+    db.create_part(1, "BOLT-M3", "M3 bolt")
+    text = database.read_text(encoding="utf-8")
+
+    assert f"data schema version {SCHEMA_VERSION}" in text.splitlines()[1]
+    assert f"'{db.SCHEMA_VERSION_KEY}', '{SCHEMA_VERSION}'" in text
+    assert f"'{db.APP_VERSION_KEY}', '{RELEASE_VERSION}'" in text
+    assert db.data_schema_version() == SCHEMA_VERSION
+
+    # app metadata, not a domain setting: it must not reach the settings page
+    assert db.SCHEMA_VERSION_KEY not in db.DOMAIN_DEFAULTS
+    with pytest.raises(db.InventoryError):
+        db.get_setting(db.SCHEMA_VERSION_KEY)
+
+
+def test_older_data_file_is_migrated_on_open(database, monkeypatch):
+    """An older file is upgraded in place and re-stamped, so the next start
+    finds it current."""
+    db.create_part(1, "BOLT-M3", "M3 bolt")
+    _set_stamp(database, SCHEMA_VERSION - 1)
+
+    ran = []
+    monkeypatch.setitem(db._MIGRATIONS, SCHEMA_VERSION, lambda s: ran.append(s))
+    db.init(database)
+
+    assert len(ran) == 1
+    assert db.data_schema_version() == SCHEMA_VERSION
+    assert f"'{db.SCHEMA_VERSION_KEY}', '{SCHEMA_VERSION}'" in database.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_newer_data_file_refuses_to_open(database):
+    """The data-loss guard: this app exports only the columns it knows, so
+    opening a newer file would drop the rest on the first write -- and with
+    auto_commit on, commit that loss over the only copy."""
+    db.create_part(1, "BOLT-M3", "M3 bolt")
+    _set_stamp(database, SCHEMA_VERSION + 1)
+
+    with pytest.raises(db.DataVersionError, match="Refusing to start"):
+        db.init(database)
+
+
+def test_unstamped_data_file_opens_as_version_one(database):
+    """Every file written before stamping existed matches the 1.0 schema."""
+    db.create_part(1, "BOLT-M3", "M3 bolt")
+    text = database.read_text(encoding="utf-8")
+    stripped = "\n".join(
+        line for line in text.splitlines() if db.SCHEMA_VERSION_KEY not in line
+    )
+    database.write_text(stripped + "\n", encoding="utf-8")
+
+    db.init(database)
+    assert db.data_schema_version() == 1
+
+
+def test_release_version_has_no_dev_suffix():
+    """The stamp must not carry hatch-vcs's dev/hash/date suffix: that changes
+    on every commit, rewriting (and re-committing) the data file for nothing."""
+    assert re.fullmatch(r"\d+\.\d+\.\d+", RELEASE_VERSION)
+
+
+def _set_stamp(sql_path, schema_version):
+    """Rewrite the exported file's schema stamp, as an older/newer app would."""
+    text = sql_path.read_text(encoding="utf-8")
+    old = f"'{db.SCHEMA_VERSION_KEY}', '{SCHEMA_VERSION}'"
+    new = f"'{db.SCHEMA_VERSION_KEY}', '{schema_version}'"
+    assert old in text
+    sql_path.write_text(text.replace(old, new), encoding="utf-8")
 
 
 def test_auto_commit(tmp_path):

@@ -30,6 +30,13 @@
 		<p class="muted">Read-only. Edit the file and restart the app to apply.</p>
 		{#if deployment}
 			<dl class="paths">
+				<dt>version</dt>
+				<dd>Stronghold {deployment.app_version}</dd>
+				<!-- always equal in practice: the app migrates the data on startup
+				     and refuses to run against a newer file, so this is a plain
+				     "what shape is my data" readout -->
+				<dt>data schema</dt>
+				<dd>version {deployment.data_schema_version}</dd>
 				<dt>settings.toml</dt>
 				<dd>{deployment.path}</dd>
 				<dt>data file</dt>

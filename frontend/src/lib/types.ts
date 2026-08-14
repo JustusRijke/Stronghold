@@ -20,6 +20,7 @@ export type PartBuild = S['PartBuildOut'];
 export type StockLogEntry = S['StockLogEntryOut'];
 export type BuildLine = S['BuildLineOut'];
 export type Setting = S['SettingOut'];
+export type DeploymentSettings = S['DeploymentSettingsOut'];
 export type Activity = S['ActivityOut'];
 export type ActivityRef = S['ActivityRef'];
 export type SearchResult = S['SearchResult'];

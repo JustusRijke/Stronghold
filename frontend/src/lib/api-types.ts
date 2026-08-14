@@ -981,6 +981,12 @@ export interface components {
             text: string;
             /** Data File */
             data_file: string;
+            /** App Version */
+            app_version: string;
+            /** Schema Version */
+            schema_version: number;
+            /** Data Schema Version */
+            data_schema_version: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {

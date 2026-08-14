@@ -108,6 +108,30 @@ Restart the server and it comes up on exactly that state. There is no import
 step and nothing else to clean up: the scratch database is rebuilt from
 whatever the file now says.
 
+Rolling back far enough can land on a file written by an older Stronghold.
+That is handled for you: the app upgrades the data to the current shape on
+startup and writes it back (with `auto_commit` on, as its own commit), so
+there is nothing extra to run.
+
+### "Refusing to start: it would drop the data this version does not know about"
+
+The opposite case is refused. If the data file was written by a *newer*
+Stronghold than the one you are running, the app reports which version wrote
+it and exits without touching the file.
+
+This is deliberate, and it protects your data. An older Stronghold exports
+only the columns it knows about, so a single write would drop everything the
+newer version added -- and with `auto_commit` on it would commit that loss
+over the only copy. Install the version named in the message (or newer) and
+start again.
+
+Every start prints the version in use, and the settings page shows it
+alongside the schema version of your data:
+
+```
+INFO:     Stronghold 1.0.0 (data schema version 1)
+```
+
 ## Reaching it from the local network
 
 The server listens on `0.0.0.0`, meaning it accepts connections on every

@@ -15,6 +15,7 @@ import type {
 	PartBuild,
 	StockLogEntry,
 	Setting,
+	DeploymentSettings,
 	Activity,
 	SearchResult,
 	StockValueReport
@@ -180,8 +181,7 @@ export const api = {
 
 	// settings
 	settings: () => get<Setting[]>('/settings'),
-	deploymentSettings: () =>
-		get<{ path: string; text: string; data_file: string }>('/settings/deployment'),
+	deploymentSettings: () => get<DeploymentSettings>('/settings/deployment'),
 	setSetting: (key: string, value: string) => put<Setting>(`/settings/${enc(key)}`, { value }),
 
 	// reports
