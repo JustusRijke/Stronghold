@@ -115,7 +115,7 @@ def _write(fn):
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        _log.info(
+        _log.debug(
             "%s %s %s", fn.__name__, args, kwargs
         )  # before commit: failures matter
         try:

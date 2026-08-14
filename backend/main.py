@@ -52,17 +52,15 @@ def _mount_frontend() -> None:
 
 
 def _report_startup(settings: Settings, db_path: Path) -> None:
-    """Say which settings file and database are in use -- both to the console
-    and the log, since a silently-ignored settings.toml is hard to spot."""
+    """Say which settings file, database and log file are in use -- a
+    silently-ignored settings.toml is otherwise hard to spot."""
     log = logging.getLogger(__name__)
     if settings.found:
-        lines = [f"settings: {settings.path}"]
+        log.info("settings: %s", settings.path)
     else:
-        lines = [f"settings: none found at {settings.path} (using defaults)"]
-    lines.append(f"database: {db_path.resolve()}")
-    for line in lines:
-        print(line, flush=True)  # flush: startup output is often piped, not a tty
-        log.info(line)
+        log.info("settings: none found at %s (using defaults)", settings.path)
+    log.info("database: %s", db_path.resolve())
+    log.info("log file: %s", Path(settings.get("logging", "file")).resolve())
 
 
 def create_app(settings: Settings) -> FastAPI:

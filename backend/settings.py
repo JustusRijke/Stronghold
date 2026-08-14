@@ -54,3 +54,9 @@ def setup_logging(settings: Settings) -> None:
     root = logging.getLogger()
     root.setLevel(settings.get("logging", "level"))
     root.addHandler(handler)
+    # INFO+ also goes to the console (bare message), so startup says which
+    # settings file and database are in use. Writes log at DEBUG: file only.
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    console.setFormatter(logging.Formatter("%(message)s"))
+    root.addHandler(console)
