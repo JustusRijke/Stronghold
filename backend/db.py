@@ -40,6 +40,7 @@ from models import (
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateTable
+from version import RELEASE_VERSION, SCHEMA_VERSION
 
 _log = logging.getLogger(__name__)
 
@@ -61,8 +62,21 @@ DOMAIN_DEFAULTS = {
 }
 
 
+# Version stamps. These live in the settings table because that is the one
+# place a value survives the export/replay roundtrip, but they are app
+# metadata, not domain settings: not in DOMAIN_DEFAULTS, so get_setting /
+# set_setting reject them and they never appear on the settings page.
+SCHEMA_VERSION_KEY = "schema.version"
+APP_VERSION_KEY = "app.version"
+VERSION_KEYS = frozenset({SCHEMA_VERSION_KEY, APP_VERSION_KEY})
+
+
 class InventoryError(Exception):
     """A write cannot apply to the current state."""
+
+
+class DataVersionError(Exception):
+    """The data file was written by a Stronghold too new to read it safely."""
 
 
 def _enable_foreign_keys(dbapi_connection, _connection_record) -> None:
@@ -101,7 +115,9 @@ def init(sql_path: Path, auto_commit: bool = False) -> None:
     Base.metadata.create_all(_engine)
     if _export_path.exists():
         _import_sql()
+        _migrate()
     _export_path.parent.mkdir(parents=True, exist_ok=True)
+    _stamp_versions()
     export()
 
 
@@ -125,6 +141,74 @@ def _import_sql() -> None:
 def session() -> Session:
     """Read access; writes go through the functions below."""
     return Session(_engine)
+
+
+# -- data versioning --------------------------------------------------------
+
+# Steps that bring an older data file up to date, keyed by the SCHEMA_VERSION
+# they produce: {2: _to_v2} runs when a version-1 file is opened by a version-2
+# app. They transform *replayed data*, not the schema -- create_all already
+# built the current tables before the replay, which is also why Alembic buys us
+# nothing here.
+#
+# Empty at 1.0: nothing has changed shape yet. The first entry arrives with the
+# first change that makes an older file wrong.
+_MIGRATIONS = {}
+
+
+def _read_schema_version(s: Session) -> int:
+    """The schema version of the open data. A file written before stamping
+    existed has no row: it predates the stamp, so it is version 1."""
+    row = s.get(Setting, SCHEMA_VERSION_KEY)
+    return int(row.value) if row else 1
+
+
+def data_schema_version() -> int:
+    with session() as s:
+        return _read_schema_version(s)
+
+
+def _stamp_versions() -> None:
+    """Record which Stronghold wrote this data. Written straight to the table,
+    not via set_setting: that is @_write-decorated and would re-export (and
+    re-commit) from inside init, before the caller's own export."""
+    with Session(_engine) as s, s.begin():
+        for key, value in (
+            (SCHEMA_VERSION_KEY, str(SCHEMA_VERSION)),
+            (APP_VERSION_KEY, RELEASE_VERSION),
+        ):
+            row = s.get(Setting, key)
+            if row is None:
+                s.add(Setting(key=key, value=value))
+            elif row.value != value:
+                row.value = value
+
+
+def _migrate() -> None:
+    """Bring the just-replayed data up to SCHEMA_VERSION.
+
+    Older data is upgraded in place and re-exported by init's own export().
+    *Newer* data is refused outright: this app would export only the columns it
+    knows about, so the first write would silently drop the newer ones -- and
+    with auto_commit on, commit that loss over the only copy of the data."""
+    with session() as s:
+        found = _read_schema_version(s)
+    if found == SCHEMA_VERSION:
+        return
+    if found > SCHEMA_VERSION:
+        with session() as s:
+            wrote = s.get(Setting, APP_VERSION_KEY)
+        raise DataVersionError(
+            f"{_export_path} holds schema version {found}, but this Stronghold "
+            f"({RELEASE_VERSION}) only understands version {SCHEMA_VERSION}. It "
+            f"was written by Stronghold {wrote.value if wrote else 'unknown'}; "
+            f"install that version or newer. Refusing to start: opening it here "
+            f"would drop the data this version does not know about."
+        )
+    for step in range(found + 1, SCHEMA_VERSION + 1):
+        _log.info("migrating %s: schema %d -> %d", _export_path, step - 1, step)
+        with Session(_engine) as s, s.begin():
+            _MIGRATIONS[step](s)
 
 
 def _literal(value) -> str:
@@ -168,7 +252,10 @@ def export(force: bool = False) -> None:
     if not _export_enabled and not force:
         return
     lines = [
-        "-- Stronghold data. Restore into a fresh (empty) database: sqlite3 inventory.db < inventory.sql"
+        "-- Stronghold data. Restore into a fresh (empty) database: sqlite3 inventory.db < inventory.sql",
+        # For the human opening this file. The authority is the settings row
+        # below (a comment cannot survive a restore); they are written together.
+        f"-- Written by Stronghold {RELEASE_VERSION}, data schema version {SCHEMA_VERSION}.",
     ]
     with Session(_engine) as s:
         conn = s.connection()

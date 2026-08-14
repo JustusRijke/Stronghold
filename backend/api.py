@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 from settings import Settings
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import aliased
+from version import APP_VERSION, SCHEMA_VERSION
 
 router = APIRouter(prefix="/api")
 
@@ -1514,6 +1515,9 @@ class DeploymentSettingsOut(BaseModel):
     path: str
     text: str
     data_file: str
+    app_version: str
+    schema_version: int
+    data_schema_version: int
 
 
 @router.get("/settings/deployment", response_model=DeploymentSettingsOut)
@@ -1524,6 +1528,9 @@ def deployment_settings() -> DeploymentSettingsOut:
         path=str(settings.path),
         text=settings.text,
         data_file=str(settings.path_of("db", "data_file").resolve()),
+        app_version=APP_VERSION,
+        schema_version=SCHEMA_VERSION,
+        data_schema_version=db.data_schema_version(),
     )
 
 

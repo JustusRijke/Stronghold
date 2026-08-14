@@ -15,11 +15,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from settings import Settings, setup_logging
+from version import APP_VERSION, SCHEMA_VERSION
 
 # built SvelteKit output (adapter-static) lives here after `npm run build`
 _FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "build"
 
-app = FastAPI(title="Stronghold API")
+app = FastAPI(title="Stronghold API", version=APP_VERSION)
 app.include_router(api.router)
 
 # dev: the SvelteKit dev server runs on :5173 and calls the API on :8080
@@ -52,8 +53,9 @@ def _mount_frontend() -> None:
 
 
 def _report_startup(settings: Settings, data_file: Path) -> None:
-    """Say which settings file, data file and log file are in use."""
+    """Say which version, settings file, data file and log file are in use."""
     log = logging.getLogger(__name__)
+    log.info("Stronghold %s (data schema version %s)", APP_VERSION, SCHEMA_VERSION)
     log.info("settings: %s", settings.path)
     log.info("data file: %s", data_file.resolve())
     log.info("log file: %s", settings.path_of("logging", "file").resolve())
@@ -86,7 +88,13 @@ def main() -> None:
     settings = Settings(args.settings)
     setup_logging(settings)
     logging.getLogger(__name__).info("starting up")
-    create_app(settings)
+    try:
+        create_app(settings)
+    except db.DataVersionError as error:
+        # a wrong Stronghold for this data: the reason is the whole message,
+        # and a traceback would only bury it
+        logging.getLogger(__name__).error("%s", error)
+        raise SystemExit(1) from None
     uvicorn.run(app, host="0.0.0.0", port=settings.get("gui", "port"))  # noqa: S104
 
 
