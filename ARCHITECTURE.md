@@ -47,6 +47,24 @@ unexpected failures at ERROR with traceback), and on success rewrites the SQL
 export. Validation failures raise `InventoryError` and roll back; `api.py` maps
 them to HTTP 400 with the message, and the frontend shows it as a toast.
 
+Durability follows from that: the data file is written (and, with
+`auto_commit`, committed) as part of every write, so nothing is held in memory
+waiting to be flushed -- even a `SIGKILL` loses nothing. The lifespan hook in
+`main.py` exports once more on shutdown, so a stop always ends on a known-good
+write; in practice it finds nothing to do.
+
+The matching risk is at the *other* end. Startup replays the file and then
+exports over it, so anything uncommitted in it -- a hand edit, or a write from
+a session that died before committing -- would be destroyed. `db.init` calls
+`_commit_pending_changes()` before the replay: with `auto_commit` on, a dirty
+data file is committed first, leaving the previous state recoverable.
+
+Startup's own export is not a domain write either, so it does not take its
+commit message from the activity log -- that row describes some earlier
+session's change. `_startup_message` names what startup actually did (recorded
+the version, migrated the data, or simply opened it); a start that changes
+nothing stages nothing and commits nothing.
+
 ## SQL export
 
 After every change `db.export()` rewrites `inventory.sql` next to the

@@ -860,6 +860,86 @@ def test_auto_commit(tmp_path):
         db.init(Path(db.__file__).parent / "inventory.sql", auto_commit=True)
 
 
+def test_startup_commit_says_what_startup_did(tmp_path):
+    """Startup is not a domain write, so it must not borrow the newest activity
+    row as its message: that row belongs to an earlier session, and reusing it
+    produced a second "Received PO-0289 into stock" whose only content was the
+    version stamp."""
+
+    def git(*args):
+        run = subprocess.run(  # noqa: S603
+            ["git", *args],  # noqa: S607
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return run.stdout
+
+    git("init", "-q")
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "T")
+    data_file = tmp_path / "inventory.sql"
+    db.init(data_file, auto_commit=True)
+    db.create_part(1, "BOLT-M3", "M3 bolt")
+    assert git("log", "--format=%s").splitlines()[0] == "Created part M3 bolt"
+
+    # an existing data file with no version stamp, as every file predating
+    # stamping is: the commit must describe the stamping, not the part
+    _strip_stamps(data_file)
+    db.init(data_file, auto_commit=True)
+    log = git("log", "--format=%s").splitlines()
+    assert log[0].startswith("Recorded the Stronghold version")
+    assert "Created part" not in log[0]
+
+    # restarting again changes nothing, so there is nothing to commit
+    db.init(data_file, auto_commit=True)
+    assert git("log", "--format=%s").splitlines()[0] == log[0]
+
+
+def _strip_stamps(sql_path):
+    text = sql_path.read_text(encoding="utf-8")
+    kept = [
+        line
+        for line in text.splitlines()
+        if db.SCHEMA_VERSION_KEY not in line and db.APP_VERSION_KEY not in line
+    ]
+    sql_path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+
+def test_uncommitted_changes_are_committed_before_reload(tmp_path):
+    """Startup ends in an export that rewrites the data file, so anything
+    uncommitted in it -- a hand edit, or a write from a session that died
+    before committing -- must be committed first or it is destroyed."""
+
+    def git(*args):
+        run = subprocess.run(  # noqa: S603
+            ["git", *args],  # noqa: S607
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return run.stdout
+
+    git("init", "-q")
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "T")
+    data_file = tmp_path / "inventory.sql"
+    db.init(data_file, auto_commit=True)
+    db.create_part(1, "BOLT-M3", "M3 bolt")
+
+    marker = "-- edited outside the app"
+    data_file.write_text(
+        data_file.read_text(encoding="utf-8") + marker + "\n", encoding="utf-8"
+    )
+    db.init(data_file, auto_commit=True)  # a restart: replays, then overwrites
+
+    rescued = git("log", "--format=%h %s").splitlines()[1]
+    assert rescued.endswith(db._UNCOMMITTED_MESSAGE)
+    assert marker in git("show", f"{rescued.split()[0]}:{data_file.name}")
+
+
 def test_non_purchasable_part(database):
     db.create_part(1, "MADE", "made in house")
     db.create_supplier(1, "acme")
