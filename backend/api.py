@@ -8,6 +8,7 @@ from this app's OpenAPI schema, so a renamed field breaks the build, not prod.
 
 import json
 from datetime import date, datetime
+from pathlib import Path
 from typing import Literal
 
 import db
@@ -31,10 +32,14 @@ from models import (
     SupplierPart,
 )
 from pydantic import BaseModel, Field
+from settings import Settings
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import aliased
 
 router = APIRouter(prefix="/api")
+
+# set by main.create_app; None when uvicorn imports this module directly
+settings: Settings | None = None
 
 
 def _guard(fn, *args, **kwargs):
@@ -1502,6 +1507,28 @@ class StocktakeReasonsOut(BaseModel):
 
     add: list[str]
     subtract: list[str]
+
+
+class DeploymentSettingsOut(BaseModel):
+    """The settings.toml actually in use, shown read-only on the settings page.
+    `found` false means no file was there and defaults are in force."""
+
+    path: str
+    found: bool
+    text: str
+    db_path: str
+
+
+@router.get("/settings/deployment", response_model=DeploymentSettingsOut)
+def deployment_settings() -> DeploymentSettingsOut:
+    if settings is None:  # uvicorn run directly, no create_app
+        raise HTTPException(500, "settings not loaded")
+    return DeploymentSettingsOut(
+        path=str(settings.path),
+        found=settings.found,
+        text=settings.text,
+        db_path=str(Path(settings.get("db", "db_path")).resolve()),
+    )
 
 
 @router.get("/settings/stocktake-reasons", response_model=StocktakeReasonsOut)

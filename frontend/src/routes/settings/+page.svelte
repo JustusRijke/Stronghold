@@ -4,8 +4,10 @@
 	import type { Setting } from '$lib/types';
 
 	let settings = $state<Setting[]>([]);
+	let deployment = $state<Awaited<ReturnType<typeof api.deploymentSettings>> | null>(null);
 	$effect(() => {
 		api.settings().then((s) => (settings = s));
+		api.deploymentSettings().then((d) => (deployment = d));
 	});
 
 	async function save(key: string, value: string) {
@@ -24,7 +26,21 @@
 				</label>
 			</div>
 		{/each}
-		<p class="muted">Deployment settings live in settings.toml (read-only here).</p>
+		<h2 class="h2">Deployment</h2>
+		<p class="muted">Read-only. Edit the file and restart the app to apply.</p>
+		{#if deployment}
+			<dl class="paths">
+				<dt>settings.toml</dt>
+				<dd>{deployment.found ? deployment.path : `none found at ${deployment.path}`}</dd>
+				<dt>database</dt>
+				<dd>{deployment.db_path}</dd>
+			</dl>
+			{#if deployment.found}
+				<pre class="toml">{deployment.text}</pre>
+			{:else}
+				<p class="muted">Built-in defaults are in force.</p>
+			{/if}
+		{/if}
 	</div>
 </div>
 
@@ -33,5 +49,27 @@
 		display: flex;
 		gap: 10px;
 		max-width: 420px;
+	}
+	.paths {
+		display: grid;
+		grid-template-columns: auto 1fr;
+		gap: 4px 12px;
+		margin: 0 0 12px;
+	}
+	.paths dt {
+		color: var(--ink-soft);
+	}
+	.paths dd,
+	.toml {
+		margin: 0;
+		font-family: var(--mono);
+	}
+	.toml {
+		padding: 12px;
+		border: 1px solid var(--line);
+		border-radius: var(--radius);
+		background: var(--card);
+		overflow-x: auto;
+		white-space: pre;
 	}
 </style>

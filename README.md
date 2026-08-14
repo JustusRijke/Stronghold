@@ -187,7 +187,10 @@ Open-source inventory/stock tracking for small and medium businesses.
   This repo gitignores it while pre-1.0, since it only holds throwaway
   development data -- un-ignore it once you run Stronghold in production
 - Configurable via an optional `settings.toml` (database location, SQL export,
-  web port, logging) -- see `settings.toml.example`
+  web port, logging) -- see `settings.toml.example`. It is read from the
+  **current working directory**, so start the app from the directory holding
+  it. Startup prints which settings file and database are in use (and says so
+  when no file was found); both are also shown on the Settings page
 
 ## Getting started
 

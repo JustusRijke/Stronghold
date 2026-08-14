@@ -7,6 +7,8 @@ import tomllib
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from uvicorn.logging import DefaultFormatter
+
 DEFAULTS = {
     "db": {
         "db_path": "inventory.db",
@@ -26,7 +28,10 @@ DEFAULTS = {
 
 class Settings:
     def __init__(self, path: Path) -> None:
-        self._data = {} if not path.exists() else tomllib.loads(path.read_text("utf-8"))
+        self.path = path.resolve()
+        self.found = path.exists()
+        self.text = path.read_text("utf-8") if self.found else ""
+        self._data = tomllib.loads(self.text) if self.found else {}
 
     def get(self, section: str, key: str):
         """A setting's value, or its default. Unknown section/key fails loudly."""
@@ -51,3 +56,10 @@ def setup_logging(settings: Settings) -> None:
     root = logging.getLogger()
     root.setLevel(settings.get("logging", "level"))
     root.addHandler(handler)
+    # INFO+ also goes to the console (bare message), so startup says which
+    # settings file and database are in use. Writes log at DEBUG: file only.
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    # uvicorn's own formatter, so our lines and its lines look identical
+    console.setFormatter(DefaultFormatter("%(levelprefix)s %(message)s"))
+    root.addHandler(console)
