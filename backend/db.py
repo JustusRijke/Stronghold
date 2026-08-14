@@ -66,14 +66,22 @@ def _enable_foreign_keys(dbapi_connection, _connection_record) -> None:
     dbapi_connection.execute("PRAGMA foreign_keys=ON")
 
 
-def init(sql_path: Path, export_sql: bool = True) -> None:
+def suspend_export() -> None:
+    """Stop exporting after every write, for a bulk load that would otherwise
+    rewrite the whole file per row. The loader MUST finish with
+    `export(force=True)` -- until it does, nothing is being persisted."""
+    global _export_enabled
+    _export_enabled = False
+
+
+def init(sql_path: Path) -> None:
     """Open the data in `sql_path`. That file is the truth (tracked in git,
     restorable by checking out an older commit); SQLite is only how we query
     it, so the .db is rebuilt from scratch in a temp directory on every
     startup and never has to be looked after."""
-    global _engine, _export_path, _export_enabled, _db_path
+    global _engine, _export_path, _db_path, _export_enabled
     _export_path = sql_path
-    _export_enabled = export_sql
+    _export_enabled = True  # a previous suspend_export must not leak in here
     _db_path = _working_db_path(sql_path)
     _db_path.unlink(missing_ok=True)
     _engine = create_engine(f"sqlite:///{_db_path}")
@@ -137,12 +145,15 @@ for _table, _skipped in _DERIVED_COLUMNS.items():
         )
 
 
-def export() -> None:
+def export(force: bool = False) -> None:
     """Write the whole database as one INSERT statement per row; readable,
     diffable, git-friendly. This file is the truth -- the .db is rebuilt from
     it at startup -- so it is written atomically. NULL and derived columns are
-    left out of each INSERT; the schema defaults cover them on restore."""
-    if not _export_enabled:
+    left out of each INSERT; the schema defaults cover them on restore.
+
+    `force` writes even while a bulk load has export suspended -- that is how
+    the loader persists its result at the end."""
+    if not _export_enabled and not force:
         return
     lines = [
         "-- Stronghold data. Restore into a fresh (empty) database: sqlite3 inventory.db < inventory.sql"

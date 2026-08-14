@@ -740,6 +740,22 @@ def test_working_db_lives_outside_the_data_folder(tmp_path):
         assert s.get(Part, 1).description == "from a"
 
 
+def test_suspended_export_still_persists_on_force(database):
+    """Regression: a bulk load suspends the per-write export, so only
+    export(force=True) writes the result. Without the force the loader wrote
+    nothing and the data file was left empty."""
+    db.suspend_export()
+    db.create_part(1, "BULK", "loaded in bulk")
+    assert "BULK" not in database.read_text(encoding="utf-8")  # suspended
+    db.export(force=True)
+    assert "BULK" in database.read_text(encoding="utf-8")
+
+    # a later init must clear the suspension, or writes stop being persisted
+    db.init(database)
+    db.create_part(2, "AFTER", "written after re-init")
+    assert "AFTER" in database.read_text(encoding="utf-8")
+
+
 def test_non_purchasable_part(database):
     db.create_part(1, "MADE", "made in house")
     db.create_supplier(1, "acme")
