@@ -52,20 +52,16 @@ def _mount_frontend() -> None:
 
 
 def _report_startup(settings: Settings, data_file: Path) -> None:
-    """Say which settings file, data file and log file are in use -- a
-    silently-ignored settings.toml is otherwise hard to spot."""
+    """Say which settings file, data file and log file are in use."""
     log = logging.getLogger(__name__)
-    if settings.found:
-        log.info("settings: %s", settings.path)
-    else:
-        log.info("settings: none found at %s (using defaults)", settings.path)
+    log.info("settings: %s", settings.path)
     log.info("data file: %s", data_file.resolve())
-    log.info("log file: %s", Path(settings.get("logging", "file")).resolve())
+    log.info("log file: %s", settings.path_of("logging", "file").resolve())
 
 
 def create_app(settings: Settings) -> FastAPI:
     api.settings = settings
-    data_file = Path(settings.get("db", "data_file"))
+    data_file = settings.path_of("db", "data_file")
     _report_startup(settings, data_file)
     db.init(data_file)
     # prices are kept current by the writes that change them; recomputing at
@@ -76,9 +72,18 @@ def create_app(settings: Settings) -> FastAPI:
 
 
 def main() -> None:
+    import argparse
+
     import uvicorn
 
-    settings = Settings(Path("settings.toml"))
+    parser = argparse.ArgumentParser(description="Run the Stronghold server.")
+    parser.add_argument(
+        "settings",
+        type=Path,
+        help="settings.toml to use; paths inside it are relative to its directory",
+    )
+    args = parser.parse_args()
+    settings = Settings(args.settings)
     setup_logging(settings)
     logging.getLogger(__name__).info("starting up")
     create_app(settings)

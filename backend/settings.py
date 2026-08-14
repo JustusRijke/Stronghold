@@ -39,9 +39,12 @@ RENAMED = {
 class Settings:
     def __init__(self, path: Path) -> None:
         self.path = path.resolve()
-        self.found = path.exists()
-        self.text = path.read_text("utf-8") if self.found else ""
-        self._data = tomllib.loads(self.text) if self.found else {}
+        # the file is named explicitly on the command line, so a missing one is
+        # a typo, not a request for defaults
+        if not path.exists():
+            raise FileNotFoundError(f"settings file not found: {self.path}")
+        self.text = path.read_text("utf-8")
+        self._data = tomllib.loads(self.text)
         for (section, key), replacement in RENAMED.items():
             if key in self._data.get(section, {}):
                 raise ValueError(
@@ -52,6 +55,10 @@ class Settings:
         """A setting's value, or its default. Unknown section/key fails loudly."""
         return self._data.get(section, {}).get(key, DEFAULTS[section][key])
 
+    def path_of(self, section: str, key: str) -> Path:
+        """A path setting, resolved relative to the settings file's directory."""
+        return self.path.parent / Path(self.get(section, key))
+
 
 def setup_logging(settings: Settings) -> None:
     """Timestamped lines to a rolling file; a RotatingFileHandler keeping
@@ -60,7 +67,7 @@ def setup_logging(settings: Settings) -> None:
     max_total_kb = settings.get("logging", "max_total_kb")
     backups = max(1, max_total_kb // rollover_kb - 1)
     handler = RotatingFileHandler(
-        Path(settings.get("logging", "file")),
+        settings.path_of("logging", "file"),
         maxBytes=rollover_kb * 1000,
         backupCount=backups,
         encoding="utf-8",

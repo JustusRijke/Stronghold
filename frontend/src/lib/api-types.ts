@@ -973,13 +973,10 @@ export interface components {
         /**
          * DeploymentSettingsOut
          * @description The settings.toml actually in use, shown read-only on the settings page.
-         *     `found` false means no file was there and defaults are in force.
          */
         DeploymentSettingsOut: {
             /** Path */
             path: string;
-            /** Found */
-            found: boolean;
             /** Text */
             text: string;
             /** Data File */

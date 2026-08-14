@@ -181,7 +181,7 @@ export const api = {
 	// settings
 	settings: () => get<Setting[]>('/settings'),
 	deploymentSettings: () =>
-		get<{ path: string; found: boolean; text: string; data_file: string }>('/settings/deployment'),
+		get<{ path: string; text: string; data_file: string }>('/settings/deployment'),
 	setSetting: (key: string, value: string) => put<Setting>(`/settings/${enc(key)}`, { value }),
 
 	// reports
