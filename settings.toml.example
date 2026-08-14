@@ -12,6 +12,11 @@
 # every time the app starts, so there is no database path to configure.
 data_file = "inventory.sql"
 
+# Commit the data file after every change, using the activity-log entry as the
+# commit message. Does nothing if the data folder is not a git repository;
+# refused at startup if the data file lives inside the Stronghold app folder.
+auto_commit = false
+
 [gui]
 port = 8080
 

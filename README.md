@@ -186,7 +186,10 @@ Open-source inventory/stock tracking for small and medium businesses.
   as plain text, and the only file you name or back up. SQLite is used
   internally, but that database is a scratch copy rebuilt in a temp directory
   on every startup. Keep the `.sql` in version control (git) and rolling back
-  to any earlier state is `git checkout` plus a restart.
+  to any earlier state is `git checkout` plus a restart. Set `db.auto_commit`
+  in `settings.toml` and every change commits itself, using its activity-log
+  entry as the message (off by default; refused if the data file sits inside
+  this repo).
   This repo gitignores it while pre-1.0, since it only holds throwaway
   development data -- un-ignore it once you run Stronghold in production
 - Configured by a `settings.toml` (data file, web port, logging) named on the
