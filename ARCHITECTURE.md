@@ -59,6 +59,12 @@ a session that died before committing -- would be destroyed. `db.init` calls
 `_commit_pending_changes()` before the replay: with `auto_commit` on, a dirty
 data file is committed first, leaving the previous state recoverable.
 
+Startup's own export is not a domain write either, so it does not take its
+commit message from the activity log -- that row describes some earlier
+session's change. `_startup_message` names what startup actually did (recorded
+the version, migrated the data, or simply opened it); a start that changes
+nothing stages nothing and commits nothing.
+
 ## SQL export
 
 After every change `db.export()` rewrites `inventory.sql` next to the

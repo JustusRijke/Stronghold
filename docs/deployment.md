@@ -97,6 +97,12 @@ file, so without that commit those changes would be gone for good; with it,
 they are one `git checkout` away. Stopping the server writes the file out one
 last time too.
 
+When starting the app itself changes the file -- recording the version the
+first time, or migrating older data -- the commit says so
+("Recorded the Stronghold version in the data file (Stronghold 1.0.0, data
+schema 1)"), rather than borrowing the message of whatever change came before
+it. A start that changes nothing commits nothing.
+
 Default is `false`.
 
 ### Rolling back
