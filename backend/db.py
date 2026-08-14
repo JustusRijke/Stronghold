@@ -2,13 +2,15 @@
 
 Each write is a plain function running in one transaction; on success the
 whole database is re-exported to <db>.sql (one INSERT per row) so the data
-can live in git. Restore: fresh db (run the app once), then
-`sqlite3 inventory.db < inventory.sql`.
+can live in git. The .sql is the source of truth: the .db is dropped and
+rebuilt from it at startup, so rolling back is `git checkout <commit>` plus a
+restart.
 """
 
 import functools
 import json
 import logging
+import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
@@ -62,13 +64,36 @@ def _enable_foreign_keys(dbapi_connection, _connection_record) -> None:
 
 
 def init(db_path: Path, export_sql: bool = True) -> None:
+    """Rebuild the database from its .sql and open it. The .sql is the truth
+    (tracked in git, restorable by checking out an older commit); the .db is a
+    disposable working copy, dropped and re-imported on every startup."""
     global _engine, _export_path, _export_enabled
     _export_path = db_path.with_suffix(".sql")
     _export_enabled = export_sql
+    if _export_path.exists():
+        db_path.unlink(missing_ok=True)
+    elif db_path.exists():
+        # No .sql but a .db: exporting now would be fine, but a *missing* .sql
+        # next to real data more likely means a lost/misplaced file than a
+        # fresh install. Refuse rather than silently rewrite from the copy.
+        raise InventoryError(
+            f"{db_path} exists but {_export_path} does not; "
+            "restore the .sql (it is the source of truth) or move the .db aside"
+        )
     _engine = create_engine(f"sqlite:///{db_path}")
     event.listen(_engine, "connect", _enable_foreign_keys)
     Base.metadata.create_all(_engine)
+    if _export_path.exists():
+        _import_sql(db_path)
     export()
+
+
+def _import_sql(db_path: Path) -> None:
+    """Replay the .sql into the freshly created (empty) database."""
+    script = _export_path.read_text(encoding="utf-8")
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(script)
+    _log.info("restored %s from %s", db_path, _export_path)
 
 
 def session() -> Session:
@@ -86,9 +111,31 @@ def _literal(value) -> str:
     raise TypeError(f"cannot export a {type(value).__name__} value")
 
 
+# Price caches: recomputed by refresh_all_prices() at startup, so exporting
+# them is noise. Only NULLable columns can be listed -- an omitted column falls
+# back to its *schema* default on restore, and our NOT NULL columns default in
+# Python, not in SQL. That rules out parts.price_partial (bool NOT NULL).
+# Part.estimated_price is deliberately kept: a virtual part's price is hand-set
+# and cannot be recomputed. So is BuildLine.unit_price, the only record of the
+# rate a build was costed at.
+_DERIVED_COLUMNS = {
+    "stock_items": {"unit_price", "price_po_id"},  # price_basis is NOT NULL
+}
+
+for _table, _skipped in _DERIVED_COLUMNS.items():
+    _not_null = {c.name for c in Base.metadata.tables[_table].columns if not c.nullable}
+    if _not_null & _skipped:
+        raise RuntimeError(
+            f"_DERIVED_COLUMNS lists NOT NULL column(s) {_not_null & _skipped} "
+            f"on {_table}: restoring the .sql would fail"
+        )
+
+
 def export() -> None:
     """Write the whole database as one INSERT statement per row; readable,
-    diffable, git-friendly. This is the backup story."""
+    diffable, git-friendly. This file is the truth -- the .db is rebuilt from
+    it at startup -- so it is written atomically. NULL and derived columns are
+    left out of each INSERT; the schema defaults cover them on restore."""
     if not _export_enabled:
         return
     lines = [
@@ -99,15 +146,25 @@ def export() -> None:
         for table in Base.metadata.sorted_tables:
             ddl = str(CreateTable(table, if_not_exists=True).compile(_engine)).strip()
             lines.append(f"{ddl};")
-            columns = ", ".join(column.name for column in table.columns)
+            skip = _DERIVED_COLUMNS.get(table.name, frozenset())
+            names = [c.name for c in table.columns]
             # S608: table/column names come from our own model metadata, never
             # from user input -- there is no injection vector here.
             for row in conn.exec_driver_sql(
                 f'SELECT * FROM "{table.name}" ORDER BY rowid'  # noqa: S608
             ):
-                values = ", ".join(_literal(value) for value in row)
+                pairs = [
+                    (name, value)
+                    for name, value in zip(names, row)
+                    if value is not None and name not in skip
+                ]
+                columns = ", ".join(name for name, _ in pairs)
+                values = ", ".join(_literal(value) for _, value in pairs)
                 lines.append(f"INSERT INTO {table.name} ({columns}) VALUES ({values});")  # noqa: S608
-    _export_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # atomic: a crash mid-write must not truncate the only copy of the data
+    tmp = _export_path.with_suffix(".sql.tmp")
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    tmp.replace(_export_path)
 
 
 def _write(fn):

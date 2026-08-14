@@ -12,7 +12,6 @@ from uvicorn.logging import DefaultFormatter
 DEFAULTS = {
     "db": {
         "db_path": "inventory.db",
-        "export_sql": True,  # keep a readable <db>.sql next to the database
     },
     "gui": {
         "port": 8080,

@@ -4,8 +4,9 @@
 # (e.g. the shop title) are edited on the app's Settings page instead.
 
 [db]
-db_path = "inventory.db"   # SQLite database file
-export_sql = true          # keep a readable <db>.sql next to the database for git
+# The .sql next to this path is the source of truth (keep its folder in git);
+# the .db itself is a working copy, rebuilt from the .sql on every startup.
+db_path = "inventory.db"
 
 [gui]
 port = 8080

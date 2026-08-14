@@ -676,14 +676,55 @@ def test_export_restore_roundtrip(database, tmp_path):
     db.create_item(1, 1)
     db.set_count(1, 4)
     sql = database.with_suffix(".sql").read_text(encoding="utf-8")
-    # restore into a raw empty db: the export's CREATE TABLEs must stand alone
+    # restore into a raw empty db: the export's CREATE TABLEs must stand alone,
+    # and the INSERTs must survive omitting NULL/derived columns
     fresh = tmp_path / "restored.db"
     with sqlite3.connect(fresh) as conn:
         conn.executescript(sql)
-    db.init(fresh)  # re-point at the restored db
+    with sqlite3.connect(fresh) as conn:
+        assert conn.execute("SELECT count FROM stock_items").fetchone()[0] == 4
+
+
+def test_startup_rebuilds_db_from_sql(database):
+    """The .sql is the truth: dropping the .db and re-initialising restores
+    everything, which is what a git checkout + restart does."""
+    db.create_part(1, "BOLT-M3", "M3 bolt")
+    db.create_supplier(1, "acme")
+    sp_id = db.next_supplier_part_id()
+    db.create_supplier_part(sp_id, 1, "SP-1", 1, pack_qty=10)
+    po_id = db.next_po_id()
+    db.create_po(po_id, 1)
+    line_id = db.next_line_id()
+    db.add_po_line(line_id, po_id, sp_id, quantity=2, price=5.0)
+    item_id = db.next_item_id()
+    db.book_po_line(line_id, item_id, 2)
     with db.session() as s:
-        assert s.get(StockItem, 1).count == 4
+        priced = s.get(StockItem, item_id)
+        price, basis = priced.unit_price, priced.price_basis
+    assert price  # the cache we deliberately stop exporting
+
+    database.unlink()
+    db.init(database)
+
+    with db.session() as s:
         assert s.get(Part, 1).sku == "BOLT-M3"
+        assert s.get(StockItem, 1).count == 20  # 2 packs of 10
+        # price caches are left out of the .sql; refresh_all_prices rebuilds them
+        db.refresh_all_prices()
+    with db.session() as s:
+        item = s.get(StockItem, 1)
+        assert item.unit_price == price
+        assert item.price_basis == basis
+
+
+def test_init_refuses_db_without_sql(tmp_path):
+    """A .db with no .sql beside it means the truth went missing -- rebuilding
+    from the .db would silently bless a stale copy, so refuse instead."""
+    path = tmp_path / "inventory.db"
+    db.init(path)
+    path.with_suffix(".sql").unlink()
+    with pytest.raises(db.InventoryError):
+        db.init(path)
 
 
 def test_non_purchasable_part(database):

@@ -67,7 +67,7 @@ def create_app(settings: Settings) -> FastAPI:
     api.settings = settings
     db_path = Path(settings.get("db", "db_path"))
     _report_startup(settings, db_path)
-    db.init(db_path, settings.get("db", "export_sql"))
+    db.init(db_path)
     # prices are kept current by the writes that change them; recomputing at
     # startup covers rows written outside the app (an import, a restored .sql)
     db.refresh_all_prices()
