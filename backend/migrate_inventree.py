@@ -1,12 +1,13 @@
-"""One-shot migration: drop the current database and rebuild it from an
+"""One-shot migration: drop the current data file and rebuild it from an
 InvenTree server. This is a migration tool, not a product feature -- it runs
 once. Because the target db starts empty, every InvenTree pk is copied verbatim
 as our own pk, so ids stay traceable back to InvenTree for later steps and
 debugging.
 
-    uv run python migrate_inventree.py <url> <username> <password> [--data-file PATH]
+    uv run python migrate_inventree.py <url> <username> <password> --data-file PATH
 
-WARNING: this deletes the target database unconditionally.
+WARNING: this deletes the target data file unconditionally. --data-file is
+required and has no default, so it can only ever destroy a path you named.
 
 Build orders are imported as historical records (part, quantity, status). The
 stock each build consumed IS imported (InvenTree's consumed stock), as
@@ -103,9 +104,12 @@ def migrate(url: str, username: str, password: str, data_file: Path) -> None:
     )
     parts = _drop_redundant_templates(parts)
 
+    # Destructive by design: this is a one-shot import that starts from an
+    # empty dataset, and the .sql it replaces lives in git.
     data_file.unlink(missing_ok=True)
     print(f"Dropped {data_file}; creating fresh schema ...")
-    db.init(data_file, export_sql=False)  # export once at the end, not per row
+    db.init(data_file)
+    db.suspend_export()  # export once at the end, not per row
 
     part_ids: set[int] = set()
     supplier_ids: set[int] = set()
@@ -367,7 +371,7 @@ def migrate(url: str, username: str, password: str, data_file: Path) -> None:
             next_stock_id += 1
 
     db.refresh_all_prices()
-    db.export()
+    db.export(force=True)  # suspended above; this is what persists the import
     print(f"Done. Data written to {data_file}.")
     if virtual_prices:
         rates = ", ".join(
@@ -392,8 +396,8 @@ def main() -> None:
     ap.add_argument(
         "--data-file",
         type=Path,
-        default=Path("inventory.sql"),
-        help="data file to write (SQL)",
+        required=True,
+        help="data file to overwrite (SQL). No default: this deletes it",
     )
     args = ap.parse_args()
     migrate(args.url, args.username, args.password, args.data_file)
