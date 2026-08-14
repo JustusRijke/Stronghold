@@ -1,7 +1,10 @@
-# Deployment settings. Copy to settings.toml and edit; every key is optional
-# and falls back to the default shown here. These are knobs whose wrong value
-# can stop the app running or make it unreachable. Settings that are just data
-# (e.g. the shop title) are edited on the app's Settings page instead.
+# Deployment settings. Copy to settings.toml and edit, then name it when
+# starting the app: `uv run backend/main.py settings.toml`. Relative paths
+# below are resolved against THIS file's directory, so the settings file can
+# sit next to your data. Every key is optional and falls back to the default
+# shown here. These are knobs whose wrong value can stop the app running or
+# make it unreachable. Settings that are just data (e.g. the shop title) are
+# edited on the app's Settings page instead.
 
 [db]
 # Your data: readable SQL, the file to keep in git. SQLite is an internal

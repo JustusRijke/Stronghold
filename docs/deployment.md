@@ -11,10 +11,10 @@ Build the frontend once (and again after every frontend change):
 cd frontend && npm install && npm run build
 ```
 
-Then start the server from the repository root:
+Then start the server, naming the settings file to use:
 
 ```
-uv run backend/main.py
+uv run backend/main.py settings.toml
 ```
 
 That single process serves both the JSON API and the web interface. Startup
@@ -24,19 +24,23 @@ being picked up.
 
 ## Pointing at your production data
 
-Settings live in `settings.toml`, read from the **directory you start the
-server in**. Running from the repository root means the file at the repository
-root is used, and any relative path inside it is resolved from there too.
+The settings file is the one you name on the command line, and every relative
+path inside it is resolved **relative to that file**, not to the directory you
+started the server in. So the settings file can live next to your data:
+
+```
+uv run backend/main.py ../Stronghold_DB/settings.toml
+```
 
 ```toml
 [db]
-data_file = "../Stronghold_DB/inventory.sql"
+data_file = "inventory.sql"
 ```
 
-Point `data_file` at wherever your data should live -- keeping it in its own
-folder outside the repository (as above) means updating Stronghold never
-touches your data. The file is created if it does not exist. An absolute path
-works too and removes any doubt about the working directory:
+Point `data_file` at wherever your data should live -- keeping it (and the
+settings file) in its own folder outside the repository, as above, means
+updating Stronghold never touches your data. The file is created if it does
+not exist. An absolute path works too:
 
 ```toml
 data_file = "/srv/stronghold/inventory.sql"

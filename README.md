@@ -189,11 +189,11 @@ Open-source inventory/stock tracking for small and medium businesses.
   to any earlier state is `git checkout` plus a restart.
   This repo gitignores it while pre-1.0, since it only holds throwaway
   development data -- un-ignore it once you run Stronghold in production
-- Configurable via an optional `settings.toml` (data file, web port,
-  logging) -- see `settings.toml.example`. It is read from the
-  **current working directory**, so start the app from the directory holding
-  it. Startup prints which settings file and database are in use (and says so
-  when no file was found); both are also shown on the Settings page
+- Configured by a `settings.toml` (data file, web port, logging) named on the
+  command line -- see `settings.toml.example`. Relative paths inside it are
+  resolved **relative to that file**, so settings and data can live together
+  outside the repo. Startup prints which settings, data and log file are in
+  use; the first two are also shown on the Settings page
 
 ## Getting started
 
@@ -205,7 +205,7 @@ cd frontend && npm install && npm run build && cd ..
 
 # 2. run the server -- it serves both the API and the built web app
 uv sync
-cd backend && uv run main.py   # http://localhost:8080
+cd backend && uv run main.py ../settings.toml   # http://localhost:8080
 ```
 
 For development, run the two halves separately with live reload:

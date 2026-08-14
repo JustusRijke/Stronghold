@@ -15,8 +15,8 @@ Backend (`backend/`):
   no domain logic. Its OpenAPI schema is the frontend's contract.
 - `inventree.py` -- read-only HTTP client for importing parts from an
   InvenTree server (stdlib urllib).
-- `settings.py` -- deployment settings from optional `settings.toml`, plus
-  logging setup.
+- `settings.py` -- deployment settings from the `settings.toml` given on the
+  command line, plus logging setup.
 - `main.py` -- entry point: init db, mount the API, and in production serve the
   built SPA from `frontend/build` (unknown non-`/api` paths fall back to
   `index.html` so client-side routing and deep links work).
@@ -171,8 +171,10 @@ Two kinds, split by one test: does a wrong value stop the app running or
 being reachable?
 
 - **Deployment** (`settings.py`): data file, GUI port, logging --
-  read once at startup from optional `settings.toml` (stdlib `tomllib`), each
-  key falling back to a default. See `settings.toml.example`. The whole
+  read once at startup from the `settings.toml` named on the command line
+  (stdlib `tomllib`), each key falling back to a default. Relative paths in it
+  resolve against its own directory (`Settings.path_of`), so the settings file
+  can live next to the data. See `settings.toml.example`. The whole
   InvenTree connection (url, username, password) lives here: `inventory.sql`
   is tracked in git, so credentials must stay out of the database.
 - **Domain** (`db.DOMAIN_DEFAULTS`): data, e.g. the GUI title. Stored in the
