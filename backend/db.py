@@ -113,6 +113,8 @@ def init(sql_path: Path, auto_commit: bool = False) -> None:
     _engine = create_engine(f"sqlite:///{_db_path}")
     event.listen(_engine, "connect", _enable_foreign_keys)
     Base.metadata.create_all(_engine)
+    # before the replay: startup ends in an export that overwrites this file
+    _commit_pending_changes()
     if _export_path.exists():
         _import_sql()
         _migrate()
@@ -284,10 +286,41 @@ def export(force: bool = False) -> None:
     _commit_export()
 
 
+_UNCOMMITTED_MESSAGE = (
+    "Uncommitted changes to the data file, committed at startup before "
+    "reloading it (edited by hand, or written by a session that did not "
+    "commit). Roll back to the previous commit to undo them."
+)
+
 _NO_ACTIVITY_MESSAGE = (
     "(no activity log record for this change -- the write that caused it does "
     "not call db._activity; worth reporting to the developers)"
 )
+
+
+def _git(*args: str) -> subprocess.CompletedProcess:
+    """Run git in the data file's own directory. Failures are the caller's to
+    interpret: no repo, nothing staged and no identity are all ordinary here."""
+    return subprocess.run(  # noqa: S603
+        ["git", *args],  # noqa: S607
+        cwd=_export_path.parent,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _commit(message: str) -> None:
+    for args in (
+        ("add", "--", _export_path.name),
+        ("commit", "--only", "--message", message, "--", _export_path.name),
+    ):
+        result = _git(*args)
+        if result.returncode:
+            _log.debug(
+                "auto commit skipped: %s", (result.stderr or result.stdout).strip()
+            )
+            return
 
 
 def _commit_export() -> None:
@@ -307,22 +340,23 @@ def _commit_export() -> None:
     fresh = row if row and row.id != _committed_activity_id else None
     message = fresh.message if fresh else _NO_ACTIVITY_MESSAGE
     _committed_activity_id = row.id if row else None
-    for command in (
-        ["git", "add", "--", _export_path.name],
-        ["git", "commit", "--only", "--message", message, "--", _export_path.name],
-    ):
-        result = subprocess.run(  # noqa: S603
-            command,
-            cwd=_export_path.parent,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode:
-            _log.debug(
-                "auto commit skipped: %s", (result.stderr or result.stdout).strip()
-            )
-            return
+    _commit(message)
+
+
+def _commit_pending_changes() -> None:
+    """Commit whatever is already in the data file before we overwrite it.
+
+    Startup ends in an export that rewrites the file wholesale, so anything
+    uncommitted in it -- a hand edit, or a write from a session that died
+    before its own commit -- would be destroyed with no way back. Committing
+    first costs nothing when there is nothing to commit, and leaves the
+    previous state recoverable when there is."""
+    if not _auto_commit or not _export_path.exists():
+        return
+    if not _git("status", "--porcelain", "--", _export_path.name).stdout.strip():
+        return  # unchanged, or not a git repo at all
+    _log.info("committing uncommitted changes in %s before reload", _export_path.name)
+    _commit(_UNCOMMITTED_MESSAGE)
 
 
 def _write(fn):

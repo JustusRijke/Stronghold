@@ -860,6 +860,39 @@ def test_auto_commit(tmp_path):
         db.init(Path(db.__file__).parent / "inventory.sql", auto_commit=True)
 
 
+def test_uncommitted_changes_are_committed_before_reload(tmp_path):
+    """Startup ends in an export that rewrites the data file, so anything
+    uncommitted in it -- a hand edit, or a write from a session that died
+    before committing -- must be committed first or it is destroyed."""
+
+    def git(*args):
+        run = subprocess.run(  # noqa: S603
+            ["git", *args],  # noqa: S607
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return run.stdout
+
+    git("init", "-q")
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "T")
+    data_file = tmp_path / "inventory.sql"
+    db.init(data_file, auto_commit=True)
+    db.create_part(1, "BOLT-M3", "M3 bolt")
+
+    marker = "-- edited outside the app"
+    data_file.write_text(
+        data_file.read_text(encoding="utf-8") + marker + "\n", encoding="utf-8"
+    )
+    db.init(data_file, auto_commit=True)  # a restart: replays, then overwrites
+
+    rescued = git("log", "--format=%h %s").splitlines()[1]
+    assert rescued.endswith(db._UNCOMMITTED_MESSAGE)
+    assert marker in git("show", f"{rescued.split()[0]}:{data_file.name}")
+
+
 def test_non_purchasable_part(database):
     db.create_part(1, "MADE", "made in house")
     db.create_supplier(1, "acme")
