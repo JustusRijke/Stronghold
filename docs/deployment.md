@@ -91,6 +91,12 @@ is pointing `auto_commit` at a data file *inside* the Stronghold application
 folder -- the server stops at startup with an error, rather than filling the
 app's own history with your stock. Keep your data in a repository of its own.
 
+Startup also commits anything it finds uncommitted in the data file before
+loading it -- an edit you made by hand, say. Loading ends by rewriting the
+file, so without that commit those changes would be gone for good; with it,
+they are one `git checkout` away. Stopping the server writes the file out one
+last time too.
+
 Default is `false`.
 
 ### Rolling back
