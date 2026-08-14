@@ -7,6 +7,8 @@ import tomllib
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from uvicorn.logging import DefaultFormatter
+
 DEFAULTS = {
     "db": {
         "db_path": "inventory.db",
@@ -58,5 +60,6 @@ def setup_logging(settings: Settings) -> None:
     # settings file and database are in use. Writes log at DEBUG: file only.
     console = logging.StreamHandler()
     console.setLevel(logging.INFO)
-    console.setFormatter(logging.Formatter("%(message)s"))
+    # uvicorn's own formatter, so our lines and its lines look identical
+    console.setFormatter(DefaultFormatter("%(levelprefix)s %(message)s"))
     root.addHandler(console)
