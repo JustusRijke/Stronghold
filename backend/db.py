@@ -8,9 +8,11 @@ restart.
 """
 
 import functools
+import hashlib
 import json
 import logging
 import sqlite3
+import tempfile
 from datetime import date, datetime
 from pathlib import Path
 
@@ -43,6 +45,7 @@ _log = logging.getLogger(__name__)
 _engine = None
 _export_path = None
 _export_enabled = True
+_db_path = None
 
 # domain settings: data, editable in the GUI, stored in the settings table
 # ponytail: all values are strings; add typed casting back when a non-str setting appears
@@ -63,37 +66,40 @@ def _enable_foreign_keys(dbapi_connection, _connection_record) -> None:
     dbapi_connection.execute("PRAGMA foreign_keys=ON")
 
 
-def init(db_path: Path, export_sql: bool = True) -> None:
-    """Rebuild the database from its .sql and open it. The .sql is the truth
-    (tracked in git, restorable by checking out an older commit); the .db is a
-    disposable working copy, dropped and re-imported on every startup."""
-    global _engine, _export_path, _export_enabled
-    _export_path = db_path.with_suffix(".sql")
+def init(sql_path: Path, export_sql: bool = True) -> None:
+    """Open the data in `sql_path`. That file is the truth (tracked in git,
+    restorable by checking out an older commit); SQLite is only how we query
+    it, so the .db is rebuilt from scratch in a temp directory on every
+    startup and never has to be looked after."""
+    global _engine, _export_path, _export_enabled, _db_path
+    _export_path = sql_path
     _export_enabled = export_sql
-    if _export_path.exists():
-        db_path.unlink(missing_ok=True)
-    elif db_path.exists():
-        # No .sql but a .db: exporting now would be fine, but a *missing* .sql
-        # next to real data more likely means a lost/misplaced file than a
-        # fresh install. Refuse rather than silently rewrite from the copy.
-        raise InventoryError(
-            f"{db_path} exists but {_export_path} does not; "
-            "restore the .sql (it is the source of truth) or move the .db aside"
-        )
-    _engine = create_engine(f"sqlite:///{db_path}")
+    _db_path = _working_db_path(sql_path)
+    _db_path.unlink(missing_ok=True)
+    _engine = create_engine(f"sqlite:///{_db_path}")
     event.listen(_engine, "connect", _enable_foreign_keys)
     Base.metadata.create_all(_engine)
     if _export_path.exists():
-        _import_sql(db_path)
+        _import_sql()
+    _export_path.parent.mkdir(parents=True, exist_ok=True)
     export()
 
 
-def _import_sql(db_path: Path) -> None:
+def _working_db_path(sql_path: Path) -> Path:
+    """A per-data-file scratch database under the system temp directory. Named
+    after the .sql's full path so two datasets never share one working copy."""
+    digest = hashlib.sha256(str(sql_path.resolve()).encode()).hexdigest()[:12]
+    directory = Path(tempfile.gettempdir()) / "stronghold"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / f"{sql_path.stem}-{digest}.db"
+
+
+def _import_sql() -> None:
     """Replay the .sql into the freshly created (empty) database."""
     script = _export_path.read_text(encoding="utf-8")
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(_db_path) as conn:
         conn.executescript(script)
-    _log.info("restored %s from %s", db_path, _export_path)
+    _log.info("loaded %s (working copy: %s)", _export_path, _db_path)
 
 
 def session() -> Session:
@@ -162,7 +168,7 @@ def export() -> None:
                 values = ", ".join(_literal(value) for _, value in pairs)
                 lines.append(f"INSERT INTO {table.name} ({columns}) VALUES ({values});")  # noqa: S608
     # atomic: a crash mid-write must not truncate the only copy of the data
-    tmp = _export_path.with_suffix(".sql.tmp")
+    tmp = _export_path.with_name(_export_path.name + ".tmp")
     tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
     tmp.replace(_export_path)
 

@@ -32,8 +32,8 @@
 			<dl class="paths">
 				<dt>settings.toml</dt>
 				<dd>{deployment.found ? deployment.path : `none found at ${deployment.path}`}</dd>
-				<dt>database</dt>
-				<dd>{deployment.db_path}</dd>
+				<dt>data file</dt>
+				<dd>{deployment.data_file}</dd>
 			</dl>
 			{#if deployment.found}
 				<pre class="toml">{deployment.text}</pre>

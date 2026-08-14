@@ -4,7 +4,7 @@ once. Because the target db starts empty, every InvenTree pk is copied verbatim
 as our own pk, so ids stay traceable back to InvenTree for later steps and
 debugging.
 
-    uv run python migrate_inventree.py <url> <username> <password> [--db PATH]
+    uv run python migrate_inventree.py <url> <username> <password> [--data-file PATH]
 
 WARNING: this deletes the target database unconditionally.
 
@@ -82,7 +82,7 @@ def _drop_redundant_templates(parts: list[dict]) -> list[dict]:
     return [p for p in parts if p["id"] not in redundant]
 
 
-def migrate(url: str, username: str, password: str, db_path: Path) -> None:
+def migrate(url: str, username: str, password: str, data_file: Path) -> None:
     print(f"Fetching from {url} ...")
     parts = inventree.fetch_parts(url, username, password)
     bom = inventree.fetch_bom(url, username, password)
@@ -103,10 +103,9 @@ def migrate(url: str, username: str, password: str, db_path: Path) -> None:
     )
     parts = _drop_redundant_templates(parts)
 
-    for p in (db_path, db_path.with_suffix(".sql")):
-        p.unlink(missing_ok=True)
-    print(f"Dropped {db_path}; creating fresh schema ...")
-    db.init(db_path, export_sql=False)  # export once at the end, not per row
+    data_file.unlink(missing_ok=True)
+    print(f"Dropped {data_file}; creating fresh schema ...")
+    db.init(data_file, export_sql=False)  # export once at the end, not per row
 
     part_ids: set[int] = set()
     supplier_ids: set[int] = set()
@@ -369,7 +368,7 @@ def migrate(url: str, username: str, password: str, db_path: Path) -> None:
 
     db.refresh_all_prices()
     db.export()
-    print(f"Done. Data written to {db_path} and {db_path.with_suffix('.sql')}.")
+    print(f"Done. Data written to {data_file}.")
     if virtual_prices:
         rates = ", ".join(
             f"part {pid}={'unpriced' if price is None else price}"
@@ -391,10 +390,13 @@ def main() -> None:
     ap.add_argument("username")
     ap.add_argument("password")
     ap.add_argument(
-        "--db", type=Path, default=Path("inventory.db"), help="database path"
+        "--data-file",
+        type=Path,
+        default=Path("inventory.sql"),
+        help="data file to write (SQL)",
     )
     args = ap.parse_args()
-    migrate(args.url, args.username, args.password, args.db)
+    migrate(args.url, args.username, args.password, args.data_file)
 
 
 if __name__ == "__main__":

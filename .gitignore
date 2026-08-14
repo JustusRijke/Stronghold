@@ -10,7 +10,6 @@ wheels/
 .venv
 
 # Runtime data
-inventory.db
 log.txt*
 
 # Local deployment config (see settings.toml.example)
@@ -20,7 +19,6 @@ settings.toml
 __pycache__/
 *.pyc
 backend/openapi.json
-backend/inventory.db
 # Ignored only because this is a pre-1.0 repo carrying throwaway dev data.
 # inventory.sql is the backup/recovery story and is meant to be tracked: when
 # running in production, un-ignore it so the data lives in git.

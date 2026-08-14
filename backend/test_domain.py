@@ -41,7 +41,7 @@ def test_parts_and_stock_flow(database):
         # manual qty adjustments are logged (the 3->7 and 7->3 changes)
         adj = s.scalars(select(Activity).where(Activity.action == "set_count")).all()
         assert len(adj) == 2 and "Adjusted stock" in adj[0].message
-    sql = database.with_suffix(".sql").read_text(encoding="utf-8")
+    sql = database.read_text(encoding="utf-8")
     assert "INSERT INTO parts" in sql
     assert "INSERT INTO stock_items" in sql
 
@@ -112,7 +112,7 @@ def test_purchasing_flow(database):
         db.edit_po_line(line_id, 999)
     with pytest.raises(db.InventoryError):
         db.edit_po(1, reference="restock", status="Cancelled")
-    sql = database.with_suffix(".sql").read_text(encoding="utf-8")
+    sql = database.read_text(encoding="utf-8")
     assert "INSERT INTO bookings" in sql
 
 
@@ -144,7 +144,7 @@ def test_bom_flow(database):
         lines = db.bom_for(s, 1)
         assert len(lines) == 1
         assert lines[0][1] == 2 and lines[0][4] == 5.0
-    sql = database.with_suffix(".sql").read_text(encoding="utf-8")
+    sql = database.read_text(encoding="utf-8")
     assert "INSERT INTO bom_lines" in sql
 
 
@@ -269,7 +269,7 @@ def test_build_flow(database):
         ).all()
         # the consumed rows keep pointing at the build that PRODUCED them
         assert {c.build_id for c in eaten} == {build_id}
-    sql = database.with_suffix(".sql").read_text(encoding="utf-8")
+    sql = database.read_text(encoding="utf-8")
     assert "INSERT INTO build_orders" in sql
 
 
@@ -675,7 +675,7 @@ def test_export_restore_roundtrip(database, tmp_path):
     db.create_part(1, "BOLT-M3", "M3 bolt")
     db.create_item(1, 1)
     db.set_count(1, 4)
-    sql = database.with_suffix(".sql").read_text(encoding="utf-8")
+    sql = database.read_text(encoding="utf-8")
     # restore into a raw empty db: the export's CREATE TABLEs must stand alone,
     # and the INSERTs must survive omitting NULL/derived columns
     fresh = tmp_path / "restored.db"
@@ -703,8 +703,12 @@ def test_startup_rebuilds_db_from_sql(database):
         price, basis = priced.unit_price, priced.price_basis
     assert price  # the cache we deliberately stop exporting
 
-    database.unlink()
+    # the working .db is scratch: deleting it loses nothing, init rebuilds it
+    working = db._db_path
+    assert working.exists()
+    working.unlink()
     db.init(database)
+    assert db._db_path.exists()
 
     with db.session() as s:
         assert s.get(Part, 1).sku == "BOLT-M3"
@@ -717,14 +721,23 @@ def test_startup_rebuilds_db_from_sql(database):
         assert item.price_basis == basis
 
 
-def test_init_refuses_db_without_sql(tmp_path):
-    """A .db with no .sql beside it means the truth went missing -- rebuilding
-    from the .db would silently bless a stale copy, so refuse instead."""
-    path = tmp_path / "inventory.db"
-    db.init(path)
-    path.with_suffix(".sql").unlink()
-    with pytest.raises(db.InventoryError):
-        db.init(path)
+def test_working_db_lives_outside_the_data_folder(tmp_path):
+    """The .db is an implementation detail: it belongs in a temp dir, and two
+    data files must never share one."""
+    a, b = tmp_path / "a.sql", tmp_path / "nested" / "b.sql"
+    b.parent.mkdir()
+    db.init(a)
+    db.create_part(1, "A", "from a")
+    path_a = db._db_path
+    db.init(b)
+    db.create_part(1, "B", "from b")
+
+    assert path_a != db._db_path
+    assert tmp_path not in path_a.parents  # not next to the data
+    assert list(tmp_path.glob("*.db")) == []
+    db.init(a)
+    with db.session() as s:
+        assert s.get(Part, 1).description == "from a"
 
 
 def test_non_purchasable_part(database):

@@ -982,8 +982,8 @@ export interface components {
             found: boolean;
             /** Text */
             text: string;
-            /** Db Path */
-            db_path: string;
+            /** Data File */
+            data_file: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {

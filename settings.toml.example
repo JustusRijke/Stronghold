@@ -4,9 +4,10 @@
 # (e.g. the shop title) are edited on the app's Settings page instead.
 
 [db]
-# The .sql next to this path is the source of truth (keep its folder in git);
-# the .db itself is a working copy, rebuilt from the .sql on every startup.
-db_path = "inventory.db"
+# Your data: readable SQL, the file to keep in git. SQLite is an internal
+# detail -- a working copy is rebuilt from this file in a temp directory
+# every time the app starts, so there is no database path to configure.
+data_file = "inventory.sql"
 
 [gui]
 port = 8080

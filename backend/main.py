@@ -51,23 +51,23 @@ def _mount_frontend() -> None:
         return FileResponse(index)
 
 
-def _report_startup(settings: Settings, db_path: Path) -> None:
-    """Say which settings file, database and log file are in use -- a
+def _report_startup(settings: Settings, data_file: Path) -> None:
+    """Say which settings file, data file and log file are in use -- a
     silently-ignored settings.toml is otherwise hard to spot."""
     log = logging.getLogger(__name__)
     if settings.found:
         log.info("settings: %s", settings.path)
     else:
         log.info("settings: none found at %s (using defaults)", settings.path)
-    log.info("database: %s", db_path.resolve())
+    log.info("data file: %s", data_file.resolve())
     log.info("log file: %s", Path(settings.get("logging", "file")).resolve())
 
 
 def create_app(settings: Settings) -> FastAPI:
     api.settings = settings
-    db_path = Path(settings.get("db", "db_path"))
-    _report_startup(settings, db_path)
-    db.init(db_path)
+    data_file = Path(settings.get("db", "data_file"))
+    _report_startup(settings, data_file)
+    db.init(data_file)
     # prices are kept current by the writes that change them; recomputing at
     # startup covers rows written outside the app (an import, a restored .sql)
     db.refresh_all_prices()

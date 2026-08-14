@@ -9,7 +9,8 @@ from main import app
 
 @pytest.fixture
 def database(tmp_path):
-    path = tmp_path / "inventory.db"
+    """The data file (.sql); the working .db lives in a temp dir of db's own."""
+    path = tmp_path / "inventory.sql"
     db.init(path)
     return path
 
@@ -17,5 +18,5 @@ def database(tmp_path):
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    db.init(tmp_path / "inventory.db")
+    db.init(tmp_path / "inventory.sql")
     return TestClient(app)
