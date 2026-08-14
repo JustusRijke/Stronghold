@@ -2,13 +2,17 @@
 
 Each write is a plain function running in one transaction; on success the
 whole database is re-exported to <db>.sql (one INSERT per row) so the data
-can live in git. Restore: fresh db (run the app once), then
-`sqlite3 inventory.db < inventory.sql`.
+can live in git. The .sql is the source of truth: the .db is dropped and
+rebuilt from it at startup, so rolling back is `git checkout <commit>` plus a
+restart.
 """
 
 import functools
+import hashlib
 import json
 import logging
+import sqlite3
+import tempfile
 from datetime import date, datetime
 from pathlib import Path
 
@@ -41,6 +45,7 @@ _log = logging.getLogger(__name__)
 _engine = None
 _export_path = None
 _export_enabled = True
+_db_path = None
 
 # domain settings: data, editable in the GUI, stored in the settings table
 # ponytail: all values are strings; add typed casting back when a non-str setting appears
@@ -61,14 +66,48 @@ def _enable_foreign_keys(dbapi_connection, _connection_record) -> None:
     dbapi_connection.execute("PRAGMA foreign_keys=ON")
 
 
-def init(db_path: Path, export_sql: bool = True) -> None:
-    global _engine, _export_path, _export_enabled
-    _export_path = db_path.with_suffix(".sql")
-    _export_enabled = export_sql
-    _engine = create_engine(f"sqlite:///{db_path}")
+def suspend_export() -> None:
+    """Stop exporting after every write, for a bulk load that would otherwise
+    rewrite the whole file per row. The loader MUST finish with
+    `export(force=True)` -- until it does, nothing is being persisted."""
+    global _export_enabled
+    _export_enabled = False
+
+
+def init(sql_path: Path) -> None:
+    """Open the data in `sql_path`. That file is the truth (tracked in git,
+    restorable by checking out an older commit); SQLite is only how we query
+    it, so the .db is rebuilt from scratch in a temp directory on every
+    startup and never has to be looked after."""
+    global _engine, _export_path, _db_path, _export_enabled
+    _export_path = sql_path
+    _export_enabled = True  # a previous suspend_export must not leak in here
+    _db_path = _working_db_path(sql_path)
+    _db_path.unlink(missing_ok=True)
+    _engine = create_engine(f"sqlite:///{_db_path}")
     event.listen(_engine, "connect", _enable_foreign_keys)
     Base.metadata.create_all(_engine)
+    if _export_path.exists():
+        _import_sql()
+    _export_path.parent.mkdir(parents=True, exist_ok=True)
     export()
+
+
+def _working_db_path(sql_path: Path) -> Path:
+    """A per-data-file scratch database under the system temp directory. Named
+    after the .sql's full path so two datasets never share one working copy."""
+    digest = hashlib.sha256(str(sql_path.resolve()).encode()).hexdigest()[:12]
+    directory = Path(tempfile.gettempdir()) / "stronghold"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / f"{sql_path.stem}-{digest}.db"
+
+
+def _import_sql() -> None:
+    """Replay the .sql into the freshly created (empty) database."""
+    script = _export_path.read_text(encoding="utf-8")
+    with sqlite3.connect(_db_path) as conn:
+        conn.executescript(script)
+    _log.info("loaded %s (working copy: %s)", _export_path, _db_path)
 
 
 def session() -> Session:
@@ -86,10 +125,35 @@ def _literal(value) -> str:
     raise TypeError(f"cannot export a {type(value).__name__} value")
 
 
-def export() -> None:
+# Price caches: recomputed by refresh_all_prices() at startup, so exporting
+# them is noise. Only NULLable columns can be listed -- an omitted column falls
+# back to its *schema* default on restore, and our NOT NULL columns default in
+# Python, not in SQL. That rules out parts.price_partial (bool NOT NULL).
+# Part.estimated_price is deliberately kept: a virtual part's price is hand-set
+# and cannot be recomputed. So is BuildLine.unit_price, the only record of the
+# rate a build was costed at.
+_DERIVED_COLUMNS = {
+    "stock_items": {"unit_price", "price_po_id"},  # price_basis is NOT NULL
+}
+
+for _table, _skipped in _DERIVED_COLUMNS.items():
+    _not_null = {c.name for c in Base.metadata.tables[_table].columns if not c.nullable}
+    if _not_null & _skipped:
+        raise RuntimeError(
+            f"_DERIVED_COLUMNS lists NOT NULL column(s) {_not_null & _skipped} "
+            f"on {_table}: restoring the .sql would fail"
+        )
+
+
+def export(force: bool = False) -> None:
     """Write the whole database as one INSERT statement per row; readable,
-    diffable, git-friendly. This is the backup story."""
-    if not _export_enabled:
+    diffable, git-friendly. This file is the truth -- the .db is rebuilt from
+    it at startup -- so it is written atomically. NULL and derived columns are
+    left out of each INSERT; the schema defaults cover them on restore.
+
+    `force` writes even while a bulk load has export suspended -- that is how
+    the loader persists its result at the end."""
+    if not _export_enabled and not force:
         return
     lines = [
         "-- Stronghold data. Restore into a fresh (empty) database: sqlite3 inventory.db < inventory.sql"
@@ -99,15 +163,25 @@ def export() -> None:
         for table in Base.metadata.sorted_tables:
             ddl = str(CreateTable(table, if_not_exists=True).compile(_engine)).strip()
             lines.append(f"{ddl};")
-            columns = ", ".join(column.name for column in table.columns)
+            skip = _DERIVED_COLUMNS.get(table.name, frozenset())
+            names = [c.name for c in table.columns]
             # S608: table/column names come from our own model metadata, never
             # from user input -- there is no injection vector here.
             for row in conn.exec_driver_sql(
                 f'SELECT * FROM "{table.name}" ORDER BY rowid'  # noqa: S608
             ):
-                values = ", ".join(_literal(value) for value in row)
+                pairs = [
+                    (name, value)
+                    for name, value in zip(names, row)
+                    if value is not None and name not in skip
+                ]
+                columns = ", ".join(name for name, _ in pairs)
+                values = ", ".join(_literal(value) for _, value in pairs)
                 lines.append(f"INSERT INTO {table.name} ({columns}) VALUES ({values});")  # noqa: S608
-    _export_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # atomic: a crash mid-write must not truncate the only copy of the data
+    tmp = _export_path.with_name(_export_path.name + ".tmp")
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    tmp.replace(_export_path)
 
 
 def _write(fn):

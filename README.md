@@ -182,12 +182,15 @@ Open-source inventory/stock tracking for small and medium businesses.
   Hold" status here, so a held InvenTree build is imported as "Pending"
 - Nothing is ever deleted: parts are deactivated and stock is marked consumed
   rather than removed, so your history and data stay intact
-- Your data as a readable SQL file: `inventory.sql` is kept up to date next
-  to the database, so you can keep your inventory in version control (git).
+- Your data is one readable SQL file: `inventory.sql` is the whole inventory
+  as plain text, and the only file you name or back up. SQLite is used
+  internally, but that database is a scratch copy rebuilt in a temp directory
+  on every startup. Keep the `.sql` in version control (git) and rolling back
+  to any earlier state is `git checkout` plus a restart.
   This repo gitignores it while pre-1.0, since it only holds throwaway
   development data -- un-ignore it once you run Stronghold in production
-- Configurable via an optional `settings.toml` (database location, SQL export,
-  web port, logging) -- see `settings.toml.example`. It is read from the
+- Configurable via an optional `settings.toml` (data file, web port,
+  logging) -- see `settings.toml.example`. It is read from the
   **current working directory**, so start the app from the directory holding
   it. Startup prints which settings file and database are in use (and says so
   when no file was found); both are also shown on the Settings page

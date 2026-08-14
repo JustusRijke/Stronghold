@@ -55,7 +55,31 @@ database: for each table (in foreign-key dependency order) a
 readable and diff-friendly, so the data can live in git -- this is the backup
 and recovery story. It is self-contained (schema included), so restoring is
 just `sqlite3 inventory.db < inventory.sql` into an empty database, no prior
-app run needed. The export can be turned off with the `export_sql` setting.
+app run needed.
+
+**The `.sql` is the source of truth, and the only file the user names.**
+`settings.toml` configures `db.data_file` (the `.sql`); SQLite is an internal
+detail. `db.init` builds a working `.db` from scratch under
+`tempfile.gettempdir()/stronghold/`, named `<stem>-<hash of the .sql's
+absolute path>.db` so two datasets never collide, and replays the `.sql` into
+it on every startup. Nothing but the `.sql` ever appears in the data folder.
+Rolling back is therefore `git checkout <commit>` on that folder plus a
+restart -- no export/import step, and no second file that can disagree.
+
+Three consequences worth knowing:
+
+- Rebuilding costs ~0.4s for a 1.8MB dataset, against the ~1.9s
+  `refresh_all_prices` already spends at startup. Cheap enough that caching
+  the working copy would buy nothing.
+- The export is written atomically (temp file + `replace`), because it is now
+  the only copy of the data.
+- `INSERT`s omit NULL columns and the stock price caches
+  (`_DERIVED_COLUMNS`; `refresh_all_prices` rebuilds them at startup), which
+  cuts the file by about a quarter and keeps the rows readable. Only NULLable
+  columns may be omitted -- our NOT NULL defaults are Python-side, so SQLite
+  has nothing to fall back on -- and a module-level check enforces that.
+  `Part.estimated_price` and `BuildLine.unit_price` are deliberately kept:
+  both are hand-set for virtual parts and cannot be recomputed.
 
 ## Domain model
 
@@ -146,7 +170,7 @@ only if not booked.
 Two kinds, split by one test: does a wrong value stop the app running or
 being reachable?
 
-- **Deployment** (`settings.py`): db path, `export_sql`, GUI port, logging --
+- **Deployment** (`settings.py`): data file, GUI port, logging --
   read once at startup from optional `settings.toml` (stdlib `tomllib`), each
   key falling back to a default. See `settings.toml.example`. The whole
   InvenTree connection (url, username, password) lives here: `inventory.sql`

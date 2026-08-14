@@ -11,8 +11,10 @@ from uvicorn.logging import DefaultFormatter
 
 DEFAULTS = {
     "db": {
-        "db_path": "inventory.db",
-        "export_sql": True,  # keep a readable <db>.sql next to the database
+        # The data file itself: readable SQL, the thing to keep in git. SQLite
+        # is an implementation detail (a working .db is rebuilt from this in a
+        # temp directory at startup), so no database path is configurable.
+        "data_file": "inventory.sql",
     },
     "gui": {
         "port": 8080,
@@ -26,12 +28,25 @@ DEFAULTS = {
 }
 
 
+# Settings that no longer exist, mapped to what to do instead. Silently
+# ignoring one would leave the user pointing at data the app never reads.
+RENAMED = {
+    ("db", "db_path"): "db.data_file, which now names the .sql file itself "
+    "(the .db is rebuilt in a temp directory at startup)",
+}
+
+
 class Settings:
     def __init__(self, path: Path) -> None:
         self.path = path.resolve()
         self.found = path.exists()
         self.text = path.read_text("utf-8") if self.found else ""
         self._data = tomllib.loads(self.text) if self.found else {}
+        for (section, key), replacement in RENAMED.items():
+            if key in self._data.get(section, {}):
+                raise ValueError(
+                    f"{self.path}: [{section}] {key} was replaced by {replacement}"
+                )
 
     def get(self, section: str, key: str):
         """A setting's value, or its default. Unknown section/key fails loudly."""

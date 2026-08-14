@@ -1516,7 +1516,7 @@ class DeploymentSettingsOut(BaseModel):
     path: str
     found: bool
     text: str
-    db_path: str
+    data_file: str
 
 
 @router.get("/settings/deployment", response_model=DeploymentSettingsOut)
@@ -1527,7 +1527,7 @@ def deployment_settings() -> DeploymentSettingsOut:
         path=str(settings.path),
         found=settings.found,
         text=settings.text,
-        db_path=str(Path(settings.get("db", "db_path")).resolve()),
+        data_file=str(Path(settings.get("db", "data_file")).resolve()),
     )
 
 

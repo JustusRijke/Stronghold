@@ -41,7 +41,7 @@ def test_parts_and_stock_flow(database):
         # manual qty adjustments are logged (the 3->7 and 7->3 changes)
         adj = s.scalars(select(Activity).where(Activity.action == "set_count")).all()
         assert len(adj) == 2 and "Adjusted stock" in adj[0].message
-    sql = database.with_suffix(".sql").read_text(encoding="utf-8")
+    sql = database.read_text(encoding="utf-8")
     assert "INSERT INTO parts" in sql
     assert "INSERT INTO stock_items" in sql
 
@@ -112,7 +112,7 @@ def test_purchasing_flow(database):
         db.edit_po_line(line_id, 999)
     with pytest.raises(db.InventoryError):
         db.edit_po(1, reference="restock", status="Cancelled")
-    sql = database.with_suffix(".sql").read_text(encoding="utf-8")
+    sql = database.read_text(encoding="utf-8")
     assert "INSERT INTO bookings" in sql
 
 
@@ -144,7 +144,7 @@ def test_bom_flow(database):
         lines = db.bom_for(s, 1)
         assert len(lines) == 1
         assert lines[0][1] == 2 and lines[0][4] == 5.0
-    sql = database.with_suffix(".sql").read_text(encoding="utf-8")
+    sql = database.read_text(encoding="utf-8")
     assert "INSERT INTO bom_lines" in sql
 
 
@@ -269,7 +269,7 @@ def test_build_flow(database):
         ).all()
         # the consumed rows keep pointing at the build that PRODUCED them
         assert {c.build_id for c in eaten} == {build_id}
-    sql = database.with_suffix(".sql").read_text(encoding="utf-8")
+    sql = database.read_text(encoding="utf-8")
     assert "INSERT INTO build_orders" in sql
 
 
@@ -675,15 +675,85 @@ def test_export_restore_roundtrip(database, tmp_path):
     db.create_part(1, "BOLT-M3", "M3 bolt")
     db.create_item(1, 1)
     db.set_count(1, 4)
-    sql = database.with_suffix(".sql").read_text(encoding="utf-8")
-    # restore into a raw empty db: the export's CREATE TABLEs must stand alone
+    sql = database.read_text(encoding="utf-8")
+    # restore into a raw empty db: the export's CREATE TABLEs must stand alone,
+    # and the INSERTs must survive omitting NULL/derived columns
     fresh = tmp_path / "restored.db"
     with sqlite3.connect(fresh) as conn:
         conn.executescript(sql)
-    db.init(fresh)  # re-point at the restored db
+    with sqlite3.connect(fresh) as conn:
+        assert conn.execute("SELECT count FROM stock_items").fetchone()[0] == 4
+
+
+def test_startup_rebuilds_db_from_sql(database):
+    """The .sql is the truth: dropping the .db and re-initialising restores
+    everything, which is what a git checkout + restart does."""
+    db.create_part(1, "BOLT-M3", "M3 bolt")
+    db.create_supplier(1, "acme")
+    sp_id = db.next_supplier_part_id()
+    db.create_supplier_part(sp_id, 1, "SP-1", 1, pack_qty=10)
+    po_id = db.next_po_id()
+    db.create_po(po_id, 1)
+    line_id = db.next_line_id()
+    db.add_po_line(line_id, po_id, sp_id, quantity=2, price=5.0)
+    item_id = db.next_item_id()
+    db.book_po_line(line_id, item_id, 2)
     with db.session() as s:
-        assert s.get(StockItem, 1).count == 4
+        priced = s.get(StockItem, item_id)
+        price, basis = priced.unit_price, priced.price_basis
+    assert price  # the cache we deliberately stop exporting
+
+    # the working .db is scratch: deleting it loses nothing, init rebuilds it
+    working = db._db_path
+    assert working.exists()
+    working.unlink()
+    db.init(database)
+    assert db._db_path.exists()
+
+    with db.session() as s:
         assert s.get(Part, 1).sku == "BOLT-M3"
+        assert s.get(StockItem, 1).count == 20  # 2 packs of 10
+        # price caches are left out of the .sql; refresh_all_prices rebuilds them
+        db.refresh_all_prices()
+    with db.session() as s:
+        item = s.get(StockItem, 1)
+        assert item.unit_price == price
+        assert item.price_basis == basis
+
+
+def test_working_db_lives_outside_the_data_folder(tmp_path):
+    """The .db is an implementation detail: it belongs in a temp dir, and two
+    data files must never share one."""
+    a, b = tmp_path / "a.sql", tmp_path / "nested" / "b.sql"
+    b.parent.mkdir()
+    db.init(a)
+    db.create_part(1, "A", "from a")
+    path_a = db._db_path
+    db.init(b)
+    db.create_part(1, "B", "from b")
+
+    assert path_a != db._db_path
+    assert tmp_path not in path_a.parents  # not next to the data
+    assert list(tmp_path.glob("*.db")) == []
+    db.init(a)
+    with db.session() as s:
+        assert s.get(Part, 1).description == "from a"
+
+
+def test_suspended_export_still_persists_on_force(database):
+    """Regression: a bulk load suspends the per-write export, so only
+    export(force=True) writes the result. Without the force the loader wrote
+    nothing and the data file was left empty."""
+    db.suspend_export()
+    db.create_part(1, "BULK", "loaded in bulk")
+    assert "BULK" not in database.read_text(encoding="utf-8")  # suspended
+    db.export(force=True)
+    assert "BULK" in database.read_text(encoding="utf-8")
+
+    # a later init must clear the suspension, or writes stop being persisted
+    db.init(database)
+    db.create_part(2, "AFTER", "written after re-init")
+    assert "AFTER" in database.read_text(encoding="utf-8")
 
 
 def test_non_purchasable_part(database):
