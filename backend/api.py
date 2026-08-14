@@ -8,7 +8,6 @@ from this app's OpenAPI schema, so a renamed field breaks the build, not prod.
 
 import json
 from datetime import date, datetime
-from pathlib import Path
 from typing import Literal
 
 import db
@@ -1510,11 +1509,9 @@ class StocktakeReasonsOut(BaseModel):
 
 
 class DeploymentSettingsOut(BaseModel):
-    """The settings.toml actually in use, shown read-only on the settings page.
-    `found` false means no file was there and defaults are in force."""
+    """The settings.toml actually in use, shown read-only on the settings page."""
 
     path: str
-    found: bool
     text: str
     data_file: str
 
@@ -1525,9 +1522,8 @@ def deployment_settings() -> DeploymentSettingsOut:
         raise HTTPException(500, "settings not loaded")
     return DeploymentSettingsOut(
         path=str(settings.path),
-        found=settings.found,
         text=settings.text,
-        data_file=str(Path(settings.get("db", "data_file")).resolve()),
+        data_file=str(settings.path_of("db", "data_file").resolve()),
     )
 
 

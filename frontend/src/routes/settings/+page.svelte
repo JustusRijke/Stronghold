@@ -31,15 +31,11 @@
 		{#if deployment}
 			<dl class="paths">
 				<dt>settings.toml</dt>
-				<dd>{deployment.found ? deployment.path : `none found at ${deployment.path}`}</dd>
+				<dd>{deployment.path}</dd>
 				<dt>data file</dt>
 				<dd>{deployment.data_file}</dd>
 			</dl>
-			{#if deployment.found}
-				<pre class="toml">{deployment.text}</pre>
-			{:else}
-				<p class="muted">Built-in defaults are in force.</p>
-			{/if}
+			<pre class="toml">{deployment.text}</pre>
 		{/if}
 	</div>
 </div>
