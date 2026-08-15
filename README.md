@@ -41,10 +41,12 @@ Open-source inventory/stock tracking for small and medium businesses.
   place and the part's estimated price -- plus any stock already booked against
   that line -- is revalued to match. Lines lock once the order is completed or
   cancelled
-- Every order carries a reference and an order date. Both are required; leave
-  the reference blank and it is filled in as "PO-0042" from the order's own
-  number, and the date defaults to today. The order date decides which order
-  counts as a part's latest price, so it can never be empty
+- Every order's reference is its own number, shown as "PO-0042" / "BO-0042".
+  It is derived, not stored, so it is always present, always unique and cannot
+  be edited into something that no longer matches the order. Use the supplier
+  ref field for the supplier's own code. The order date is required and
+  defaults to today: it decides which order counts as a part's latest price,
+  so it can never be empty
 - Manage suppliers and per-supplier product catalogs, raise purchase orders with
   lines, and receive (book) incoming goods straight into stock -- each booked
   item stays linked to its order line for later price/provenance lookups.
@@ -168,8 +170,9 @@ Open-source inventory/stock tracking for small and medium businesses.
   instead. Set an hourly rate there and every assembly listing it is priced
   accordingly; leave it blank and those assemblies stay "partial"
 - A search box (top right) live-searches parts, suppliers, supplier parts,
-  purchase orders, and build orders by text (SKU, description, name,
-  reference -- never by ID), grouped by type; a checkbox includes inactive
+  purchase orders, and build orders by text (SKU, description, name, supplier
+  ref -- never by ID, though typing a full order code like "PO-0042" jumps to
+  that order), grouped by type; a checkbox includes inactive
   records, otherwise only active ones show. Click a result to jump straight
   to its detail page
 - An activity log (clock icon, top right) records what you did -- parts and

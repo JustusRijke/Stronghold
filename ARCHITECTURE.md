@@ -134,11 +134,26 @@ be wrong is the replayed **data**:
 | Change since the file was written | Replaying it into the current schema |
 |---|---|
 | Column added | Succeeds, and the new column silently takes its default |
-| Column removed or renamed | Fails loudly: `table parts has no column named ...` |
+| Column removed | Handled: the column is scaffolded back for the replay, then dropped (below) |
+| Column renamed | Fails loudly: `table parts has no column named ...` |
 
 The added-column case is the dangerous one precisely because it is silent, and
 it is reached by a documented, routine operation: rolling back with
 `git checkout` on an older `.sql` (see docs/deployment.md).
+
+A **removed** column is the case that a plain replay cannot survive: the old
+file's `INSERT`s name a column the current tables no longer have, so
+`executescript` raises and startup dies *before* `_migrate` could fix anything.
+`db._DROPPED_COLUMNS` closes that gap. It lists every column a migration
+removed, keyed by the schema version that removed it, and `_import_sql`
+`ALTER TABLE ... ADD COLUMN`s each one back before the replay so the old
+`INSERT`s fit. The matching `_MIGRATIONS` step then drops it again for good.
+
+The scaffold goes up unconditionally, because the version stamp lives *in* the
+data and cannot be read until the replay has happened. That costs nothing for a
+current file: the column is simply never populated, and the same step drops it
+again. Renames are still unhandled -- do them as a drop plus an add, or add the
+step when one is actually needed.
 
 ### The two directions
 
@@ -146,8 +161,10 @@ it is reached by a documented, routine operation: rolling back with
 
 - **Older file** -- each `db._MIGRATIONS[n]` runs in ascending order, then
   `init`'s own `export()` writes the upgraded file back, re-stamped. Steps
-  transform replayed data; the tables are already current. A file with no
-  stamp at all predates stamping and is treated as version 1.
+  transform replayed data; the tables are already current, the one exception
+  being a dropped column, which needs both halves (the `_import_sql` scaffold
+  above and a step here to take it down). A file with no stamp at all predates
+  stamping and is treated as version 1.
 - **Newer file** -- refused with `DataVersionError`, and `main` exits 1. This
   is a data-loss guard, not tidiness: this app exports only the columns it
   knows, so the first write would drop the newer ones and `auto_commit` would
