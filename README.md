@@ -254,9 +254,14 @@ The git tag *is* the version: `backend/version.py` reads it through
 ```bash
 git tag -a v1.0.0 -m "Stronghold 1.0.0"   # on main, after the PR is merged
 git push origin v1.0.0
-uv sync                                    # required: the version is resolved
+uv sync --reinstall-package stronghold     # required: the version is resolved
                                            # at install time, not read live
 ```
+
+Plain `uv sync` will *not* do: with `pyproject.toml` unchanged it only audits
+the existing install, so the package is never rebuilt and keeps reporting the
+previous version -- which then gets stamped into every data file it writes.
+Check with `cd backend && uv run python -c "import version; print(version.APP_VERSION)"`.
 
 Between tags the version reports as e.g. `1.0.1.dev3+g1aebf96` -- expected for
 a development build. Only the `X.Y.Z` part is written into data files.
