@@ -133,6 +133,7 @@
 							max={owedToBuild ? 0 : undefined}
 							value={item.count}
 							onblur={(e) => setCount(Number(e.currentTarget.value))}
+							onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
 						/>
 						{#if owedToBuild}
 							<span class="hint">stock owed to a build; settle it to 0, never above</span>
