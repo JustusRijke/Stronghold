@@ -4,6 +4,8 @@
 	import { stockTabs } from '$lib/tabs.svelte';
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
 	import SettleDebtDialog from '$lib/components/SettleDebtDialog.svelte';
+	import { expert } from '$lib/expert.svelte';
+	import { toast } from '$lib/toast.svelte';
 	import type { StockItem } from '$lib/types';
 
 	const id = $derived(Number($page.params.id));
@@ -37,6 +39,11 @@
 			return;
 		}
 		stockTabs.open(id, `#${item.id}${item.sku ? ` - ${item.sku}` : ''}`);
+	}
+
+	async function setCount(count: number) {
+		if (count === item?.count) return;
+		await toast.run(async () => (item = await api.patchStock(id, { count })), 'Saved');
 	}
 	$effect(() => {
 		if (!Number.isNaN(id)) load();
@@ -111,12 +118,24 @@
 						</span>
 					{/if}
 				</p>
-				<p>
-					Count: <strong>{item.count}</strong>
-					<span class="hint">
-						corrected with Stocktake on the <a href={`/parts/${item.part_id}`}>part page</a>
-					</span>
-				</p>
+				{#if expert.on}
+					<label class="field">
+						<span>Count</span>
+						<input
+							type="number"
+							step="any"
+							value={item.count}
+							onblur={(e) => setCount(Number(e.currentTarget.value))}
+						/>
+					</label>
+				{:else}
+					<p>
+						Count: <strong>{item.count}</strong>
+						<span class="hint">
+							corrected with Stocktake on the <a href={`/parts/${item.part_id}`}>part page</a>
+						</span>
+					</p>
+				{/if}
 			</section>
 		</div>
 	</div>
