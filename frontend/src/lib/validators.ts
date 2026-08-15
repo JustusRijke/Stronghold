@@ -16,7 +16,6 @@ export const BookIn = v.object({
 export const BuildOrderIn = v.object({
 	part_id: v.pipe(v.number(), v.integer()),
 	quantity: v.pipe(v.number(), v.integer(), v.gtValue(0, 'must be greater than 0')),
-	reference: v.optional(v.string()),
 	status: v.optional(v.picklist(["Draft","Pending","Production","Cancelled","Complete"])),
 	description: v.string(),
 	start_date: v.optional(v.nullable(v.string())),
@@ -24,7 +23,6 @@ export const BuildOrderIn = v.object({
 	});
 export const BuildOrderPatch = v.object({
 	quantity: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.gtValue(0, 'must be greater than 0')))),
-	reference: v.optional(v.nullable(v.string())),
 	status: v.optional(v.nullable(v.picklist(["Draft","Pending","Production","Cancelled","Complete"]))),
 	description: v.optional(v.nullable(v.string())),
 	start_date: v.optional(v.nullable(v.string())),
@@ -64,7 +62,6 @@ export const ProduceIn = v.object({
 	});
 export const PurchaseOrderIn = v.object({
 	supplier_id: v.pipe(v.number(), v.integer()),
-	reference: v.optional(v.string()),
 	status: v.optional(v.picklist(["Pending","Placed","On Hold","Complete","Cancelled","Lost","Returned"])),
 	start_date: v.optional(v.string()),
 	end_date: v.optional(v.nullable(v.string())),
@@ -73,7 +70,6 @@ export const PurchaseOrderIn = v.object({
 	description: v.string(),
 	});
 export const PurchaseOrderPatch = v.object({
-	reference: v.optional(v.nullable(v.string())),
 	status: v.optional(v.nullable(v.picklist(["Pending","Placed","On Hold","Complete","Cancelled","Lost","Returned"]))),
 	start_date: v.optional(v.nullable(v.string())),
 	end_date: v.optional(v.nullable(v.string())),

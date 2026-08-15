@@ -909,11 +909,6 @@ export interface components {
             part_id: number;
             /** Quantity */
             quantity: number;
-            /**
-             * Reference
-             * @default
-             */
-            reference: string;
             /** @default Draft */
             status: components["schemas"]["BuildStatus"];
             /** Description */
@@ -950,8 +945,6 @@ export interface components {
         BuildOrderPatch: {
             /** Quantity */
             quantity?: number | null;
-            /** Reference */
-            reference?: string | null;
             status?: components["schemas"]["BuildStatus"] | null;
             /** Description */
             description?: string | null;
@@ -1189,11 +1182,6 @@ export interface components {
         PurchaseOrderIn: {
             /** Supplier Id */
             supplier_id: number;
-            /**
-             * Reference
-             * @default
-             */
-            reference: string;
             /** @default Pending */
             status: components["schemas"]["POStatus"];
             /**
@@ -1242,8 +1230,6 @@ export interface components {
         };
         /** PurchaseOrderPatch */
         PurchaseOrderPatch: {
-            /** Reference */
-            reference?: string | null;
             status?: components["schemas"]["POStatus"] | null;
             /** Start Date */
             start_date?: string | null;

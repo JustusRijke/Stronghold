@@ -7,6 +7,7 @@ from this app's OpenAPI schema, so a renamed field breaks the build, not prod.
 """
 
 import json
+import re
 from datetime import date, datetime
 from typing import Literal
 
@@ -14,6 +15,8 @@ import db
 from db import InventoryError
 from fastapi import APIRouter, HTTPException
 from models import (
+    BUILD_PREFIX,
+    PO_PREFIX,
     STOCK_AVAILABLE,
     STOCK_CONSUMED,
     Activity,
@@ -29,6 +32,8 @@ from models import (
     StockItem,
     Supplier,
     SupplierPart,
+    build_ref,
+    po_ref,
 )
 from pydantic import BaseModel, Field
 from settings import Settings
@@ -263,7 +268,7 @@ class SupplierPartPatch(BaseModel):
 class PurchaseOrderOut(BaseModel):
     id: int
     supplier_id: int
-    reference: str
+    reference: str  # derived from the id (PO-0042), not stored and not settable
     status: str
     start_date: date
     end_date: date | None
@@ -279,7 +284,6 @@ class PartPurchaseOrderOut(PurchaseOrderOut):
 
 class PurchaseOrderIn(BaseModel):
     supplier_id: int
-    reference: str = ""
     status: POStatus = POStatus.PENDING
     # the order date: defaults to today rather than being required of the caller
     start_date: date = Field(default_factory=date.today)
@@ -290,7 +294,6 @@ class PurchaseOrderIn(BaseModel):
 
 
 class PurchaseOrderPatch(BaseModel):
-    reference: str | None = None
     status: POStatus | None = None
     start_date: date | None = None
     end_date: date | None = None
@@ -324,7 +327,7 @@ class BuildOrderOut(BaseModel):
     id: int
     part_id: int
     quantity: int
-    reference: str
+    reference: str  # derived from the id (BO-0042), not stored and not settable
     status: str
     description: str
     start_date: date | None
@@ -360,7 +363,6 @@ class BuildLineOut(BaseModel):
 class BuildOrderIn(BaseModel):
     part_id: int
     quantity: int = Field(gt=0)
-    reference: str = ""
     status: BuildStatus = BuildStatus.DRAFT
     description: str = Field(min_length=1)
     start_date: date | None = None
@@ -369,7 +371,6 @@ class BuildOrderIn(BaseModel):
 
 class BuildOrderPatch(BaseModel):
     quantity: int | None = Field(default=None, gt=0)
-    reference: str | None = None
     status: BuildStatus | None = None
     description: str | None = None
     start_date: date | None = None
@@ -583,7 +584,7 @@ def _stock_log_entries(
     split off a surviving parent (produce_build copies po_id onto the consumed
     slice for pricing) -- the parent already reports the receipt, so reporting
     it again would double-count what arrived."""
-    i, po_ref, po_date, prod_ref, prod_date, eat_ref, eat_date = row
+    i, po_date, prod_date, eat_date = row
     label, url, at, approx = "", "", None, True
     # a receipt's booking records what actually arrived, so a smaller count now
     # means later events ate into this row
@@ -595,7 +596,7 @@ def _stock_log_entries(
         # row was typed in by hand
         kind = "debt" if i.count < 0 else "consumed"
         at = eat_date
-        label = eat_ref or f"BO-{i.consumed_by_build_id}"
+        label = build_ref(i.consumed_by_build_id)
         url = f"/build-orders/{i.consumed_by_build_id}"
         quantity = i.count if i.count < 0 else -i.count
     elif i.stocktake_at is not None:
@@ -607,13 +608,13 @@ def _stock_log_entries(
     elif i.build_id is not None:
         kind = "produced"
         at = prod_date
-        label = prod_ref or f"BO-{i.build_id}"
+        label = build_ref(i.build_id)
         url = f"/build-orders/{i.build_id}"
         quantity = i.count
     elif i.po_id is not None:
         kind = "received"
         at = po_date
-        label = po_ref or f"PO-{i.po_id}"
+        label = po_ref(i.po_id)
         url = f"/purchase-orders/{i.po_id}"
         quantity = i.count
     else:
@@ -627,7 +628,7 @@ def _stock_log_entries(
             origin = (
                 "received",
                 po_date,
-                po_ref or f"PO-{i.po_id}",
+                po_ref(i.po_id),
                 "purchase-orders",
                 i.po_id,
             )
@@ -635,7 +636,7 @@ def _stock_log_entries(
             origin = (
                 "produced",
                 prod_date,
-                prod_ref or f"BO-{i.build_id}",
+                build_ref(i.build_id),
                 "build-orders",
                 i.build_id,
             )
@@ -709,7 +710,7 @@ def _imported_production_entries(part_id: int) -> list[StockLogEntryOut]:
                 quantity=missing,
                 drawn_down=False,
                 reason="",
-                order_label=b.reference or f"BO-{b.id}",
+                order_label=build_ref(b.id),
                 order_url=f"/build-orders/{b.id}",
                 # the stock is gone, so nothing records what it cost
                 unit_price=None,
@@ -734,11 +735,8 @@ def list_part_stock_log(part_id: int) -> list[StockLogEntryOut]:
         rows = s.execute(
             select(
                 StockItem,
-                PurchaseOrder.reference,
                 PurchaseOrder.start_date,
-                producer.reference,
                 producer.start_date,
-                eater.reference,
                 eater.start_date,
             )
             .join(PurchaseOrder, StockItem.po_id == PurchaseOrder.id, isouter=True)
@@ -880,33 +878,20 @@ def remove_bom_line(line_id: int) -> OkOut:
 # the build a stock row belongs to: its producer, else the build that owes it
 # (a shortfall debt row and its consumed placeholder have no producing build)
 _src_build = func.coalesce(StockItem.build_id, StockItem.consumed_by_build_id)
-# the consuming build needs its own join: when a row has both a producer and a
-# consumer, _src_build names the producer, so nothing else carries this label
-_eater = aliased(BuildOrder)
 
 
+# Order codes are derived from the ids this row already carries, so the joins
+# that once fetched them (purchase_orders, and an aliased build_orders for the
+# consumer) are gone.
 _STOCK_SELECT = (
-    select(
-        StockItem,
-        Part.sku,
-        Part.description,
-        PurchaseOrder.reference,
-        _src_build,
-        BuildOrder.reference,
-        _eater.reference,
-    )
+    select(StockItem, Part.sku, Part.description, _src_build)
     .join(Part, StockItem.part_id == Part.id)
-    .join(PurchaseOrder, StockItem.po_id == PurchaseOrder.id, isouter=True)
-    # the build this stock came from: the one that produced it, or
-    # (debt/consumed rows have no producer) the one that owes it
-    .join(BuildOrder, _src_build == BuildOrder.id, isouter=True)
-    .join(_eater, StockItem.consumed_by_build_id == _eater.id, isouter=True)
     .order_by(StockItem.id)
 )
 
 
 def _stock_out(row) -> StockItemOut:
-    i, sku, desc, po_ref, src_build, build_ref, eater_ref = row
+    i, sku, desc, src_build = row
     return StockItemOut(
         id=i.id,
         part_id=i.part_id,
@@ -914,13 +899,13 @@ def _stock_out(row) -> StockItemOut:
         description=desc,
         count=i.count,
         po_id=i.po_id,
-        po_reference=po_ref or "",
+        po_reference=po_ref(i.po_id) if i.po_id is not None else "",
         build_id=i.build_id,
         consumed_by_build_id=i.consumed_by_build_id,
-        build_reference=build_ref
-        or (f"BO-{src_build}" if src_build is not None else ""),
-        consumed_by_reference=eater_ref
-        or (f"BO-{i.consumed_by_build_id}" if i.consumed_by_build_id else ""),
+        build_reference=build_ref(src_build) if src_build is not None else "",
+        consumed_by_reference=build_ref(i.consumed_by_build_id)
+        if i.consumed_by_build_id is not None
+        else "",
         status=i.status,
         unit_price=i.unit_price,
         price_basis=i.price_basis,
@@ -1180,7 +1165,7 @@ def _po_out(po: PurchaseOrder) -> PurchaseOrderOut:
     return PurchaseOrderOut(
         id=po.id,
         supplier_id=po.supplier_id,
-        reference=po.reference,
+        reference=po_ref(po.id),
         status=po.status,
         start_date=po.start_date,
         end_date=po.end_date,
@@ -1215,7 +1200,6 @@ def create_po(body: PurchaseOrderIn) -> PurchaseOrderOut:
         db.create_po,
         new_id,
         body.supplier_id,
-        reference=body.reference,
         status=body.status,
         start_date=body.start_date,
         end_date=body.end_date,
@@ -1233,7 +1217,6 @@ def patch_po(po_id: int, body: PurchaseOrderPatch) -> PurchaseOrderOut:
     # start_date is required: an explicit null is rejected by db.edit_po.
     sent = body.model_fields_set
     if sent & {
-        "reference",
         "status",
         "start_date",
         "end_date",
@@ -1245,7 +1228,6 @@ def patch_po(po_id: int, body: PurchaseOrderPatch) -> PurchaseOrderOut:
         _guard(
             db.edit_po,
             po_id,
-            reference=body.reference if "reference" in sent else cur.reference,
             status=body.status if "status" in sent else cur.status,
             start_date=body.start_date if "start_date" in sent else cur.start_date,
             end_date=body.end_date if "end_date" in sent else cur.end_date,
@@ -1341,7 +1323,7 @@ def _build_out(s, b: BuildOrder) -> BuildOrderOut:
         id=b.id,
         part_id=b.part_id,
         quantity=b.quantity,
-        reference=b.reference,
+        reference=build_ref(b.id),
         status=b.status,
         description=b.description,
         start_date=b.start_date,
@@ -1377,7 +1359,6 @@ def create_build(body: BuildOrderIn) -> BuildOrderOut:
         new_id,
         body.part_id,
         body.quantity,
-        reference=body.reference,
         status=body.status,
         description=body.description,
         start_date=body.start_date,
@@ -1393,7 +1374,6 @@ def patch_build(build_id: int, body: BuildOrderPatch) -> BuildOrderOut:
     sent = body.model_fields_set
     if sent & {
         "quantity",
-        "reference",
         "status",
         "description",
         "start_date",
@@ -1404,7 +1384,6 @@ def patch_build(build_id: int, body: BuildOrderPatch) -> BuildOrderOut:
             db.edit_build,
             build_id,
             body.quantity if "quantity" in sent else cur.quantity,
-            reference=body.reference if "reference" in sent else cur.reference,
             status=body.status if "status" in sent else cur.status,
             description=body.description if "description" in sent else cur.description,
             start_date=body.start_date if "start_date" in sent else cur.start_date,
@@ -1607,18 +1586,6 @@ def stock_value_report() -> StockValueReport:
             .join(Part, StockItem.part_id == Part.id)
             .order_by(StockItem.id)
         ).all()
-        po_references = {
-            po_id: reference
-            for po_id, reference in s.execute(
-                select(PurchaseOrder.id, PurchaseOrder.reference)
-            )
-        }
-        build_references = {
-            build_id: reference
-            for build_id, reference in s.execute(
-                select(BuildOrder.id, BuildOrder.reference)
-            )
-        }
         # newest PO date per part, same source rule as db.latest_po_price_source
         # (non-cancelled orders only) -- one grouped query, not one per row
         last_po_dates = {
@@ -1644,9 +1611,13 @@ def stock_value_report() -> StockValueReport:
             value=None if item.unit_price is None else item.unit_price * item.count,
             basis=item.price_basis,
             basis_po_id=item.price_po_id,
-            basis_po_reference=po_references.get(item.price_po_id, ""),
+            basis_po_reference=po_ref(item.price_po_id)
+            if item.price_po_id is not None
+            else "",
             build_id=item.build_id,
-            build_reference=build_references.get(item.build_id, ""),
+            build_reference=build_ref(item.build_id)
+            if item.build_id is not None
+            else "",
             last_po_date=last_po_dates.get(item.part_id),
             part_active=part_active,
             part_assembly=part_assembly,
@@ -1743,18 +1714,35 @@ def search(q: str = "", include_inactive: bool = False) -> list[SearchResult]:
                 )
             )
 
+        # An order code is derived from the pk, so there is no column to match:
+        # "PO-0042" (and a bare "42" once prefixed) resolves to an id instead.
+        # Not a general id search -- the code has to be spelled out.
         po_q = select(PurchaseOrder).where(
-            _matches_all_words(
-                q, PurchaseOrder.reference, PurchaseOrder.supplier_reference
-            )
+            _matches_all_words(q, PurchaseOrder.supplier_reference)
         )
-        for x in s.scalars(po_q.limit(SEARCH_LIMIT)):
+        po_ids = {x.id for x in s.scalars(po_q.limit(SEARCH_LIMIT))}
+        po_ids |= _ref_id_match(s, PurchaseOrder, PO_PREFIX, q)
+        for po_id in sorted(po_ids)[:SEARCH_LIMIT]:
             results.append(
-                SearchResult(type="purchase_order", id=x.id, label=x.reference)
+                SearchResult(type="purchase_order", id=po_id, label=po_ref(po_id))
             )
 
-        build_q = select(BuildOrder).where(_matches_all_words(q, BuildOrder.reference))
-        for x in s.scalars(build_q.limit(SEARCH_LIMIT)):
-            results.append(SearchResult(type="build_order", id=x.id, label=x.reference))
+        for build_id in sorted(_ref_id_match(s, BuildOrder, BUILD_PREFIX, q)):
+            results.append(
+                SearchResult(type="build_order", id=build_id, label=build_ref(build_id))
+            )
 
     return results
+
+
+def _ref_id_match(s, model, prefix: str, q: str) -> set[int]:
+    """The id an order code names, if `q` is one and that order exists.
+
+    The prefix is required -- searching "42" must not start listing records by
+    id (see the README: search is by text, never by id). Leading zeros are
+    optional, so "PO-0042" and "po-42" both find order 42."""
+    m = re.fullmatch(rf"{re.escape(prefix)}0*(\d+)", q.strip(), re.IGNORECASE)
+    if m is None:
+        return set()
+    order_id = int(m.group(1))
+    return {order_id} if s.get(model, order_id) is not None else set()

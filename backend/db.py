@@ -36,8 +36,10 @@ from models import (
     StockItem,
     Supplier,
     SupplierPart,
+    build_ref,
+    po_ref,
 )
-from sqlalchemy import create_engine, event, func, select
+from sqlalchemy import create_engine, event, func, select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateTable
 from version import RELEASE_VERSION, SCHEMA_VERSION
@@ -140,11 +142,32 @@ def _working_db_path(sql_path: Path) -> Path:
 
 
 def _import_sql() -> None:
-    """Replay the .sql into the freshly created (empty) database."""
+    """Replay the .sql into the freshly created (empty) database.
+
+    The tables already exist in their *current* shape (create_all ran first), so
+    a column an older file does not have simply takes its default. A column the
+    file *does* have and we have since dropped is the hard case: its INSERTs
+    would fail outright, killing startup before _migrate could fix anything. So
+    every dropped column is temporarily put back before the replay and dropped
+    again by its migration step -- see _DROPPED_COLUMNS."""
     script = _export_path.read_text(encoding="utf-8")
     with sqlite3.connect(_db_path) as conn:
+        for table, column, ddl_type in _dropped_columns():
+            # unconditional: the stamp is only readable once the data is in.
+            # Harmless for a current file -- the column stays empty and its
+            # migration step (a no-op for that file) drops it again.
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
         conn.executescript(script)
     _log.info("loaded %s (working copy: %s)", _export_path, _db_path)
+
+
+def _dropped_columns() -> list[tuple[str, str, str]]:
+    """Every (table, column, type) removed by a migration, newest step last."""
+    return [
+        (table, column, ddl_type)
+        for step in sorted(_DROPPED_COLUMNS)
+        for table, column, ddl_type in _DROPPED_COLUMNS[step]
+    ]
 
 
 def session() -> Session:
@@ -154,15 +177,37 @@ def session() -> Session:
 
 # -- data versioning --------------------------------------------------------
 
+# Columns a migration removed, keyed by the SCHEMA_VERSION that removed them,
+# as (table, column, SQL type). _import_sql puts them back before the replay so
+# an older file's INSERTs still fit; the migration step below drops them again.
+# The type only has to hold the old values long enough to be discarded, so the
+# permissive one is right -- a NOT NULL here would reject the current file,
+# whose INSERTs no longer carry the column.
+_DROPPED_COLUMNS = {
+    2: [
+        ("purchase_orders", "reference", "VARCHAR"),
+        ("build_orders", "reference", "VARCHAR"),
+    ],
+}
+
+
+def _drop_columns(s: Session, step: int) -> None:
+    """Discard the columns `step` removed. The data is not migrated anywhere:
+    the order codes these held were always a copy of the pk, so models.po_ref
+    reproduces them exactly."""
+    for table, column, _ in _DROPPED_COLUMNS[step]:
+        s.execute(text(f"ALTER TABLE {table} DROP COLUMN {column}"))
+
+
 # Steps that bring an older data file up to date, keyed by the SCHEMA_VERSION
 # they produce: {2: _to_v2} runs when a version-1 file is opened by a version-2
 # app. They transform *replayed data*, not the schema -- create_all already
 # built the current tables before the replay, which is also why Alembic buys us
-# nothing here.
-#
-# Empty at 1.0: nothing has changed shape yet. The first entry arrives with the
-# first change that makes an older file wrong.
-_MIGRATIONS = {}
+# nothing here. The exception is a dropped column, which needs both halves:
+# an _import_sql scaffold and a step here to take it down again.
+_MIGRATIONS = {
+    2: lambda s: _drop_columns(s, 2),
+}
 
 
 def _read_stamps() -> tuple[int, str | None]:
@@ -541,7 +586,6 @@ def latest_po_price_source(s: Session, part_id: int) -> tuple[float, int, str] |
             POLine.price,
             SupplierPart.pack_qty,
             PurchaseOrder.id,
-            PurchaseOrder.reference,
         )
         .join(SupplierPart, POLine.supplier_part_id == SupplierPart.id)
         .join(PurchaseOrder, POLine.po_id == PurchaseOrder.id)
@@ -556,7 +600,7 @@ def latest_po_price_source(s: Session, part_id: int) -> tuple[float, int, str] |
         )
         .limit(1)
     ).first()
-    return (row[0] / row[1], row[2], row[3]) if row else None
+    return (row[0] / row[1], row[2], po_ref(row[2])) if row else None
 
 
 def latest_po_unit_price(s: Session, part_id: int) -> float | None:
@@ -901,7 +945,7 @@ def resync_build_lines(s: Session, build_id: int) -> None:
             f"build {build_id} is {build.status}; its components cannot be resynced"
         )
     _snapshot_build_lines(s, build_id, build.part_id)
-    label = build.reference or f"BO-{build_id}"
+    label = build_ref(build_id)
     _activity(
         s,
         "resync_build_lines",
@@ -1225,8 +1269,8 @@ def stocktake(
 
     refs = [("part", part_id, part.sku)]
     if build_id is not None:
-        build = get_build(s, build_id)
-        refs.append(("build", build_id, build.reference or f"BO-{build_id}"))
+        get_build(s, build_id)  # exists check; the label is derived from the id
+        refs.append(("build", build_id, build_ref(build_id)))
     _activity(
         s,
         "stocktake",
@@ -1245,7 +1289,7 @@ def add_negative_stock(
     fully allocated. Writes the same pair produce_build's shortage does, so
     receiving the parts settles it and reprices the build."""
     part = get_part(s, part_id)
-    build = get_build(s, build_id)
+    get_build(s, build_id)  # exists check
     if quantity <= 0:
         raise InventoryError("quantity must be positive")
     at = datetime.now()  # noqa: DTZ005
@@ -1269,7 +1313,7 @@ def add_negative_stock(
             )
         )
         next_id += 1
-    label = build.reference or f"BO-{build_id}"
+    label = build_ref(build_id)
     _activity(
         s,
         "add_negative_stock",
@@ -1371,8 +1415,8 @@ def settle_debt_from_stock(
     ):
         refresh_stock_price(s, produced)
     part = get_part(s, debt.part_id)
-    build = get_build(s, build_id)
-    label = build.reference or f"BO-{build_id}"
+    get_build(s, build_id)  # exists check
+    label = build_ref(build_id)
     _activity(
         s,
         "settle_debt_from_stock",
@@ -1425,18 +1469,6 @@ def next_supplier_id() -> int:
 def next_supplier_part_id() -> int:
     with session() as s:
         return (s.scalar(select(func.max(SupplierPart.id))) or 0) + 1
-
-
-def _check_reference_free(s: Session, model, reference: str, own_id: int) -> None:
-    """A reference is the order's human code -- refuse to hand the same one to
-    two orders. Case-insensitive: PO-0007 and po-0007 are the same code."""
-    clash = s.scalar(
-        select(model.id).where(
-            func.lower(model.reference) == reference.lower(), model.id != own_id
-        )
-    )
-    if clash is not None:
-        raise InventoryError(f"reference {reference} is already used by order {clash}")
 
 
 def next_po_id() -> int:
@@ -1561,7 +1593,6 @@ def create_po(
     s: Session,
     po_id: int,
     supplier_id: int,
-    reference: str = "",
     status: str = "",
     start_date: date | None = None,
     end_date: date | None = None,
@@ -1572,15 +1603,11 @@ def create_po(
     get_supplier(s, supplier_id)
     if s.get(PurchaseOrder, po_id) is not None:
         raise InventoryError(f"purchase order {po_id} already exists")
-    # every order carries a human code; default to the pk in the same
-    # zero-padded shape the InvenTree import produced (PO-0042)
-    reference = reference.strip() or f"PO-{po_id:04d}"
-    _check_reference_free(s, PurchaseOrder, reference, po_id)
+    reference = po_ref(po_id)
     s.add(
         PurchaseOrder(
             id=po_id,
             supplier_id=supplier_id,
-            reference=reference,
             status=status,
             # the order date drives "latest price"; a dateless order cannot be
             # ranked, so new orders are stamped today when none is given
@@ -1598,7 +1625,6 @@ def create_po(
 def edit_po(
     s: Session,
     po_id: int,
-    reference: str = "",
     status: str = "",
     start_date: date | None = None,
     end_date: date | None = None,
@@ -1620,12 +1646,7 @@ def edit_po(
         )
     if start_date is None:
         raise InventoryError("purchase order start date is required")
-    if not reference.strip():
-        raise InventoryError("purchase order reference is required")
-    reference = reference.strip()
-    _check_reference_free(s, PurchaseOrder, reference, po_id)
     reprice = status != po.status or start_date != po.start_date
-    po.reference = reference
     po.status = status
     po.start_date = start_date
     po.end_date = end_date
@@ -1841,8 +1862,8 @@ def _settle_activity(
     """One activity row per build a receipt paid off, so receiving tells the user
     what it settled instead of silently zeroing rows."""
     for build_id, qty in settled.items():
-        build = get_build(s, build_id)
-        build_label = build.reference or f"BO-{build_id}"
+        get_build(s, build_id)  # exists check
+        build_label = build_ref(build_id)
         _activity(
             s,
             "settle_stock_debt",
@@ -1875,7 +1896,7 @@ def book_po_line(s: Session, line_id: int, stock_item_id: int, quantity: float) 
     _, settled = _receive_line(s, line, stock_item_id, quantity)
     part = get_part(s, supplier_part.part_id)
     po = get_po(s, line.po_id)
-    po_label = po.reference or f"PO-{po.id}"
+    po_label = po_ref(po.id)
     _activity(
         s,
         "book_po_line",
@@ -1907,7 +1928,7 @@ def book_po(s: Session, po_id: int) -> None:
     if po.status == POStatus.CANCELLED:
         raise InventoryError(f"purchase order {po_id} is cancelled, cannot receive")
     next_id = (s.scalar(select(func.max(StockItem.id))) or 0) + 1
-    po_label = po.reference or f"PO-{po_id}"
+    po_label = po_ref(po_id)
     refs = [("po", po_id, po_label)]
     all_settled: list[tuple[dict[int, float], Part]] = []
     for line in s.scalars(select(POLine).where(POLine.po_id == po_id)):
@@ -1950,7 +1971,6 @@ def create_build(
     build_id: int,
     part_id: int,
     quantity: int,
-    reference: str = "",
     status: str = "",
     description: str = "",
     start_date: date | None = None,
@@ -1963,16 +1983,11 @@ def create_build(
     part = get_part(s, part_id)
     if not part.assembly:
         raise InventoryError(f"part {part_id} is not an assembly")
-    # every order carries a human code; default to the pk in the same
-    # zero-padded shape the InvenTree import produced (BO-0042), as create_po does
-    reference = reference.strip() or f"BO-{build_id:04d}"
-    _check_reference_free(s, BuildOrder, reference, build_id)
     s.add(
         BuildOrder(
             id=build_id,
             part_id=part_id,
             quantity=quantity,
-            reference=reference,
             status=status,
             description=description,
             start_date=start_date,
@@ -1980,7 +1995,7 @@ def create_build(
         )
     )
     _snapshot_build_lines(s, build_id, part_id)
-    label = reference
+    label = build_ref(build_id)
     _activity(
         s,
         "create_build",
@@ -1994,7 +2009,6 @@ def edit_build(
     s: Session,
     build_id: int,
     quantity: int,
-    reference: str = "",
     status: str = "",
     description: str = "",
     start_date: date | None = None,
@@ -2021,12 +2035,7 @@ def edit_build(
             f"build {build_id}: {already} already produced; status must be "
             "Production or Complete"
         )
-    # a build always has a code (create_build defaults one); an omitted or
-    # blanked reference keeps the stored one rather than clearing it
-    reference = reference.strip() or build.reference
-    _check_reference_free(s, BuildOrder, reference, build_id)
     build.quantity = quantity
-    build.reference = reference
     build.status = status
     build.description = description
     build.start_date = start_date
@@ -2192,7 +2201,7 @@ def produce_build(s: Session, build_id: int, quantity: int) -> None:
     ):
         refresh_stock_price(s, item)
     part = get_part(s, build.part_id)
-    label = build.reference or f"BO-{build_id}"
+    label = build_ref(build_id)
     _activity(
         s,
         "produce_build",

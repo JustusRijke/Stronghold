@@ -18,6 +18,20 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+# An order's human code is its pk in the zero-padded shape the InvenTree import
+# produced (PO-0042). Derived, never stored: it was always a copy of the pk, so
+# storing it only allowed it to be edited into something that lied.
+PO_PREFIX = "PO-"
+BUILD_PREFIX = "BO-"
+
+
+def po_ref(po_id: int) -> str:
+    return f"{PO_PREFIX}{po_id:04d}"
+
+
+def build_ref(build_id: int) -> str:
+    return f"{BUILD_PREFIX}{build_id:04d}"
+
 
 class PriceBasis(StrEnum):
     """How a stock item's cached unit_price was arrived at."""
@@ -193,15 +207,14 @@ class SupplierPart(Base):
 
 
 class PurchaseOrder(Base):
-    """id mirrors the InvenTree order pk during migration. reference is the
-    human PO code (e.g. PO-0042); status is the InvenTree status label."""
+    """id mirrors the InvenTree order pk during migration. The human PO code
+    (e.g. PO-0042) is derived from the id by `reference`, not stored; status is
+    the InvenTree status label."""
 
     __tablename__ = "purchase_orders"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     supplier_id: Mapped[int] = mapped_column(ForeignKey(Supplier.id))
-    # human PO code, required: defaulted to PO-<pk> in db.create_po
-    reference: Mapped[str]
     status: Mapped[str] = mapped_column(default="")
     # the order date: NOT NULL because it is the sort key for "latest price" --
     # a dateless order cannot be ranked. Defaulted to today in db.create_po
@@ -227,8 +240,9 @@ class BuildOrder(Base):
     """The assembly analogue of a PurchaseOrder: an order to build `quantity` of
     an assembly Part. Completing it consumes component stock per the part's live
     BOM (BomLine) and produces one stock item of the assembly (stamped build_id).
-    id mirrors the InvenTree build pk during migration. reference is the human
-    build code; status is the InvenTree BuildStatus label."""
+    id mirrors the InvenTree build pk during migration. The human build code is
+    derived from the id by `reference`, not stored; status is the InvenTree
+    BuildStatus label."""
 
     __tablename__ = "build_orders"
 
@@ -239,7 +253,6 @@ class BuildOrder(Base):
     # the app (their output is real stock rows); set by the InvenTree migration,
     # which cannot reconstruct output InvenTree has since deleted.
     imported_produced: Mapped[int] = mapped_column(default=0)
-    reference: Mapped[str] = mapped_column(default="")
     status: Mapped[str] = mapped_column(default="")
     description: Mapped[str] = mapped_column(default="")
     start_date: Mapped[date | None] = mapped_column(default=None)
