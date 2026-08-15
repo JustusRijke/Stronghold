@@ -144,7 +144,6 @@ export const api = {
 	createPo: (b: {
 		supplier_id: number;
 		description: string;
-		reference?: string;
 		start_date?: string;
 	}) =>
 		post<PurchaseOrder>('/purchase-orders', b),
@@ -167,7 +166,6 @@ export const api = {
 		part_id: number;
 		quantity: number;
 		description: string;
-		reference?: string;
 	}) =>
 		post<BuildOrder>('/build-orders', b),
 	patchBuild: (id: number, b: Partial<Omit<BuildOrder, 'id' | 'part_id'>>) =>

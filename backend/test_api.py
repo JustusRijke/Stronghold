@@ -552,7 +552,11 @@ def test_search(client):
     sup = client.post("/api/suppliers", json={"name": "SrchCo"}).json()
     po = client.post(
         "/api/purchase-orders",
-        json={"description": "d", "supplier_id": sup["id"], "reference": "SRCH-PO-1"},
+        json={
+            "description": "d",
+            "supplier_id": sup["id"],
+            "supplier_reference": "SRCH-PO-1",
+        },
     ).json()
 
     hits = client.get("/api/search", params={"q": "srch"}).json()
@@ -575,6 +579,27 @@ def test_search(client):
     ).json()
     reordered = client.get("/api/search", params={"q": "933 DIN"}).json()
     assert ("part", din["id"]) in {(h["type"], h["id"]) for h in reordered}
+
+    # an order code has no column to match, so it resolves to the pk it names:
+    # with or without leading zeros, and case-insensitively
+    build = client.post(
+        "/api/parts", json={"sku": "SRCH-ASM", "description": "asm"}
+    ).json()
+    client.patch(f"/api/parts/{build['id']}", json={"assembly": True})
+    bo = client.post(
+        "/api/build-orders",
+        json={"description": "d", "part_id": build["id"], "quantity": 1},
+    ).json()
+    for q in (bo["reference"], bo["reference"].lower(), f"BO-{bo['id']}"):
+        hit = client.get("/api/search", params={"q": q}).json()
+        assert ("build_order", bo["id"]) in {(h["type"], h["id"]) for h in hit}
+    by_code = client.get("/api/search", params={"q": po["reference"]}).json()
+    assert ("purchase_order", po["id"]) in {(h["type"], h["id"]) for h in by_code}
+    # a bare number is not an id search: the prefix is required
+    bare = client.get("/api/search", params={"q": str(bo["id"])}).json()
+    assert not [h for h in bare if h["type"] == "build_order"]
+    # a code naming an order that does not exist finds nothing
+    assert client.get("/api/search", params={"q": "PO-9999"}).json() == []
 
 
 def test_stock_value_report(client):
@@ -1122,9 +1147,10 @@ def test_part_demand_and_suggested_order(client):
     assert row["suggested_order"] == 1
 
 
-def test_order_references_default_and_stay_unique(client):
-    """Both order types get a BO-/PO-<pk> code when none is given, and no two
-    orders may carry the same code (case-insensitively)."""
+def test_order_references_are_derived_from_the_pk(client):
+    """Both order types report a PO-/BO-<pk> code. It is computed from the id,
+    not stored, so it cannot be set on create or changed afterwards -- which is
+    what makes it reliably unique and predictable."""
     sup = client.post("/api/suppliers", json={"name": "Acme"}).json()["id"]
     asm = client.post("/api/parts", json={"sku": "ASM", "description": "a"}).json()[
         "id"
@@ -1141,47 +1167,17 @@ def test_order_references_default_and_stay_unique(client):
     assert po["reference"] == f"PO-{po['id']:04d}"
     assert build["reference"] == f"BO-{build['id']:04d}"
 
-    # a second order cannot claim a code already in use, in either direction
-    dup = client.post(
+    # a reference in the payload is ignored, not honoured: the field is gone
+    # from the input models, so the derived code stands
+    forced = client.post(
         "/api/purchase-orders",
-        json={"description": "d", "supplier_id": sup, "reference": po["reference"]},
-    )
-    assert dup.status_code == 400 and "already used" in dup.json()["detail"]
-    dup_build = client.post(
-        "/api/build-orders",
-        json={
-            "description": "d",
-            "part_id": asm,
-            "quantity": 1,
-            "reference": build["reference"].lower(),
-        },
-    )
-    assert dup_build.status_code == 400
-
-    # editing onto a taken code is rejected too; blanking keeps the stored code
-    other = client.post(
-        "/api/build-orders",
-        json={"description": "d", "part_id": asm, "quantity": 1},
+        json={"description": "d", "supplier_id": sup, "reference": "PO-9999"},
     ).json()
-    assert (
-        client.patch(
-            f"/api/build-orders/{other['id']}", json={"reference": build["reference"]}
-        ).status_code
-        == 400
-    )
-    assert (
-        client.patch(
-            f"/api/build-orders/{other['id']}", json={"reference": " "}
-        ).json()["reference"]
-        == other["reference"]
-    )
-    # keeping its own code is fine (the check must skip the row itself)
-    assert (
-        client.patch(
-            f"/api/build-orders/{other['id']}", json={"reference": other["reference"]}
-        ).status_code
-        == 200
-    )
+    assert forced["reference"] == f"PO-{forced['id']:04d}"
+    patched = client.patch(
+        f"/api/build-orders/{build['id']}", json={"reference": "BO-9999"}
+    ).json()
+    assert patched["reference"] == build["reference"]
 
 
 def test_stock_log_reconstructs_deleted_production(client):

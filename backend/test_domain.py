@@ -16,10 +16,12 @@ from models import (
     Activity,
     Booking,
     BuildLine,
+    BuildOrder,
     Part,
     POLine,
     PurchaseOrder,
     StockItem,
+    po_ref,
 )
 from sqlalchemy import select
 from version import RELEASE_VERSION, SCHEMA_VERSION
@@ -51,16 +53,16 @@ def test_parts_and_stock_flow(database):
 
 
 def test_po_defaults_reference_and_date(database):
-    """A new PO always has a reference and an order date: without a date it
-    cannot be ranked as "latest", so its price would never win."""
+    """A PO's reference is derived from its pk, and it always has an order
+    date: without one it cannot be ranked as "latest", so its price would
+    never win."""
     db.create_part(1, "BOLT-M3", "M3 bolt")
     db.create_supplier(1, "Acme Corp")
     db.create_supplier_part(1, 1, "A-100", 1, pack_qty=100)
     db.create_po(7, 1, start_date=date(2026, 1, 1))
     db.add_po_line(db.next_line_id(), 7, 1, 1, 8.0)
     with db.session() as s:
-        po = s.get(PurchaseOrder, 7)
-        assert po.reference == "PO-0007"  # defaulted from the pk
+        assert po_ref(7) == "PO-0007"  # derived from the pk, not stored
         assert s.get(Part, 1).estimated_price == 0.08
     # a later order, created with no date at all, must still win on price
     db.create_po(8, 1)
@@ -69,14 +71,14 @@ def test_po_defaults_reference_and_date(database):
         assert s.get(PurchaseOrder, 8).start_date == date.today()
         assert s.get(Part, 1).estimated_price == 0.01
     with pytest.raises(db.InventoryError):
-        db.edit_po(8, reference="", status="Pending", start_date=date.today())
+        db.edit_po(8, status="Pending", start_date=None)
 
 
 def test_purchasing_flow(database):
     db.create_part(1, "BOLT-M3", "M3 bolt")
     db.create_supplier(1, "Acme Corp")
     db.create_supplier_part(1, 1, "A-100", 1, ean="123", pack_qty=10)
-    db.create_po(1, 1, reference="restock")
+    db.create_po(1, 1)
     line_id = db.next_line_id()
     db.add_po_line(line_id, 1, 1, 20, 0.05)
     line2 = db.next_line_id()
@@ -115,7 +117,7 @@ def test_purchasing_flow(database):
     with pytest.raises(db.InventoryError):
         db.edit_po_line(line_id, 999)
     with pytest.raises(db.InventoryError):
-        db.edit_po(1, reference="restock", status="Cancelled")
+        db.edit_po(1, status="Cancelled", start_date=date.today())
     sql = database.read_text(encoding="utf-8")
     assert "INSERT INTO bookings" in sql
 
@@ -794,6 +796,49 @@ def test_older_data_file_is_migrated_on_open(database, monkeypatch):
     )
 
 
+def test_v1_data_file_drops_the_stored_order_references(tmp_path):
+    """The real schema 1 -> 2 step, on a file as the 1.0 app actually wrote one.
+
+    A *removed* column is the case that breaks a plain replay: these INSERTs
+    name `reference`, which no longer exists, so without the scaffold in
+    _import_sql the whole startup dies before _migrate can run."""
+    data_file = tmp_path / "inventory.sql"
+    db.init(data_file)
+    db.create_part(1, "ASM", "an assembly")
+    db.set_part_assembly(1, True)
+    db.create_supplier(1, "Acme")
+    db.create_po(7, 1, start_date=date(2026, 1, 5))
+    db.create_build(3, 1, 2)
+
+    # rewrite the export as the 1.0 app wrote it: the reference column back in
+    # each order's INSERT, carrying codes a user could edit (and had)
+    text = data_file.read_text(encoding="utf-8")
+    text = text.replace(
+        "INSERT INTO purchase_orders (id, supplier_id",
+        "INSERT INTO purchase_orders (reference, id, supplier_id",
+    ).replace("VALUES (7, 1", "VALUES ('whatever-they-typed', 7, 1")
+    text = text.replace(
+        "INSERT INTO build_orders (id, part_id",
+        "INSERT INTO build_orders (reference, id, part_id",
+    ).replace("VALUES (3, 1", "VALUES ('BO-XXXX', 3, 1")
+    data_file.write_text(text, encoding="utf-8")
+    _set_stamp(data_file, 1)
+    assert "whatever-they-typed" in data_file.read_text(encoding="utf-8")
+
+    db.init(data_file)
+
+    assert db.data_schema_version() == SCHEMA_VERSION
+    with db.session() as s:
+        # everything except the dropped column survived
+        assert s.get(PurchaseOrder, 7).start_date == date(2026, 1, 5)
+        assert s.get(BuildOrder, 3).quantity == 2
+        assert not hasattr(s.get(PurchaseOrder, 7), "reference")
+    # the hand-edited codes are gone for good, replaced by the derived ones
+    text = data_file.read_text(encoding="utf-8")
+    assert "whatever-they-typed" not in text and "BO-XXXX" not in text
+    assert po_ref(7) == "PO-0007"
+
+
 def test_newer_data_file_refuses_to_open(database):
     """The data-loss guard: this app exports only the columns it knows, so
     opening a newer file would drop the rest on the first write -- and with
@@ -806,7 +851,8 @@ def test_newer_data_file_refuses_to_open(database):
 
 
 def test_unstamped_data_file_opens_as_version_one(database):
-    """Every file written before stamping existed matches the 1.0 schema."""
+    """Every file written before stamping existed matches the 1.0 schema, so it
+    is read as version 1 and migrated up from there like any other old file."""
     db.create_part(1, "BOLT-M3", "M3 bolt")
     text = database.read_text(encoding="utf-8")
     stripped = "\n".join(
@@ -815,7 +861,10 @@ def test_unstamped_data_file_opens_as_version_one(database):
     database.write_text(stripped + "\n", encoding="utf-8")
 
     db.init(database)
-    assert db.data_schema_version() == 1
+    # migrated to current, and the part survived the trip
+    assert db.data_schema_version() == SCHEMA_VERSION
+    with db.session() as s:
+        assert s.get(Part, 1).sku == "BOLT-M3"
 
 
 def test_release_version_has_no_dev_suffix():
@@ -884,12 +933,12 @@ def test_startup_commit_says_what_startup_did(tmp_path):
     db.create_part(1, "BOLT-M3", "M3 bolt")
     assert git("log", "--format=%s").splitlines()[0] == "Created part M3 bolt"
 
-    # an existing data file with no version stamp, as every file predating
-    # stamping is: the commit must describe the stamping, not the part
+    # an existing data file with no version stamp: unstamped means version 1,
+    # so startup migrates it -- and the commit must say so, not name the part
     _strip_stamps(data_file)
     db.init(data_file, auto_commit=True)
     log = git("log", "--format=%s").splitlines()
-    assert log[0].startswith("Recorded the Stronghold version")
+    assert log[0].startswith("Migrated data from schema 1")
     assert "Created part" not in log[0]
 
     # restarting again changes nothing, so there is nothing to commit

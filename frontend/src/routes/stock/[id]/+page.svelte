@@ -69,7 +69,7 @@
 					<p>
 						Purchase order:
 						<a class="mono" href={`/purchase-orders/${item.po_id}`}
-							>{item.po_reference || item.po_id}</a
+							>{item.po_reference}</a
 						>
 					</p>
 				{/if}
@@ -77,7 +77,7 @@
 					<p>
 						Built by:
 						<a class="mono" href={`/build-orders/${item.build_id}`}
-							>{item.build_reference || item.build_id}</a
+							>{item.build_reference}</a
 						>
 					</p>
 				{/if}
@@ -85,7 +85,7 @@
 					<p>
 						Consumed by:
 						<a class="mono" href={`/build-orders/${item.consumed_by_build_id}`}
-							>{item.consumed_by_reference || item.consumed_by_build_id}</a
+							>{item.consumed_by_reference}</a
 						>
 					</p>
 				{/if}

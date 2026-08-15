@@ -8,7 +8,6 @@
 	import type { Supplier } from '$lib/types';
 
 	let supplierId = $state<number | ''>(Number($page.url.searchParams.get('supplier_id')) || '');
-	let reference = $state('');
 	let description = $state('');
 	// the order date drives "latest price"; default to today
 	let startDate = $state(new Date().toISOString().slice(0, 10));
@@ -44,7 +43,6 @@
 		try {
 			const po = await api.createPo({
 				supplier_id: Number(supplierId),
-				reference,
 				description,
 				start_date: startDate
 			});
@@ -70,10 +68,6 @@
 	<label class="field req">
 		<span>Description</span>
 		<input required bind:value={description} />
-	</label>
-	<label class="field">
-		<span>Reference</span>
-		<input bind:value={reference} placeholder="PO-… (auto if left blank)" />
 	</label>
 	<label class="field req">
 		<span>Order date</span>

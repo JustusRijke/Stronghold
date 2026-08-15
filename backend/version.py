@@ -14,7 +14,9 @@ from importlib.metadata import PackageNotFoundError, version
 
 # Bump when a change makes an older data file wrong, and add the matching entry
 # to db._MIGRATIONS. 1 is the 1.0 baseline: the shape the app shipped 1.0 with.
-SCHEMA_VERSION = 1
+# 2 dropped purchase_orders.reference / build_orders.reference (derived from the
+# pk since; see models.po_ref).
+SCHEMA_VERSION = 2
 
 try:
     APP_VERSION = version("stronghold")
