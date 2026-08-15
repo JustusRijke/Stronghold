@@ -61,7 +61,16 @@ DOMAIN_DEFAULTS = {
     # stock and losing it have little vocabulary in common.
     "stocktake.add_reasons": "Found,Refurbished/repaired,Returned by customer,Unknown",
     "stocktake.subtract_reasons": "Damaged,Warranty claim by customer,Lost,Unknown",
+    # "true" lifts the order status transition rules (so a cancelled order can
+    # be un-cancelled) and lets stock counts be typed in directly.
+    "expert.mode": "false",
 }
+
+EXPERT_MODE_KEY = "expert.mode"
+
+
+def expert_mode() -> bool:
+    return get_setting(EXPERT_MODE_KEY) == "true"
 
 
 # Version stamps. These live in the settings table because that is the one
@@ -1635,12 +1644,18 @@ def edit_po(
     po = get_po(s, po_id)
     # status transition rules: Complete/Cancelled are dead ends (mirrors builds);
     # Cancelled additionally requires nothing has been received yet, since
-    # receipts already created real stock that cancelling can't undo.
-    if po.status in (POStatus.COMPLETE, POStatus.CANCELLED) and status != po.status:
+    # receipts already created real stock that cancelling can't undo. Expert
+    # mode lifts both -- the escape hatch for an order cancelled by mistake.
+    expert = expert_mode()
+    if (
+        not expert
+        and po.status in (POStatus.COMPLETE, POStatus.CANCELLED)
+        and status != po.status
+    ):
         raise InventoryError(
             f"purchase order {po_id} is {po.status}, cannot change status"
         )
-    if status == POStatus.CANCELLED and _po_has_receipts(s, po_id):
+    if not expert and status == POStatus.CANCELLED and _po_has_receipts(s, po_id):
         raise InventoryError(
             f"purchase order {po_id} has received lines, cannot cancel"
         )
@@ -2024,13 +2039,14 @@ def edit_build(
         )
     # status transition rules: Complete only when fully produced; once anything
     # is produced the order can only be Production or Complete (no reverting to
-    # Draft/Pending/Cancelled).
-    if status == BuildStatus.COMPLETE and already != quantity:
+    # Draft/Pending/Cancelled). Expert mode lifts both.
+    expert = expert_mode()
+    if not expert and status == BuildStatus.COMPLETE and already != quantity:
         raise InventoryError(
             f"build {build_id}: cannot complete, produced {already} of {quantity}"
         )
     started_states = (BuildStatus.PRODUCTION, BuildStatus.COMPLETE)
-    if already > 0 and status not in started_states:
+    if not expert and already > 0 and status not in started_states:
         raise InventoryError(
             f"build {build_id}: {already} already produced; status must be "
             "Production or Complete"

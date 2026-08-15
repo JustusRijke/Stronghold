@@ -1003,3 +1003,19 @@ def test_non_purchasable_part(database):
     db.create_supplier_part(sp_id, 1, "SP-1", 1)
     with pytest.raises(db.InventoryError):
         db.set_part_purchasable(1, False)
+
+
+def test_expert_mode_lifts_status_rules(database):
+    db.create_supplier(1, "acme")
+    po_id = db.next_po_id()
+    db.create_po(po_id, 1)
+    db.edit_po(po_id, status="Cancelled", start_date=date.today())
+
+    # cancelled is a dead end by default
+    with pytest.raises(db.InventoryError):
+        db.edit_po(po_id, status="Pending", start_date=date.today())
+
+    db.set_setting("expert.mode", "true")
+    db.edit_po(po_id, status="Pending", start_date=date.today())
+    with db.session() as s:
+        assert s.get(PurchaseOrder, po_id).status == "Pending"
