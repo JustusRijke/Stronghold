@@ -8,7 +8,6 @@
 
 	let partId = $state<number | ''>(Number($page.url.searchParams.get('part_id')) || '');
 	let quantity = $state(1);
-	let reference = $state('');
 	let description = $state('');
 	let assemblies = $state<Part[]>([]);
 	$effect(() => {
@@ -21,7 +20,6 @@
 			const build = await api.createBuild({
 				part_id: Number(partId),
 				quantity,
-				reference,
 				description
 			});
 			goto(`/build-orders/${build.id}`);
@@ -49,10 +47,6 @@
 	</label>
 	<label class="field req">
 		<span>Description</span><input required bind:value={description} />
-	</label>
-	<label class="field">
-		<span>Reference</span>
-		<input bind:value={reference} placeholder="BO-… (auto if left blank)" />
 	</label>
 	<div><button class="btn" type="submit">Create</button></div>
 	{#if assemblies.length === 0}

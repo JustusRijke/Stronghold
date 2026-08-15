@@ -66,7 +66,7 @@
 	<h2 class="h2">Settle from stock</h2>
 	<p class="muted">
 		{debt.description} &middot; <strong>{owedQty}</strong> owed to
-		{debt.consumed_by_reference || `BO-${debt.consumed_by_build_id}`}, {available} in stock
+		{debt.consumed_by_reference}, {available} in stock
 	</p>
 
 	<label class="field req">

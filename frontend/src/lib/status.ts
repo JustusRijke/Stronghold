@@ -27,7 +27,7 @@ type StockOrigin = {
 };
 
 export const stockOrderLabel = (s: StockOrigin) =>
-	s.po_id !== null ? s.po_reference || `PO-${s.po_id}` : s.build_reference;
+	s.po_id !== null ? s.po_reference : s.build_reference;
 
 export function stockOrderUrl(s: StockOrigin) {
 	if (s.po_id !== null) return `/purchase-orders/${s.po_id}`;

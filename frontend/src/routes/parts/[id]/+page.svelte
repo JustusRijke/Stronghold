@@ -702,7 +702,7 @@
 			<ul>
 				{#each poCandidates as c (c.po.id)}
 					<li>
-						<a href={`/purchase-orders/${c.po.id}`}>{c.po.reference || `PO ${c.po.id}`}</a>
+						<a href={`/purchase-orders/${c.po.id}`}>{c.po.reference}</a>
 						<span class="muted">
 							&middot; {c.supplierPart.supplier_name} &middot; packs of {c.supplierPart.pack_qty}
 						</span>

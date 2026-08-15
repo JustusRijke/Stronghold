@@ -268,7 +268,7 @@
 			<ul>
 				{#each poCandidates as c (c.po.id)}
 					<li>
-						<a href={`/purchase-orders/${c.po.id}`}>{c.po.reference || `PO ${c.po.id}`}</a>
+						<a href={`/purchase-orders/${c.po.id}`}>{c.po.reference}</a>
 						{#if c.line}
 							<button class="btn" onclick={() => addToExistingLine(c.line!, poQty)}
 								>Add to existing line ({c.line.quantity} &rarr; {c.line.quantity + poQty})</button

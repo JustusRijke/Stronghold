@@ -46,7 +46,7 @@
 			notFound = true;
 			return;
 		}
-		buildTabs.open(id, build.reference || `Build ${id}`);
+		buildTabs.open(id, build.reference);
 		const [part, lines, allStock, buildStock] = await Promise.all([
 			api.part(build.part_id),
 			api.buildLines(id),
@@ -227,7 +227,7 @@
 		<DetailSidebar {sections} />
 		<div class="content">
 			<div class="head">
-				<h1 class="h1">Build {build.reference || build.id}</h1>
+				<h1 class="h1">{build.reference}</h1>
 				<span class="badge">{build.status}</span>
 			</div>
 			<p>
@@ -243,18 +243,6 @@
 					<input
 						value={build.description}
 						onblur={(e) => save({ description: e.currentTarget.value })}
-					/>
-				</label>
-				<label class="field req">
-					<span>Reference</span>
-					<input
-						required
-						value={build.reference}
-						onblur={(e) => {
-							// required: an emptied box snaps back to the stored reference
-							if (e.currentTarget.value.trim()) save({ reference: e.currentTarget.value });
-							else e.currentTarget.value = build!.reference;
-						}}
 					/>
 				</label>
 				<label class="field">

@@ -55,7 +55,7 @@
 			notFound = true;
 			return;
 		}
-		poTabs.open(id, po.reference || `PO ${id}`);
+		poTabs.open(id, po.reference);
 		const [supplier, poLines, sps, allStock] = await Promise.all([
 			api.supplier(po.supplier_id),
 			api.poLines(id),
@@ -161,7 +161,7 @@
 		<DetailSidebar {sections} />
 		<div class="content">
 			<div class="head">
-				<h1 class="h1">PO {po.reference || po.id}</h1>
+				<h1 class="h1">{po.reference}</h1>
 			</div>
 			<p>
 				Supplier: <a href={`/suppliers/${po.supplier_id}`}>{supplierName}</a>
@@ -174,18 +174,6 @@
 					<input
 						value={po.description}
 						onblur={(e) => save({ description: e.currentTarget.value })}
-					/>
-				</label>
-				<label class="field req">
-					<span>Reference</span>
-					<input
-						required
-						value={po.reference}
-						onblur={(e) => {
-							// required: an emptied box snaps back to the stored reference
-							if (e.currentTarget.value.trim()) save({ reference: e.currentTarget.value });
-							else e.currentTarget.value = po!.reference;
-						}}
 					/>
 				</label>
 				<label class="field">
