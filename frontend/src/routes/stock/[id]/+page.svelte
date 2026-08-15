@@ -42,11 +42,20 @@
 			return;
 		}
 		stockTabs.open(id, `#${item.id}${item.sku ? ` - ${item.sku}` : ''}`);
+		draftCount = item.count;
 	}
 
-	async function setCount(count: number) {
-		if (count === item?.count) return;
+	// the count field is a draft until OK: a stock edit is deliberate, and the
+	// spinner arrows would otherwise write a row per click. Empty reads as null
+	// (Svelte's number binding), which is not a value to save
+	let draftCount = $state<number | null>(null);
+	const countChanged = $derived(!!item && draftCount !== null && draftCount !== item.count);
+
+	async function saveCount() {
+		const count = draftCount;
+		if (!countChanged || count === null) return;
 		await toast.run(async () => (item = await api.patchStock(id, { count })), 'Saved');
+		if (item) draftCount = item.count;
 	}
 	$effect(() => {
 		if (!Number.isNaN(id)) load();
@@ -122,23 +131,28 @@
 					{/if}
 				</p>
 				{#if expert.on}
-					<label class="field">
-						<span>Count</span>
-						<!-- a row keeps its sign: shelf stock stays >= 0, a debt row stays
-						     <= 0. The backend enforces the same, this just says so first -->
-						<input
-							type="number"
-							step="any"
-							min={owedToBuild ? undefined : 0}
-							max={owedToBuild ? 0 : undefined}
-							value={item.count}
-							onblur={(e) => setCount(Number(e.currentTarget.value))}
-							onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-						/>
+					<div class="countfield">
+						<span id="count-label">Count</span>
+						<div class="count">
+							<!-- a row keeps its sign: shelf stock stays >= 0, a debt row stays
+							     <= 0. The backend enforces the same, this just says so first -->
+							<input
+								type="number"
+								step="any"
+								aria-labelledby="count-label"
+								min={owedToBuild ? undefined : 0}
+								max={owedToBuild ? 0 : undefined}
+								bind:value={draftCount}
+								onkeydown={(e) => e.key === 'Enter' && saveCount()}
+							/>
+							<button class="btn" type="button" disabled={!countChanged} onclick={saveCount}>
+								OK
+							</button>
+						</div>
 						{#if owedToBuild}
 							<span class="hint">stock owed to a build; settle it to 0, never above</span>
 						{/if}
-					</label>
+					</div>
 				{:else}
 					<p>
 						Count: <strong>{item.count}</strong>
@@ -156,6 +170,24 @@
 {/if}
 
 <style>
+	/* label.field is column-flex; the count row needs the button beside the
+	   input, so it carries its own layout rather than fighting that */
+	.countfield {
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+		font-size: 12px;
+		color: var(--ink-soft);
+		max-width: 420px;
+	}
+	.count {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.count input {
+		flex: 1;
+	}
 	.hint {
 		color: var(--ink-faint);
 		font-size: 0.85em;

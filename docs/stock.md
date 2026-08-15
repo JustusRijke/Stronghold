@@ -249,9 +249,13 @@ that normally keep the books honest:
   only be Production or Complete. With expert mode on, any status can be set on
   any order. This exists mainly to un-cancel an order cancelled by mistake.
 - **Stock counts become directly editable.** The stock item page shows the count
-  as an input instead of a read-only figure. Editing it overwrites the count
-  with no stocktake row, no reason and no consumed row -- so nothing records
-  where the stock went.
+  as an input with an **OK** button beside it. Typing a new figure changes
+  nothing on its own: the edit is saved only when you press OK or Enter, and OK
+  stays greyed out until the value actually differs from what is stored. Saving
+  overwrites the count with no stocktake row, no reason and no consumed row --
+  so nothing records where the stock went.
+  A row keeps its sign either way: shelf stock cannot be edited negative, and a
+  build's shortfall row cannot be edited positive (settle it to 0 instead).
 
 Both bypasses are exactly the safety rails that make the history readable. Turn
 it on for the repair, turn it off again afterwards. For an everyday correction

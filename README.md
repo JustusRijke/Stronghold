@@ -187,8 +187,9 @@ Open-source inventory/stock tracking for small and medium businesses.
   rather than removed, so your history and data stay intact
 - **Expert mode** (a switch on the Settings page, off by default) lifts the
   order status rules -- so a purchase order cancelled by mistake can be
-  un-cancelled -- and makes a stock item's count directly editable. Both skip
-  the trail a stocktake would leave; use it to repair, not day to day
+  un-cancelled -- and makes a stock item's count directly editable behind an OK
+  button (greyed out until the value changes, so the edit is deliberate). Both
+  skip the trail a stocktake would leave; use it to repair, not day to day
 - Your data is one readable SQL file: `inventory.sql` is the whole inventory
   as plain text, and the only file you name or back up. SQLite is used
   internally, but that database is a scratch copy rebuilt in a temp directory
