@@ -1116,10 +1116,25 @@ def create_item(s: Session, item_id: int, part_id: int) -> None:
 
 @_write
 def set_count(s: Session, item_id: int, count: float) -> None:
-    if count < 0:
-        raise InventoryError(f"count of item {item_id} cannot be {count}")
     item = get_item(s, item_id)
     old = item.count
+    # a row's sign is what it is: shelf stock (>= 0) is not a debt and a debt
+    # row is not shelf stock. Either may be edited to any value on its own side
+    # of zero -- zero is the settled end of both -- but never across, which
+    # would silently turn stock owed to a build into stock on hand. A debt is
+    # identified by its build stamp, not by its count: settling one to zero
+    # must not leave a row that can then be raised positive.
+    # (Consumed rows carry the same stamp, hence the status check -- a debt is
+    # the Available half of that pair.)
+    debt = old < 0 or (
+        item.status == STOCK_AVAILABLE and item.consumed_by_build_id is not None
+    )
+    if count < 0 and not debt:
+        raise InventoryError(f"count of item {item_id} cannot be {count}")
+    if count > 0 and debt:
+        raise InventoryError(
+            f"item {item_id} is stock owed to a build; its count cannot be {count}"
+        )
     item.count = count
     if count != old:
         part = get_part(s, item.part_id)

@@ -12,10 +12,13 @@
 	let item = $state<StockItem | null>(null);
 	let notFound = $state(false);
 	let settling = $state(false);
-	// an outstanding shortfall: negative available stock owed to a build
-	const isDebt = $derived(
-		!!item && item.status === 'Available' && item.count < 0 && !!item.consumed_by_build_id
+	// a row belonging to a build's shortfall rather than to the shelf. Still
+	// true once it settles to zero, so an expert edit cannot turn it into stock
+	const owedToBuild = $derived(
+		!!item && item.status === 'Available' && !!item.consumed_by_build_id
 	);
+	// an outstanding shortfall: one still owing stock, so still settleable
+	const isDebt = $derived(owedToBuild && !!item && item.count < 0);
 
 	const sections = [{ id: 'details', label: 'Details' }];
 
@@ -121,12 +124,19 @@
 				{#if expert.on}
 					<label class="field">
 						<span>Count</span>
+						<!-- a row keeps its sign: shelf stock stays >= 0, a debt row stays
+						     <= 0. The backend enforces the same, this just says so first -->
 						<input
 							type="number"
 							step="any"
+							min={owedToBuild ? undefined : 0}
+							max={owedToBuild ? 0 : undefined}
 							value={item.count}
 							onblur={(e) => setCount(Number(e.currentTarget.value))}
 						/>
+						{#if owedToBuild}
+							<span class="hint">stock owed to a build; settle it to 0, never above</span>
+						{/if}
 					</label>
 				{:else}
 					<p>
