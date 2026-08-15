@@ -243,7 +243,7 @@
 					<span>Description</span>
 					<input
 						value={build.description}
-						onblur={(e) => save({ description: e.currentTarget.value })}
+						onchange={(e) => save({ description: e.currentTarget.value })}
 					/>
 				</label>
 				<label class="field">
@@ -253,7 +253,7 @@
 						min={Math.max(1, build.produced)}
 						step="1"
 						value={build.quantity}
-						onblur={(e) => saveQuantity(e.currentTarget)}
+						onchange={(e) => saveQuantity(e.currentTarget)}
 					/>
 				</label>
 				<label class="field">

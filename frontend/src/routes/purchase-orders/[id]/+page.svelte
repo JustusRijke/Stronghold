@@ -175,7 +175,7 @@
 					<span>Description</span>
 					<input
 						value={po.description}
-						onblur={(e) => save({ description: e.currentTarget.value })}
+						onchange={(e) => save({ description: e.currentTarget.value })}
 					/>
 				</label>
 				<label class="field">
@@ -193,7 +193,7 @@
 					<span>Supplier ref</span>
 					<input
 						value={po.supplier_reference}
-						onblur={(e) => save({ supplier_reference: e.currentTarget.value })}
+						onchange={(e) => save({ supplier_reference: e.currentTarget.value })}
 					/>
 				</label>
 				<label class="field req">
@@ -220,7 +220,7 @@
 						min="0"
 						step="any"
 						value={po.delivery_cost}
-						onblur={(e) => save({ delivery_cost: Number(e.currentTarget.value) })}
+						onchange={(e) => save({ delivery_cost: Number(e.currentTarget.value) })}
 					/>
 				</label>
 			</section>
@@ -267,7 +267,7 @@
 												min="1"
 												step="1"
 												value={line.quantity}
-												onblur={(e) =>
+												onchange={(e) =>
 												saveLine(line, { quantity: Number(e.currentTarget.value) }, e.currentTarget)}
 											/>
 										{/if}
@@ -283,7 +283,7 @@
 												min="0"
 												step="any"
 												value={line.price}
-												onblur={(e) =>
+												onchange={(e) =>
 												saveLine(line, { price: Number(e.currentTarget.value) }, e.currentTarget)}
 											/>
 										{/if}

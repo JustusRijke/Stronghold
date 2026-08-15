@@ -40,7 +40,7 @@
 				{:else}
 					<label class="field" style="flex:1">
 						<span>{s.key}</span>
-						<input value={s.value} onblur={(e) => save(s.key, e.currentTarget.value)} />
+						<input value={s.value} onchange={(e) => save(s.key, e.currentTarget.value)} />
 					</label>
 				{/if}
 			</div>

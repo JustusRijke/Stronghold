@@ -401,7 +401,7 @@
 									type={c.edit === 'number' ? 'number' : 'text'}
 									step={c.edit === 'number' ? (c.step ?? 'any') : undefined}
 									value={row[c.key] ?? ''}
-									onblur={(e) =>
+									onchange={(e) =>
 										onEdit?.(row, c.key, c.edit === 'number' ? Number(e.currentTarget.value) : e.currentTarget.value)}
 								/>
 							{:else}
