@@ -10,6 +10,7 @@
 	import { BookIn } from '$lib/validators';
 	import type { POLine, PurchaseOrder, StockItem, SupplierPart } from '$lib/types';
 	import { PO_STATUS_OPTIONS as STATUS_OPTIONS } from '$lib/status';
+	import { expert } from '$lib/expert.svelte';
 	import { STATUS_OPTIONS as STOCK_STATUS_OPTIONS } from '$lib/validators';
 
 	// mirrors backend transition rules (db.edit_po): Complete only when every
@@ -17,6 +18,7 @@
 	// Cancelled additionally requires nothing received yet (receipts already
 	// created real stock that cancelling can't undo).
 	function statusAllowed(st: string): boolean {
+		if (expert.on) return true;
 		if (po?.status === 'Complete' || po?.status === 'Cancelled') return st === po.status;
 		if (st === 'Complete') return lines.length > 0 && lines.every((l) => l.received >= l.quantity);
 		if (st === 'Cancelled') return !lines.some((l) => l.received > 0);

@@ -4,9 +4,12 @@
 	import { goto } from '$app/navigation';
 	import { toast } from '$lib/toast.svelte';
 	import { api } from '$lib/api';
+	import { loadExpertMode } from '$lib/expert.svelte';
 	import type { SearchResult } from '$lib/types';
 
 	let { children } = $props();
+
+	loadExpertMode();
 
 	const NAV = [
 		['Home', '/'],

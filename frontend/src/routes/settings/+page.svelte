@@ -1,7 +1,10 @@
 <script lang="ts">
 	import { api } from '$lib/api';
 	import { toast } from '$lib/toast.svelte';
+	import { loadExpertMode } from '$lib/expert.svelte';
 	import type { Setting } from '$lib/types';
+
+	const EXPERT_KEY = 'expert.mode';
 
 	let settings = $state<Setting[]>([]);
 	let deployment = $state<Awaited<ReturnType<typeof api.deploymentSettings>> | null>(null);
@@ -11,7 +14,9 @@
 	});
 
 	async function save(key: string, value: string) {
-		await toast.run(() => api.setSetting(key, value), 'Saved. Restart to apply.');
+		const expert = key === EXPERT_KEY;
+		await toast.run(() => api.setSetting(key, value), expert ? 'Saved' : 'Saved. Restart to apply.');
+		if (expert) await loadExpertMode();
 	}
 </script>
 
@@ -20,10 +25,24 @@
 		<h1 class="h1">Settings</h1>
 		{#each settings as s (s.key)}
 			<div class="setting">
-				<label class="field" style="flex:1">
-					<span>{s.key}</span>
-					<input value={s.value} onblur={(e) => save(s.key, e.currentTarget.value)} />
-				</label>
+				{#if s.key === EXPERT_KEY}
+					<label class="field" style="flex:1">
+						<span>{s.key}</span>
+						<span class="check">
+							<input
+								type="checkbox"
+								checked={s.value === 'true'}
+								onchange={(e) => save(s.key, String(e.currentTarget.checked))}
+							/>
+							Lift order status rules and edit stock counts directly
+						</span>
+					</label>
+				{:else}
+					<label class="field" style="flex:1">
+						<span>{s.key}</span>
+						<input value={s.value} onblur={(e) => save(s.key, e.currentTarget.value)} />
+					</label>
+				{/if}
 			</div>
 		{/each}
 		<h2 class="h2">Deployment</h2>
@@ -52,6 +71,12 @@
 		display: flex;
 		gap: 10px;
 		max-width: 420px;
+	}
+	.check {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		color: var(--ink-soft);
 	}
 	.paths {
 		display: grid;
