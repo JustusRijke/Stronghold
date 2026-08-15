@@ -1003,3 +1003,54 @@ def test_non_purchasable_part(database):
     db.create_supplier_part(sp_id, 1, "SP-1", 1)
     with pytest.raises(db.InventoryError):
         db.set_part_purchasable(1, False)
+
+
+def test_expert_mode_lifts_status_rules(database):
+    db.create_supplier(1, "acme")
+    po_id = db.next_po_id()
+    db.create_po(po_id, 1)
+    db.edit_po(po_id, status="Cancelled", start_date=date.today())
+
+    # cancelled is a dead end by default
+    with pytest.raises(db.InventoryError):
+        db.edit_po(po_id, status="Pending", start_date=date.today())
+
+    db.set_setting("expert.mode", "true")
+    db.edit_po(po_id, status="Pending", start_date=date.today())
+    with db.session() as s:
+        assert s.get(PurchaseOrder, po_id).status == "Pending"
+
+
+def test_set_count_cannot_cross_zero(database):
+    """A stock row's sign is its identity: shelf stock and stock owed to a build
+    are not interchangeable, so a count edit stays on its own side of zero."""
+    db.create_part(1, "BOLT", "bolt")
+    shelf = db.next_item_id()
+    db.create_item(shelf, 1)
+    db.set_count(shelf, 10)
+
+    # shelf stock may move freely at or above zero, never below
+    db.set_count(shelf, 3)
+    db.set_count(shelf, 0)
+    with pytest.raises(db.InventoryError):
+        db.set_count(shelf, -1)
+
+    # a debt row may be edited to any negative value, and settled to zero
+    db.create_part(2, "NUT", "nut")
+    asm = db.next_part_id()
+    db.create_part(asm, "ASM", "asm")
+    db.set_part_assembly(asm, True)
+    db.create_build(db.next_build_id(), asm, 1)
+    build_id = 1
+    db.add_negative_stock(2, 4, build_id)
+    with db.session() as s:
+        debt = s.scalars(
+            select(StockItem).where(StockItem.part_id == 2, StockItem.count < 0)
+        ).one()
+    db.set_count(debt.id, -2)
+    with pytest.raises(db.InventoryError):
+        db.set_count(debt.id, 5)
+    db.set_count(debt.id, 0)
+    # settled to zero it is still the build's row, not shelf stock
+    with pytest.raises(db.InventoryError):
+        db.set_count(debt.id, 5)

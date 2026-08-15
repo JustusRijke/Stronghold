@@ -80,7 +80,7 @@
 			<section id="details">
 				<label class="field">
 					<span>Name</span>
-					<input value={supplier.name} onblur={(e) => saveName(e.currentTarget.value)} />
+					<input value={supplier.name} onchange={(e) => saveName(e.currentTarget.value)} />
 				</label>
 				<label class="check">
 					<input

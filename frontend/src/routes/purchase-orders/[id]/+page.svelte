@@ -10,6 +10,7 @@
 	import { BookIn } from '$lib/validators';
 	import type { POLine, PurchaseOrder, StockItem, SupplierPart } from '$lib/types';
 	import { PO_STATUS_OPTIONS as STATUS_OPTIONS } from '$lib/status';
+	import { expert } from '$lib/expert.svelte';
 	import { STATUS_OPTIONS as STOCK_STATUS_OPTIONS } from '$lib/validators';
 
 	// mirrors backend transition rules (db.edit_po): Complete only when every
@@ -17,6 +18,7 @@
 	// Cancelled additionally requires nothing received yet (receipts already
 	// created real stock that cancelling can't undo).
 	function statusAllowed(st: string): boolean {
+		if (expert.on) return true;
 		if (po?.status === 'Complete' || po?.status === 'Cancelled') return st === po.status;
 		if (st === 'Complete') return lines.length > 0 && lines.every((l) => l.received >= l.quantity);
 		if (st === 'Cancelled') return !lines.some((l) => l.received > 0);
@@ -173,7 +175,7 @@
 					<span>Description</span>
 					<input
 						value={po.description}
-						onblur={(e) => save({ description: e.currentTarget.value })}
+						onchange={(e) => save({ description: e.currentTarget.value })}
 					/>
 				</label>
 				<label class="field">
@@ -191,7 +193,7 @@
 					<span>Supplier ref</span>
 					<input
 						value={po.supplier_reference}
-						onblur={(e) => save({ supplier_reference: e.currentTarget.value })}
+						onchange={(e) => save({ supplier_reference: e.currentTarget.value })}
 					/>
 				</label>
 				<label class="field req">
@@ -218,7 +220,7 @@
 						min="0"
 						step="any"
 						value={po.delivery_cost}
-						onblur={(e) => save({ delivery_cost: Number(e.currentTarget.value) })}
+						onchange={(e) => save({ delivery_cost: Number(e.currentTarget.value) })}
 					/>
 				</label>
 			</section>
@@ -265,7 +267,7 @@
 												min="1"
 												step="1"
 												value={line.quantity}
-												onblur={(e) =>
+												onchange={(e) =>
 												saveLine(line, { quantity: Number(e.currentTarget.value) }, e.currentTarget)}
 											/>
 										{/if}
@@ -281,7 +283,7 @@
 												min="0"
 												step="any"
 												value={line.price}
-												onblur={(e) =>
+												onchange={(e) =>
 												saveLine(line, { price: Number(e.currentTarget.value) }, e.currentTarget)}
 											/>
 										{/if}

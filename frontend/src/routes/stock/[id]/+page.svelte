@@ -4,16 +4,21 @@
 	import { stockTabs } from '$lib/tabs.svelte';
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
 	import SettleDebtDialog from '$lib/components/SettleDebtDialog.svelte';
+	import { expert } from '$lib/expert.svelte';
+	import { toast } from '$lib/toast.svelte';
 	import type { StockItem } from '$lib/types';
 
 	const id = $derived(Number($page.params.id));
 	let item = $state<StockItem | null>(null);
 	let notFound = $state(false);
 	let settling = $state(false);
-	// an outstanding shortfall: negative available stock owed to a build
-	const isDebt = $derived(
-		!!item && item.status === 'Available' && item.count < 0 && !!item.consumed_by_build_id
+	// a row belonging to a build's shortfall rather than to the shelf. Still
+	// true once it settles to zero, so an expert edit cannot turn it into stock
+	const owedToBuild = $derived(
+		!!item && item.status === 'Available' && !!item.consumed_by_build_id
 	);
+	// an outstanding shortfall: one still owing stock, so still settleable
+	const isDebt = $derived(owedToBuild && !!item && item.count < 0);
 
 	const sections = [{ id: 'details', label: 'Details' }];
 
@@ -37,6 +42,20 @@
 			return;
 		}
 		stockTabs.open(id, `#${item.id}${item.sku ? ` - ${item.sku}` : ''}`);
+		draftCount = item.count;
+	}
+
+	// the count field is a draft until OK: a stock edit is deliberate, and the
+	// spinner arrows would otherwise write a row per click. Empty reads as null
+	// (Svelte's number binding), which is not a value to save
+	let draftCount = $state<number | null>(null);
+	const countChanged = $derived(!!item && draftCount !== null && draftCount !== item.count);
+
+	async function saveCount() {
+		const count = draftCount;
+		if (!countChanged || count === null) return;
+		await toast.run(async () => (item = await api.patchStock(id, { count })), 'Saved');
+		if (item) draftCount = item.count;
 	}
 	$effect(() => {
 		if (!Number.isNaN(id)) load();
@@ -111,12 +130,37 @@
 						</span>
 					{/if}
 				</p>
-				<p>
-					Count: <strong>{item.count}</strong>
-					<span class="hint">
-						corrected with Stocktake on the <a href={`/parts/${item.part_id}`}>part page</a>
-					</span>
-				</p>
+				{#if expert.on}
+					<div class="countfield">
+						<span id="count-label">Count</span>
+						<div class="count">
+							<!-- a row keeps its sign: shelf stock stays >= 0, a debt row stays
+							     <= 0. The backend enforces the same, this just says so first -->
+							<input
+								type="number"
+								step="any"
+								aria-labelledby="count-label"
+								min={owedToBuild ? undefined : 0}
+								max={owedToBuild ? 0 : undefined}
+								bind:value={draftCount}
+								onkeydown={(e) => e.key === 'Enter' && saveCount()}
+							/>
+							<button class="btn" type="button" disabled={!countChanged} onclick={saveCount}>
+								OK
+							</button>
+						</div>
+						{#if owedToBuild}
+							<span class="hint">stock owed to a build; settle it to 0, never above</span>
+						{/if}
+					</div>
+				{:else}
+					<p>
+						Count: <strong>{item.count}</strong>
+						<span class="hint">
+							corrected with Stocktake on the <a href={`/parts/${item.part_id}`}>part page</a>
+						</span>
+					</p>
+				{/if}
 			</section>
 		</div>
 	</div>
@@ -126,6 +170,24 @@
 {/if}
 
 <style>
+	/* label.field is column-flex; the count row needs the button beside the
+	   input, so it carries its own layout rather than fighting that */
+	.countfield {
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+		font-size: 12px;
+		color: var(--ink-soft);
+		max-width: 420px;
+	}
+	.count {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.count input {
+		flex: 1;
+	}
 	.hint {
 		color: var(--ink-faint);
 		font-size: 0.85em;

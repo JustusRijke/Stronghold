@@ -189,7 +189,7 @@
 				<p class="muted">In stock: <strong>{inStock}</strong></p>
 				<label class="field">
 					<span>Description</span>
-					<input value={sp.description} onblur={(e) => save({ description: e.currentTarget.value })} />
+					<input value={sp.description} onchange={(e) => save({ description: e.currentTarget.value })} />
 				</label>
 				<label class="field">
 					<span>Part</span>
@@ -199,11 +199,11 @@
 				</label>
 				<label class="field">
 					<span>EAN</span>
-					<input value={sp.ean} onblur={(e) => save({ ean: e.currentTarget.value })} />
+					<input value={sp.ean} onchange={(e) => save({ ean: e.currentTarget.value })} />
 				</label>
 				<label class="field">
 					<span>URL</span>
-					<input value={sp.hyperlink} onblur={(e) => save({ hyperlink: e.currentTarget.value })} />
+					<input value={sp.hyperlink} onchange={(e) => save({ hyperlink: e.currentTarget.value })} />
 				</label>
 				<label class="field">
 					<span>Pack qty</span>
@@ -211,7 +211,7 @@
 						type="number"
 						min="1"
 						value={sp.pack_qty}
-						onblur={(e) => save({ pack_qty: Number(e.currentTarget.value) })}
+						onchange={(e) => save({ pack_qty: Number(e.currentTarget.value) })}
 					/>
 				</label>
 				<label class="check">

@@ -449,11 +449,11 @@
 			<section id="details">
 				<label class="field">
 					<span>SKU</span>
-					<input value={part.sku} onblur={(e) => saveSku(e.currentTarget.value)} />
+					<input value={part.sku} onchange={(e) => saveSku(e.currentTarget.value)} />
 				</label>
 				<label class="field">
 					<span>Description</span>
-					<input value={part.description} onblur={(e) => saveDescription(e.currentTarget.value)} />
+					<input value={part.description} onchange={(e) => saveDescription(e.currentTarget.value)} />
 				</label>
 				{#if !part.virtual}
 					<p class="muted stockline">
@@ -480,7 +480,7 @@
 							step="any"
 							value={part.estimated_price ?? ''}
 							placeholder="not set"
-							onblur={(e) => savePrice(e.currentTarget.value)}
+							onchange={(e) => savePrice(e.currentTarget.value)}
 						/>
 					</label>
 					<p class="muted hint">

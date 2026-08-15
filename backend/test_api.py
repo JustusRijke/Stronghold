@@ -521,7 +521,9 @@ def test_settings(client):
         "/api/settings"
     ).json()
     client.put("/api/settings/gui.title", json={"value": "My Stock"})
-    assert client.get("/api/settings").json()[0]["value"] == "My Stock"
+    assert {"key": "gui.title", "value": "My Stock"} in client.get(
+        "/api/settings"
+    ).json()
     assert client.put("/api/settings/nope", json={"value": "x"}).status_code == 400
 
 
