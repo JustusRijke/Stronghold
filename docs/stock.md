@@ -238,3 +238,21 @@ Two footnotes:
   had on the day of the import, because InvenTree keeps no record of what labour
   cost at the time. That figure is a starting point rather than real history --
   but it is frozen from then on, exactly like a build produced here.
+
+## Expert mode
+
+A switch on the Settings page. It is off by default, and it turns off the rules
+that normally keep the books honest:
+
+- **Order status becomes unrestricted.** Normally a Complete or Cancelled
+  purchase order is a dead end, and a build order that has produced anything can
+  only be Production or Complete. With expert mode on, any status can be set on
+  any order. This exists mainly to un-cancel an order cancelled by mistake.
+- **Stock counts become directly editable.** The stock item page shows the count
+  as an input instead of a read-only figure. Editing it overwrites the count
+  with no stocktake row, no reason and no consumed row -- so nothing records
+  where the stock went.
+
+Both bypasses are exactly the safety rails that make the history readable. Turn
+it on for the repair, turn it off again afterwards. For an everyday correction
+use a stocktake, which keeps the trail.
