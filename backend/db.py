@@ -484,6 +484,13 @@ def _write(fn):
     return wrapper
 
 
+def _field_changes(row, **new) -> list[str]:
+    """'field old -> new' for each attribute the edit actually changes."""
+    return [
+        f"{k} {getattr(row, k)} -> {v}" for k, v in new.items() if getattr(row, k) != v
+    ]
+
+
 def _activity(s: Session, action: str, message: str, refs: list[tuple]) -> None:
     """Append an activity-log row inside the caller's transaction (so it commits
     atomically with the action). refs: list of (type, id, label) tuples."""
@@ -512,10 +519,13 @@ def set_setting(s: Session, key: str, value: str) -> None:
     if key not in DOMAIN_DEFAULTS:
         raise InventoryError(f"unknown setting '{key}'")
     row = s.get(Setting, key)
+    old = DOMAIN_DEFAULTS[key] if row is None else row.value
     if row is None:
         s.add(Setting(key=key, value=value))
     else:
         row.value = value
+    if value != old:
+        _activity(s, "set_setting", f"Setting {key}: '{old}' -> '{value}'", [])
 
 
 # -- parts ------------------------------------------------------------------
@@ -825,10 +835,11 @@ def refresh_stock_prices_for_part(s: Session, part_id: int) -> None:
 
 
 @_write
-def refresh_all_prices(s: Session) -> None:
+def refresh_all_prices(s: Session, log: bool = False) -> None:
     """Recompute every part's price, then every stock item's. The repair/
     backfill path (e.g. after an import); normal writes keep prices current
-    incrementally."""
+    incrementally. `log` writes an Activity row -- off for the startup and
+    import runs, which would otherwise log on every boot."""
     for part_id in list(s.scalars(select(Part.id))):
         part = get_part(s, part_id)
         price, partial = _compute_price(s, part_id, set())
@@ -843,6 +854,9 @@ def refresh_all_prices(s: Session) -> None:
             .order_by(StockItem.id)
         ):
             refresh_stock_price(s, item)
+    if log:
+        parts = s.scalar(select(func.count()).select_from(Part))
+        _activity(s, "refresh_prices", f"Recalculated prices for {parts} parts", [])
 
 
 # -- bom --------------------------------------------------------------------
@@ -1073,9 +1087,19 @@ def edit_bomline_quantity(s: Session, line_id: int, quantity: float) -> None:
     if quantity <= 0:
         raise InventoryError("bom quantity must be positive")
     line = get_bomline(s, line_id)
+    old = line.quantity
     line.quantity = quantity
     s.flush()
     refresh_part_price(s, line.parent_part_id)
+    if quantity != old:
+        parent = get_part(s, line.parent_part_id)
+        component = get_part(s, line.component_part_id)
+        _activity(
+            s,
+            "edit_bomline",
+            f"BOM {parent.description}: {component.description} {old} -> {quantity}",
+            [("part", parent.id, parent.sku), ("part", component.id, component.sku)],
+        )
 
 
 @_write
@@ -1677,6 +1701,15 @@ def edit_po(
     if start_date is None:
         raise InventoryError("purchase order start date is required")
     reprice = status != po.status or start_date != po.start_date
+    changes = _field_changes(
+        po,
+        status=status,
+        start_date=start_date,
+        end_date=end_date,
+        delivery_cost=delivery_cost,
+        supplier_reference=supplier_reference,
+        description=description,
+    )
     po.status = status
     po.start_date = start_date
     po.end_date = end_date
@@ -1695,6 +1728,14 @@ def edit_po(
             )
         ):
             refresh_part_price(s, part_id)
+    if changes:
+        label = po_ref(po_id)
+        _activity(
+            s,
+            "edit_po",
+            f"Edited {label}: {', '.join(changes)}",
+            [("po", po_id, label)],
+        )
 
 
 def _po_has_receipts(s: Session, po_id: int) -> bool:
@@ -1746,6 +1787,7 @@ def edit_po_line(
 ) -> None:
     line = get_po_line(s, line_id)
     _check_po_line_editable(s, line)
+    changes = []
     if quantity is not None:
         if quantity <= 0:
             raise InventoryError("po line quantity must be positive")
@@ -1753,8 +1795,12 @@ def edit_po_line(
             raise InventoryError(
                 f"po line {line_id}: quantity {quantity} below {line.received} already received"
             )
+        if quantity != line.quantity:
+            changes.append(f"quantity {line.quantity} -> {quantity}")
         line.quantity = quantity
     if price is not None:
+        if price != line.price:
+            changes.append(f"price {line.price} -> {price}")
         if price < 0:
             raise InventoryError("po line price must not be negative")
         line.price = price
@@ -1768,6 +1814,15 @@ def edit_po_line(
             .where(Booking.po_line_id == line_id)
         ):
             refresh_stock_price(s, item)
+    if changes:
+        part = get_part(s, get_supplier_part(s, line.supplier_part_id).part_id)
+        label = po_ref(line.po_id)
+        _activity(
+            s,
+            "edit_po_line",
+            f"{label} line {part.description}: {', '.join(changes)}",
+            [("po", line.po_id, label), ("part", part.id, part.sku)],
+        )
 
 
 @_write
@@ -2066,11 +2121,27 @@ def edit_build(
             f"build {build_id}: {already} already produced; status must be "
             "Production or Complete"
         )
+    changes = _field_changes(
+        build,
+        quantity=quantity,
+        status=status,
+        description=description,
+        start_date=start_date,
+        end_date=end_date,
+    )
     build.quantity = quantity
     build.status = status
     build.description = description
     build.start_date = start_date
     build.end_date = end_date
+    if changes:
+        label = build_ref(build_id)
+        _activity(
+            s,
+            "edit_build",
+            f"Edited {label}: {', '.join(changes)}",
+            [("build", build_id, label)],
+        )
 
 
 def produced_qty(s: Session, build_id: int) -> float:

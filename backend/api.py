@@ -1563,7 +1563,7 @@ class StockValueReport(BaseModel):
 def refresh_prices() -> dict[str, int]:
     """Recompute every part's cached price. Normal writes keep prices current;
     this is the backfill/repair path (e.g. after an InvenTree import)."""
-    _guard(db.refresh_all_prices)
+    _guard(db.refresh_all_prices, log=True)
     with db.session() as s:
         return {
             "priced": len(

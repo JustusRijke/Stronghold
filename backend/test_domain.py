@@ -898,11 +898,13 @@ def test_auto_commit(tmp_path):
     git("config", "user.name", "T")
     db.init(tmp_path / "inventory.sql", auto_commit=True)
     db.create_part(1, "BOLT-M3", "M3 bolt")
-    db.set_setting("gui.title", "Warehouse")  # no activity record
+    db.set_setting("gui.title", "Warehouse")
+    db.edit_part(1, "M3 bolt, zinc")  # no activity record
 
     log = git("log", "--format=%s").splitlines()
     assert log[0] == db._NO_ACTIVITY_MESSAGE
-    assert log[1] == "Created part M3 bolt"
+    assert log[1] == "Setting gui.title: 'Stronghold' -> 'Warehouse'"
+    assert log[2] == "Created part M3 bolt"
 
     # committing the data into the app's own repo is never what the user meant
     with pytest.raises(ValueError, match="app repo"):

@@ -176,7 +176,8 @@ Open-source inventory/stock tracking for small and medium businesses.
   records, otherwise only active ones show. Click a result to jump straight
   to its detail page
 - An activity log (clock icon, top right) records what you did -- parts and
-  orders created, stock received, builds produced -- as a filterable table of
+  orders created, stock received, builds produced, order lines and BOM
+  quantities edited, settings changed -- as a filterable table of
   timestamped entries, each linking to the items it touched. It is a history to
   glance over, not an undo
 - Import your part catalog, BOMs, suppliers, supplier catalogs, purchase orders,
