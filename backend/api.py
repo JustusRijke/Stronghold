@@ -677,7 +677,7 @@ def _stock_log_entries(
     split off a surviving parent (produce_build copies po_id onto the consumed
     slice for pricing) -- the parent already reports the receipt, so reporting
     it again would double-count what arrived."""
-    i, po_date, prod_date, eat_date = row
+    i, po_date, prod_date, eat_date, sale_date = row
     label, url, at, approx = "", "", None, True
     # a receipt's booking records what actually arrived, so a smaller count now
     # means later events ate into this row
@@ -691,6 +691,15 @@ def _stock_log_entries(
         at = eat_date
         label = build_ref(i.consumed_by_build_id)
         url = f"/build-orders/{i.consumed_by_build_id}"
+        quantity = i.count if i.count < 0 else -i.count
+    elif i.consumed_by_so_id is not None:
+        # a sale eats stock the same way a build does, and the slice inherits
+        # the source's po_id/build_id for price provenance -- so this has to be
+        # tested before those, or the row reads as a second arrival
+        kind = "debt" if i.count < 0 else "consumed"
+        at = sale_date
+        label = so_ref(i.consumed_by_so_id)
+        url = f"/sales-orders/{i.consumed_by_so_id}"
         quantity = i.count if i.count < 0 else -i.count
     elif i.stocktake_at is not None:
         kind = "stocktake"
@@ -831,10 +840,14 @@ def list_part_stock_log(part_id: int) -> list[StockLogEntryOut]:
                 PurchaseOrder.start_date,
                 producer.start_date,
                 eater.start_date,
+                SalesOrder.date_created,
             )
             .join(PurchaseOrder, StockItem.po_id == PurchaseOrder.id, isouter=True)
             .join(producer, StockItem.build_id == producer.id, isouter=True)
             .join(eater, StockItem.consumed_by_build_id == eater.id, isouter=True)
+            .join(
+                SalesOrder, StockItem.consumed_by_so_id == SalesOrder.id, isouter=True
+            )
             .where(StockItem.part_id == part_id)
         ).all()
         # what each booked row received: a PO line orders packs of pack_qty
@@ -852,7 +865,11 @@ def list_part_stock_log(part_id: int) -> list[StockLogEntryOut]:
     # consumed row sharing that order is a slice of it (produce_build copies
     # po_id and build_id onto the split), so it must not report that origin a
     # second time.
-    survivors = [r[0] for r in rows if r[0].consumed_by_build_id is None]
+    survivors = [
+        r[0]
+        for r in rows
+        if r[0].consumed_by_build_id is None and r[0].consumed_by_so_id is None
+    ]
     reported_pos = {i.po_id for i in survivors if i.po_id is not None}
     reported_builds = {i.build_id for i in survivors if i.build_id is not None}
     split_of = {
