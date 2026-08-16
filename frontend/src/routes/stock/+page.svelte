@@ -16,6 +16,8 @@
 		count: number;
 		order: string;
 		order_url: string;
+		consumed_by: string;
+		consumed_by_url: string;
 		nonzero: boolean;
 		status: string;
 	};
@@ -29,6 +31,8 @@
 			count: i.count,
 			order: stockOrderLabel(i),
 			order_url: stockOrderUrl(i),
+			consumed_by: i.consumed_by_reference,
+			consumed_by_url: i.consumed_by_build_id ? `/build-orders/${i.consumed_by_build_id}` : '',
 			nonzero: i.count !== 0,
 			status: i.status
 		}));
@@ -48,6 +52,15 @@
 			width: '130px',
 			mono: true,
 			cellHref: (r) => r.order_url
+		},
+		{
+			// blank for stock still on the shelf; the consumed rows are hidden by
+			// default, so this column is mostly empty until you unhide them
+			key: 'consumed_by',
+			header: 'Consumed by',
+			width: '130px',
+			mono: true,
+			cellHref: (r) => r.consumed_by_url
 		},
 		{
 			key: 'nonzero',
