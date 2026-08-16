@@ -2234,6 +2234,77 @@ def produced_qty(s: Session, build_id: int) -> float:
     return max(from_stock, float(get_build(s, build_id).imported_produced))
 
 
+def _consume_fifo(s: Session, part_id: int, need: float, next_id: int, **stamp) -> int:
+    """Take `need` units of `part_id` out of stock, oldest first, and return the
+    next free stock id. `stamp` is the column naming the consumer -- a build
+    (`consumed_by_build_id`) or a sale (`consumed_by_so_id`).
+
+    Consumption never destroys stock: each source Available row is drawn down
+    and a matching STOCK_CONSUMED row is split off inheriting its price, so what
+    was used and what it cost stay traceable. Running short does not block --
+    the shortfall becomes a consumed row at the part's estimate plus a NEGATIVE
+    Available debt row, which nets out of on-hand counts until a PO settles it.
+    """
+    items = s.scalars(
+        select(StockItem)
+        .where(
+            StockItem.part_id == part_id,
+            StockItem.status == STOCK_AVAILABLE,
+            StockItem.count > 0,  # never "consume" an outstanding debt row
+        )
+        .order_by(StockItem.id)
+    ).all()
+    for item in items:
+        if need <= 0:
+            break
+        take = min(item.count, need)
+        item.count -= take
+        need -= take
+        s.add(
+            StockItem(
+                id=next_id,
+                count=take,
+                part_id=part_id,
+                po_id=item.po_id,  # keep the source's price provenance
+                # the source's producing build carries over (this split is
+                # the same stock); the order eating it is the consumer
+                build_id=item.build_id,
+                status=STOCK_CONSUMED,
+                # inherit the source's resolved price: what this stock was
+                # actually worth when it was consumed
+                unit_price=item.unit_price,
+                price_basis=item.price_basis,
+                price_po_id=item.price_po_id,
+                **stamp,
+            )
+        )
+        next_id += 1
+    # FIFO left need > 0: stock ran short. The order used these parts anyway, so
+    # record them consumed at the part's estimate (so the consumer is costed in
+    # full, as an estimate rather than a floor) and carry the debt as a negative
+    # Available row. When the parts arrive, book_po_line settles the debt and
+    # reprices the consumed row to what was actually paid.
+    if need > 1e-9:
+        price = get_part(s, part_id).estimated_price
+        basis = PriceBasis.ESTIMATE if price is not None else PriceBasis.NONE
+        # consumed row first, debt row second, always adjacent ids:
+        # _settle_stock_debt pairs them by `debt.id - 1`
+        for count in (need, -need):
+            s.add(
+                StockItem(
+                    id=next_id,
+                    count=count,
+                    part_id=part_id,
+                    status=STOCK_CONSUMED if count > 0 else STOCK_AVAILABLE,
+                    unit_price=price,
+                    price_basis=basis,
+                    **stamp,
+                )
+            )
+            next_id += 1
+    return next_id
+
+
 @_write
 def produce_build(s: Session, build_id: int, quantity: int) -> None:
     """Produce `quantity` assembly units from a build order, consuming the BOM
@@ -2290,65 +2361,9 @@ def produce_build(s: Session, build_id: int, quantity: int) -> None:
             )
             next_id += 1
             continue
-        need = qty * quantity
-        items = s.scalars(
-            select(StockItem)
-            .where(
-                StockItem.part_id == component_id,
-                StockItem.status == STOCK_AVAILABLE,
-                StockItem.count > 0,  # never "consume" an outstanding debt row
-            )
-            .order_by(StockItem.id)
-        ).all()
-        for item in items:
-            if need <= 0:
-                break
-            take = min(item.count, need)
-            item.count -= take
-            need -= take
-            s.add(
-                StockItem(
-                    id=next_id,
-                    count=take,
-                    part_id=component_id,
-                    po_id=item.po_id,  # keep the source's price provenance
-                    # the source's producing build carries over (this split is
-                    # the same stock); the build eating it is the consumer
-                    build_id=item.build_id,
-                    consumed_by_build_id=build_id,
-                    status=STOCK_CONSUMED,
-                    # inherit the source's resolved price: what this stock was
-                    # actually worth when it went into the build
-                    unit_price=item.unit_price,
-                    price_basis=item.price_basis,
-                    price_po_id=item.price_po_id,
-                )
-            )
-            next_id += 1
-        # FIFO left need > 0: stock ran short. The build used these parts
-        # anyway, so record them consumed at the part's estimate (so
-        # build_unit_cost costs the assembly in full, as an estimate rather
-        # than a floor) and carry the debt as a negative Available row. When
-        # the parts arrive, book_po_line settles the debt and reprices the
-        # consumed row to what was actually paid.
-        if need > 1e-9:
-            price = get_part(s, component_id).estimated_price
-            basis = PriceBasis.ESTIMATE if price is not None else PriceBasis.NONE
-            # consumed row first, debt row second, always adjacent ids:
-            # _settle_stock_debt pairs them by `debt.id - 1`
-            for count in (need, -need):
-                s.add(
-                    StockItem(
-                        id=next_id,
-                        count=count,
-                        part_id=component_id,
-                        consumed_by_build_id=build_id,
-                        status=STOCK_CONSUMED if count > 0 else STOCK_AVAILABLE,
-                        unit_price=price,
-                        price_basis=basis,
-                    )
-                )
-                next_id += 1
+        next_id = _consume_fifo(
+            s, component_id, qty * quantity, next_id, consumed_by_build_id=build_id
+        )
 
     s.add(
         StockItem(
