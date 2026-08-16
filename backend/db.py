@@ -1550,6 +1550,7 @@ def settle_debt_from_stock(
         get_build(s, build_id)  # exists check
         kind, order_id, label = "build", build_id, build_ref(build_id)
     else:
+        so_id = int(so_id)  # not-null: checked above, one of the two is set
         get_so(s, so_id)  # exists check
         kind, order_id, label = "sales-order", so_id, so_ref(so_id)
     _activity(
@@ -1998,10 +1999,11 @@ def _settle_stock_debt(s: Session, item: StockItem) -> dict[tuple[str, int], flo
         item.count -= pay
         # exactly one of the two is set: the debt query requires at least one,
         # and a row is consumed by a build or a sale, never both
-        if debt.consumed_by_build_id is not None:
-            key = ("build", debt.consumed_by_build_id)
-        else:
-            key = ("sales-order", debt.consumed_by_so_id)
+        key: tuple[str, int] = (
+            ("build", debt.consumed_by_build_id)
+            if debt.consumed_by_build_id is not None
+            else ("sales-order", debt.consumed_by_so_id)  # ty: ignore[invalid-assignment]
+        )
         settled[key] = settled.get(key, 0.0) + pay
     # the assemblies those builds produced were costed off the estimate; now
     # that their inputs are real, reprice the output. A sale produces nothing,

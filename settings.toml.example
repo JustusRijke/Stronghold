@@ -20,6 +20,15 @@ auto_commit = false
 [gui]
 port = 8080
 
+[woocommerce]
+# The store sales orders are imported from. Leave blank to disable importing.
+# Generate a READ-ONLY key pair in WooCommerce under
+# Settings -> Advanced -> REST API. These are credentials, so they live here
+# and not in the data file, which is meant to be kept in git.
+url = ""               # site root, e.g. "https://shop.example.com"
+key = ""               # consumer key  (ck_...)
+secret = ""            # consumer secret (cs_...)
+
 [logging]
 level = "DEBUG"        # DEBUG, INFO, WARNING or ERROR
 file = "log.txt"       # writes are logged here (INFO), failures at ERROR

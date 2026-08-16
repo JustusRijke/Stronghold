@@ -22,6 +22,15 @@ DEFAULTS = {
     "gui": {
         "port": 8080,
     },
+    # The store sales orders are imported from. Credentials live here and never
+    # in the data file: inventory.sql is tracked in git. Generate a read-only
+    # key pair under WooCommerce -> Settings -> Advanced -> REST API; `url` is
+    # the site root (the client appends /wp-json/wc/v3 itself).
+    "woocommerce": {
+        "url": "",
+        "key": "",
+        "secret": "",
+    },
     "logging": {
         "level": "DEBUG",  # DEBUG, INFO, WARNING, ERROR
         "file": "log.txt",
