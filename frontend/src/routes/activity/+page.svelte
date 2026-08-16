@@ -31,7 +31,8 @@
 		supplier: '/suppliers',
 		'supplier-part': '/supplier-parts',
 		po: '/purchase-orders',
-		build: '/build-orders'
+		build: '/build-orders',
+		'sales-order': '/sales-orders'
 	};
 	const refHref = (r: ActivityRef) => `${ROUTE[r.type] ?? ''}/${r.id}`;
 

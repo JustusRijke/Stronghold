@@ -2,6 +2,7 @@
 	import { api } from '$lib/api';
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
 	import {
+		stockConsumerUrl,
 		stockOrderLabel,
 		stockOrderUrl,
 		STOCK_CONSUMED,
@@ -32,7 +33,7 @@
 			order: stockOrderLabel(i),
 			order_url: stockOrderUrl(i),
 			consumed_by: i.consumed_by_reference,
-			consumed_by_url: i.consumed_by_build_id ? `/build-orders/${i.consumed_by_build_id}` : '',
+			consumed_by_url: stockConsumerUrl(i),
 			nonzero: i.count !== 0,
 			status: i.status
 		}));

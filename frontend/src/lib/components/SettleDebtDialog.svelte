@@ -1,7 +1,7 @@
 <script lang="ts">
-	// Pay off a build shortfall (a negative stock item) out of stock already on
-	// the shelf. The same thing receiving the parts on a purchase order does,
-	// for when the stock is already there.
+	// Pay off an order's shortfall (a negative stock item) out of stock already
+	// on the shelf -- a build's or a sale's. The same thing receiving the parts
+	// on a purchase order does, for when the stock is already there.
 	import { api } from '$lib/api';
 	import { toast } from '$lib/toast.svelte';
 	import type { StockItem } from '$lib/types';

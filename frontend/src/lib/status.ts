@@ -71,6 +71,13 @@ type StockOrigin = {
 export const stockOrderLabel = (s: StockOrigin) =>
 	s.po_id !== null ? s.po_reference : s.build_reference || (s.consumed_by_reference ?? '');
 
+// The order that consumed a stock row -- a build that ate it or a sale that
+// shipped it, never both. "" while it is still on the shelf.
+export function stockConsumerUrl(s: StockOrigin) {
+	if (s.consumed_by_build_id !== null) return `/build-orders/${s.consumed_by_build_id}`;
+	return s.consumed_by_so_id == null ? '' : `/sales-orders/${s.consumed_by_so_id}`;
+}
+
 export function stockOrderUrl(s: StockOrigin) {
 	if (s.po_id !== null) return `/purchase-orders/${s.po_id}`;
 	const build = s.build_id ?? s.consumed_by_build_id;
