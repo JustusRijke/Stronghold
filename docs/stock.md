@@ -19,7 +19,7 @@ That is why a stock item has one of two statuses:
 | Status | Meaning |
 | --- | --- |
 | **Available** | On the shelf. Counts towards your stock on hand and your stock value. |
-| **Consumed by build order** | Gone into an assembly (or written off). Kept for history and costing, never counted as on-hand stock. |
+| **Consumed** | Gone into an assembly (or written off). Kept for history and costing, never counted as on-hand stock. |
 
 A consequence: stock tables are full of rows sitting at zero -- a receipt whose
 units went straight into a build, or a settled shortfall. They are history, not
