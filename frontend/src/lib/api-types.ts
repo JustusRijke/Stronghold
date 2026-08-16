@@ -1302,11 +1302,7 @@ export interface components {
             build_reference: string;
             /** Consumed By Reference */
             consumed_by_reference: string;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "Available" | "Consumed by build order";
+            status: components["schemas"]["StockStatus"];
             /** Unit Price */
             unit_price: number | null;
             /**
@@ -1323,8 +1319,7 @@ export interface components {
         StockItemPatch: {
             /** Count */
             count?: number | null;
-            /** Status */
-            status?: ("Available" | "Consumed by build order") | null;
+            status?: components["schemas"]["StockStatus"] | null;
         };
         /**
          * StockLogEntryOut
@@ -1362,6 +1357,15 @@ export interface components {
              */
             price_basis: "po" | "build" | "build_partial" | "estimate" | "virtual" | "po_no_price" | "none";
         };
+        /**
+         * StockStatus
+         * @description Whether a stock row is on the shelf or has been consumed by an order.
+         *     The stored values are short codes, not display text: the label the user
+         *     sees lives in the frontend (see status.ts), so rewording it never means
+         *     migrating data. Schema 3 rewrote the prose values these replaced.
+         * @enum {string}
+         */
+        StockStatus: "available" | "consumed";
         /** StockValueReport */
         StockValueReport: {
             /** Rows */
@@ -1391,11 +1395,7 @@ export interface components {
             description: string;
             /** Count */
             count: number;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "Available" | "Consumed by build order";
+            status: components["schemas"]["StockStatus"];
             /** Unit Price */
             unit_price: number | null;
             /** Value */

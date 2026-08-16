@@ -34,6 +34,7 @@ from models import (
     PurchaseOrder,
     Setting,
     StockItem,
+    StockStatus,
     Supplier,
     SupplierPart,
     build_ref,
@@ -214,8 +215,23 @@ def _drop_columns(s: Session, step: int) -> None:
 # built the current tables before the replay, which is also why Alembic buys us
 # nothing here. The exception is a dropped column, which needs both halves:
 # an _import_sql scaffold and a step here to take it down again.
+def _to_v3(s: Session) -> None:
+    """Rewrite the prose stock statuses to the short codes of
+    models.StockStatus. Display text moved to the frontend, so the stored value
+    no longer changes when the wording does."""
+    for old, new in (
+        ("Available", StockStatus.AVAILABLE),
+        ("Consumed by build order", StockStatus.CONSUMED),
+    ):
+        s.execute(
+            text("UPDATE stock_items SET status = :new WHERE status = :old"),
+            {"new": new.value, "old": old},
+        )
+
+
 _MIGRATIONS = {
     2: lambda s: _drop_columns(s, 2),
+    3: _to_v3,
 }
 
 

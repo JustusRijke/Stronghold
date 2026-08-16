@@ -21,6 +21,7 @@ from models import (
     POLine,
     PurchaseOrder,
     StockItem,
+    StockStatus,
     po_ref,
 )
 from sqlalchemy import select
@@ -35,7 +36,7 @@ def test_parts_and_stock_flow(database):
     db.create_item(item_id, part_id)
     db.set_count(item_id, 7)  # grid edits set the count directly -> logged
     db.set_count(item_id, 3)
-    db.set_item_status(item_id, "Consumed by build order")
+    db.set_item_status(item_id, StockStatus.CONSUMED)
     db.set_part_active(part_id, False)
     with db.session() as s:
         part = s.get(Part, part_id)
@@ -43,7 +44,7 @@ def test_parts_and_stock_flow(database):
         assert part.description == "M3 hex bolt"
         assert not part.active
         assert item.count == 3
-        assert item.status == "Consumed by build order"
+        assert item.status == StockStatus.CONSUMED
         # manual qty adjustments are logged (the 3->7 and 7->3 changes)
         adj = s.scalars(select(Activity).where(Activity.action == "set_count")).all()
         assert len(adj) == 2 and "Adjusted stock" in adj[0].message
@@ -201,7 +202,7 @@ def test_build_flow(database):
         # consumed stock is preserved as new rows, not destroyed
         consumed = s.scalars(
             select(StockItem).where(
-                StockItem.status == "Consumed by build order",
+                StockItem.status == StockStatus.CONSUMED,
                 StockItem.consumed_by_build_id == build_id,
             )
         ).all()
@@ -236,7 +237,7 @@ def test_build_flow(database):
         # the full BOM quantity is consumed now, the last unit on credit
         cc_consumed = s.scalars(
             select(StockItem).where(
-                StockItem.status == "Consumed by build order",
+                StockItem.status == StockStatus.CONSUMED,
                 StockItem.part_id == 4,
             )
         ).all()
@@ -244,7 +245,7 @@ def test_build_flow(database):
         debt = s.scalars(
             select(StockItem).where(
                 StockItem.part_id == 4,
-                StockItem.status == "Available",
+                StockItem.status == StockStatus.AVAILABLE,
                 StockItem.count < 0,
             )
         ).one()
@@ -590,7 +591,7 @@ def test_virtual_part(database):
     with db.session() as s:
         assert s.get(StockItem, 1).count == 2  # comp-a consumed, stock untouched
         consumed = s.scalars(
-            select(StockItem).where(StockItem.status == "Consumed by build order")
+            select(StockItem).where(StockItem.status == StockStatus.CONSUMED)
         ).all()
         # labour IS recorded as consumed (so the user sees it and it costs the
         # build), but no Available labour stock is ever drawn down
@@ -601,7 +602,7 @@ def test_virtual_part(database):
         assert labour.price_basis == "virtual"  # exact, not an estimate
         assert not s.scalars(
             select(StockItem).where(
-                StockItem.part_id == 3, StockItem.status == "Available"
+                StockItem.part_id == 3, StockItem.status == StockStatus.AVAILABLE
             )
         ).all()
         assert db.produced_qty(s, build_id) == 2
@@ -837,6 +838,38 @@ def test_v1_data_file_drops_the_stored_order_references(tmp_path):
     text = data_file.read_text(encoding="utf-8")
     assert "whatever-they-typed" not in text and "BO-XXXX" not in text
     assert po_ref(7) == "PO-0007"
+
+
+def test_v2_data_file_rewrites_the_prose_stock_statuses(tmp_path):
+    """The real schema 2 -> 3 step. Unlike a dropped column this replays fine --
+    the values are just stale prose -- so the danger is it passing unnoticed:
+    every status filter would silently match nothing."""
+    data_file = tmp_path / "inventory.sql"
+    db.init(data_file)
+    db.create_part(1, "BOLT-M3", "M3 bolt")
+    db.create_item(1, 1)
+    db.set_count(1, 20)
+    db.create_item(2, 1)
+    db.set_item_status(2, StockStatus.CONSUMED)
+
+    # rewrite the export as a 2.x app wrote it: the display text in the column
+    text = data_file.read_text(encoding="utf-8")
+    text = text.replace(f"'{StockStatus.AVAILABLE.value}'", "'Available'").replace(
+        f"'{StockStatus.CONSUMED.value}'", "'Consumed by build order'"
+    )
+    data_file.write_text(text, encoding="utf-8")
+    _set_stamp(data_file, 2)
+    assert "'Consumed by build order'" in data_file.read_text(encoding="utf-8")
+
+    db.init(data_file)
+
+    assert db.data_schema_version() == SCHEMA_VERSION
+    with db.session() as s:
+        assert s.get(StockItem, 1).status == StockStatus.AVAILABLE
+        assert s.get(StockItem, 2).status == StockStatus.CONSUMED
+        assert s.get(StockItem, 1).count == 20  # the rest of the row is untouched
+    # and the prose is gone from the file, not just from the working db
+    assert "Consumed by build order" not in data_file.read_text(encoding="utf-8")
 
 
 def test_newer_data_file_refuses_to_open(database):

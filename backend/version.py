@@ -16,7 +16,9 @@ from importlib.metadata import PackageNotFoundError, version
 # to db._MIGRATIONS. 1 is the 1.0 baseline: the shape the app shipped 1.0 with.
 # 2 dropped purchase_orders.reference / build_orders.reference (derived from the
 # pk since; see models.po_ref).
-SCHEMA_VERSION = 2
+# 3 replaced the prose stock_items.status values ("Available", "Consumed by
+# build order") with the short codes in models.StockStatus.
+SCHEMA_VERSION = 3
 
 try:
     APP_VERSION = version("stronghold")

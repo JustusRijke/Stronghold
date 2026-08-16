@@ -3,7 +3,7 @@ tmp database. Complements test_domain.py (which exercises db directly)."""
 
 import db
 import pytest
-from models import StockItem
+from models import StockItem, StockStatus
 
 
 def test_parts_crud_and_bom(client):
@@ -47,11 +47,12 @@ def test_stock_flow(client):
     assert item["count"] == 0 and item["sku"] == "BOLT"
     client.patch(f"/api/stock/{item['id']}", json={"count": 7})
     assert client.get(f"/api/stock/{item['id']}").json()["count"] == 7
-    assert item["status"] == "Available"
-    client.patch(f"/api/stock/{item['id']}", json={"status": "Consumed by build order"})
+    assert item["status"] == StockStatus.AVAILABLE
+    client.patch(
+        f"/api/stock/{item['id']}", json={"status": StockStatus.CONSUMED.value}
+    )
     assert (
-        client.get(f"/api/stock/{item['id']}").json()["status"]
-        == "Consumed by build order"
+        client.get(f"/api/stock/{item['id']}").json()["status"] == StockStatus.CONSUMED
     )
 
 
@@ -203,7 +204,7 @@ def test_stock_log_reports_imported_receipts(client):
                 count=7,
                 po_id=po,
                 consumed_by_build_id=build,
-                status="Consumed by build order",
+                status=StockStatus.CONSUMED,
             )
         )
         s.commit()
@@ -254,7 +255,7 @@ def test_stock_log_reports_imported_production(client):
                 count=5,
                 build_id=made,
                 consumed_by_build_id=ate,
-                status="Consumed by build order",
+                status=StockStatus.CONSUMED,
             )
         )
         s.commit()
@@ -492,10 +493,12 @@ def test_build_flow(client):
     consumed = [
         s
         for s in stock
-        if s["status"] == "Consumed by build order" and s["consumed_by_build_id"] == bid
+        if s["status"] == StockStatus.CONSUMED and s["consumed_by_build_id"] == bid
     ]
     assert sum(s["count"] for s in consumed) == 6
-    produced = [s for s in stock if s["part_id"] == asm and s["status"] == "Available"]
+    produced = [
+        s for s in stock if s["part_id"] == asm and s["status"] == StockStatus.AVAILABLE
+    ]
     assert sum(s["count"] for s in produced) == 3
 
     # the produces show up in the activity log with structured refs, newest first
@@ -1030,7 +1033,7 @@ def test_build_produced_stock_costed_from_consumption(client):
     produced = next(
         x
         for x in rows.values()
-        if x["part_id"] == asm["id"] and x["status"] == "Available"
+        if x["part_id"] == asm["id"] and x["status"] == StockStatus.AVAILABLE
     )
     # consumed 3*(2 @ 3.00 + 4 @ 0.50) = 24.00 for 3 units -> 8.00 each
     assert produced["basis"] == "build"
@@ -1055,7 +1058,7 @@ def test_build_produced_stock_costed_from_consumption(client):
     short_row = next(
         x
         for x in client.get("/api/reports/stock-value").json()["rows"]
-        if x["part_id"] == short_asm["id"] and x["status"] == "Available"
+        if x["part_id"] == short_asm["id"] and x["status"] == StockStatus.AVAILABLE
     )
     assert short_row["basis"] == "build_partial"
 

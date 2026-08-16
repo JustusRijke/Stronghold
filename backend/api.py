@@ -30,6 +30,7 @@ from models import (
     POStatus,
     PurchaseOrder,
     StockItem,
+    StockStatus,
     Supplier,
     SupplierPart,
     build_ref,
@@ -129,7 +130,6 @@ class BomUsageOut(BaseModel):
     quantity: float
 
 
-StockStatus = Literal["Available", "Consumed by build order"]
 PriceBasisOut = Literal[
     "po", "build", "build_partial", "estimate", "virtual", "po_no_price", "none"
 ]

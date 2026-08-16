@@ -133,8 +133,19 @@ class BomLine(Base):
     quantity: Mapped[float]
 
 
-STOCK_AVAILABLE = "Available"
-STOCK_CONSUMED = "Consumed by build order"
+class StockStatus(StrEnum):
+    """Whether a stock row is on the shelf or has been consumed by an order.
+    The stored values are short codes, not display text: the label the user
+    sees lives in the frontend (see status.ts), so rewording it never means
+    migrating data. Schema 3 rewrote the prose values these replaced."""
+
+    AVAILABLE = "available"
+    CONSUMED = "consumed"
+
+
+# the enum is the source of truth; these aliases keep the existing call sites
+STOCK_AVAILABLE = StockStatus.AVAILABLE
+STOCK_CONSUMED = StockStatus.CONSUMED
 
 
 class StockItem(Base):
