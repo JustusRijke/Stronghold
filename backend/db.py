@@ -1550,9 +1550,9 @@ def settle_debt_from_stock(
         get_build(s, build_id)  # exists check
         kind, order_id, label = "build", build_id, build_ref(build_id)
     else:
-        so_id = int(so_id)  # not-null: checked above, one of the two is set
-        get_so(s, so_id)  # exists check
-        kind, order_id, label = "sales-order", so_id, so_ref(so_id)
+        # not-null: checked above, one of build_id/so_id is always set
+        get_so(s, so_id)  # ty: ignore[invalid-argument-type]  # exists check
+        kind, order_id, label = "sales-order", so_id, so_ref(so_id)  # ty: ignore[invalid-argument-type]
     _activity(
         s,
         "settle_debt_from_stock",
@@ -1999,11 +1999,12 @@ def _settle_stock_debt(s: Session, item: StockItem) -> dict[tuple[str, int], flo
         item.count -= pay
         # exactly one of the two is set: the debt query requires at least one,
         # and a row is consumed by a build or a sale, never both
+        # not-null: the debt query requires one of the two to be set
         key: tuple[str, int] = (
             ("build", debt.consumed_by_build_id)
             if debt.consumed_by_build_id is not None
-            else ("sales-order", debt.consumed_by_so_id)  # ty: ignore[invalid-assignment]
-        )
+            else ("sales-order", debt.consumed_by_so_id)
+        )  # ty: ignore[invalid-assignment]
         settled[key] = settled.get(key, 0.0) + pay
     # the assemblies those builds produced were costed off the estimate; now
     # that their inputs are real, reprice the output. A sale produces nothing,
@@ -2458,6 +2459,12 @@ def next_so_id() -> int:
     # ponytail: max+1 id generation; fine while one process owns the db
     with session() as s:
         return (s.scalar(select(func.max(SalesOrder.id))) or 0) + 1
+
+
+def next_line_part_id() -> int:
+    # ponytail: max+1 id generation; fine while one process owns the db
+    with session() as s:
+        return (s.scalar(select(func.max(SalesOrderLinePart.id))) or 0) + 1
 
 
 def get_so_by_wc_id(s: Session, wc_order_id: int) -> SalesOrder | None:

@@ -28,6 +28,17 @@ export const BuildOrderPatch = v.object({
 	start_date: v.optional(v.nullable(v.string())),
 	end_date: v.optional(v.nullable(v.string())),
 	});
+export const ImportIn = v.object({
+	after: v.string(),
+	before: v.optional(v.nullable(v.string())),
+	});
+export const LinePartIn = v.object({
+	part_id: v.pipe(v.number(), v.integer()),
+	quantity: v.pipe(v.number(), v.gtValue(0, 'must be greater than 0')),
+	});
+export const LinePartPatch = v.object({
+	quantity: v.pipe(v.number(), v.gtValue(0, 'must be greater than 0')),
+	});
 export const NegativeStockIn = v.object({
 	part_id: v.pipe(v.number(), v.integer()),
 	quantity: v.pipe(v.number(), v.gtValue(0, 'must be greater than 0')),

@@ -12,11 +12,13 @@ from datetime import date, datetime
 from typing import Literal
 
 import db
+import import_woocommerce
 from db import InventoryError
 from fastapi import APIRouter, HTTPException
 from models import (
     BUILD_PREFIX,
     PO_PREFIX,
+    SO_PREFIX,
     STOCK_AVAILABLE,
     STOCK_CONSUMED,
     Activity,
@@ -29,12 +31,16 @@ from models import (
     POLine,
     POStatus,
     PurchaseOrder,
+    SalesOrder,
+    SalesOrderLine,
+    SalesOrderLinePart,
     StockItem,
     StockStatus,
     Supplier,
     SupplierPart,
     build_ref,
     po_ref,
+    so_ref,
 )
 from pydantic import BaseModel, Field
 from settings import Settings
@@ -145,8 +151,9 @@ class StockItemOut(BaseModel):
     po_reference: str  # "" when po_id is null
     build_id: int | None  # the build that produced this stock
     consumed_by_build_id: int | None  # the build that consumed it
+    consumed_by_so_id: int | None  # the sale that consumed it
     build_reference: str  # label of build_id, else consumed_by_build_id; "" if neither
-    consumed_by_reference: str  # label of consumed_by_build_id; "" when it is null
+    consumed_by_reference: str  # label of the order that consumed it; "" if none
     status: StockStatus
     unit_price: float | None  # what THIS stock is worth per item
     price_basis: PriceBasisOut
@@ -379,6 +386,92 @@ class BuildOrderPatch(BaseModel):
 
 class ProduceIn(BaseModel):
     quantity: int = Field(gt=0)
+
+
+class SalesOrderOut(BaseModel):
+    """A sale, with both ways of costing it. `estimated_*` come from the linked
+    parts' current estimates and exist before booking; `realised_*` come from
+    what the consumed stock actually cost and are null until booked. Shipping is
+    reported but excluded from margin -- it is a pass-through, not goods."""
+
+    id: int
+    reference: str  # derived from the id (SO-0042), not stored and not settable
+    wc_order_id: int
+    wc_number: str
+    customer_name: str
+    shipping_country: str
+    shipping_cost: float
+    # NOT a StockStatus/BuildStatus: sales statuses are WooCommerce's own. Typed
+    # as a plain str so it cannot collide with the generated STATUS_OPTIONS.
+    status: str
+    date_created: date | None
+    booked: bool
+    revenue: float  # ex VAT, excluding shipping
+    estimated_cost: float | None
+    realised_cost: float | None
+    estimated_margin: float | None
+    realised_margin: float | None
+
+
+class PartSalesOrderOut(SalesOrderOut):
+    """A sale that consumes this part, with how much of it the order needs."""
+
+    required: float
+
+
+class LinePartOut(BaseModel):
+    """One part a sold line item consumes, with what stock is behind it."""
+
+    id: int
+    part_id: int
+    sku: str
+    description: str
+    quantity: float  # per sold unit
+    required: float  # quantity * the line's sold quantity
+    in_stock: float
+    estimated_price: float | None
+
+
+class SalesOrderLineOut(BaseModel):
+    id: int
+    wc_line_id: int
+    sku: str  # WooCommerce's product code; often empty, never matched on
+    description: str
+    unit_price: float
+    quantity: float
+    line_total: float
+    parts: list[LinePartOut]
+
+
+class LinePartIn(BaseModel):
+    part_id: int
+    quantity: float = Field(gt=0)
+
+
+class LinePartPatch(BaseModel):
+    quantity: float = Field(gt=0)
+
+
+class SalesShortageOut(BaseModel):
+    """What booking would go short of. Booking is allowed anyway (the shortfall
+    becomes a debt), so this is a warning, not a blocker."""
+
+    part_id: int
+    description: str
+    required: float
+    in_stock: float
+
+
+class ImportIn(BaseModel):
+    after: date
+    before: date | None = None
+
+
+class ImportResultOut(BaseModel):
+    imported: int
+    updated: int
+    skipped: int
+    notes: list[str]
 
 
 class SettingOut(BaseModel):
@@ -816,6 +909,32 @@ def list_part_consumed_by(part_id: int) -> list[PartBuildOut]:
         ]
 
 
+@router.get("/parts/{part_id}/sales-orders", response_model=list[PartSalesOrderOut])
+def list_part_sales_orders(part_id: int) -> list[PartSalesOrderOut]:
+    """Sales orders that consume this part, with what each requires of it."""
+    with db.session() as s:
+        return [
+            PartSalesOrderOut(
+                **_so_out(s, so).model_dump(),
+                required=required,
+            )
+            for so, required in s.execute(
+                select(
+                    SalesOrder,
+                    func.sum(SalesOrderLinePart.quantity * SalesOrderLine.quantity),
+                )
+                .join(SalesOrderLine, SalesOrderLine.so_id == SalesOrder.id)
+                .join(
+                    SalesOrderLinePart,
+                    SalesOrderLinePart.line_id == SalesOrderLine.id,
+                )
+                .where(SalesOrderLinePart.part_id == part_id)
+                .group_by(SalesOrder.id)
+                .order_by(SalesOrder.id)
+            )
+        ]
+
+
 # -- bom (nested under a part) ----------------------------------------------
 
 
@@ -890,6 +1009,16 @@ _STOCK_SELECT = (
 )
 
 
+def _consumed_by_ref(i: StockItem) -> str:
+    """Label of the order that consumed this stock -- a build or a sale, never
+    both. "" when it is still on the shelf."""
+    if i.consumed_by_build_id is not None:
+        return build_ref(i.consumed_by_build_id)
+    if i.consumed_by_so_id is not None:
+        return so_ref(i.consumed_by_so_id)
+    return ""
+
+
 def _stock_out(row) -> StockItemOut:
     i, sku, desc, src_build = row
     return StockItemOut(
@@ -902,10 +1031,9 @@ def _stock_out(row) -> StockItemOut:
         po_reference=po_ref(i.po_id) if i.po_id is not None else "",
         build_id=i.build_id,
         consumed_by_build_id=i.consumed_by_build_id,
+        consumed_by_so_id=i.consumed_by_so_id,
         build_reference=build_ref(src_build) if src_build is not None else "",
-        consumed_by_reference=build_ref(i.consumed_by_build_id)
-        if i.consumed_by_build_id is not None
-        else "",
+        consumed_by_reference=_consumed_by_ref(i),
         status=i.status,
         unit_price=i.unit_price,
         price_basis=i.price_basis,
@@ -1463,6 +1591,165 @@ def list_build_stock(build_id: int) -> list[StockItemOut]:
         ]
 
 
+# -- sales orders -----------------------------------------------------------
+
+
+def _so_out(s, so: SalesOrder) -> SalesOrderOut:
+    revenue = db.so_revenue(s, so.id)
+    estimated, realised = db.so_cost(s, so.id)
+    return SalesOrderOut(
+        id=so.id,
+        reference=so_ref(so.id),
+        wc_order_id=so.wc_order_id,
+        wc_number=so.wc_number,
+        customer_name=so.customer_name,
+        shipping_country=so.shipping_country,
+        shipping_cost=so.shipping_cost,
+        status=so.status,
+        date_created=so.date_created,
+        booked=so.booked,
+        revenue=revenue,
+        estimated_cost=estimated,
+        realised_cost=realised,
+        estimated_margin=None if estimated is None else revenue - estimated,
+        realised_margin=None if realised is None else revenue - realised,
+    )
+
+
+def _get_so_or_404(s, so_id: int) -> SalesOrder:
+    so = s.get(SalesOrder, so_id)
+    if so is None:
+        raise HTTPException(status_code=404, detail=f"no sales order {so_id}")
+    return so
+
+
+@router.get("/sales-orders", response_model=list[SalesOrderOut])
+def list_sales_orders() -> list[SalesOrderOut]:
+    with db.session() as s:
+        return [
+            _so_out(s, so)
+            for so in s.scalars(select(SalesOrder).order_by(SalesOrder.id))
+        ]
+
+
+@router.get("/sales-orders/{so_id}", response_model=SalesOrderOut)
+def get_sales_order(so_id: int) -> SalesOrderOut:
+    with db.session() as s:
+        return _so_out(s, _get_so_or_404(s, so_id))
+
+
+@router.get("/sales-orders/{so_id}/lines", response_model=list[SalesOrderLineOut])
+def list_sales_order_lines(so_id: int) -> list[SalesOrderLineOut]:
+    """The order's line items, each with the parts it has been mapped to."""
+    with db.session() as s:
+        _get_so_or_404(s, so_id)
+        return [
+            SalesOrderLineOut(
+                id=line.id,
+                wc_line_id=line.wc_line_id,
+                sku=line.sku,
+                description=line.description,
+                unit_price=line.unit_price,
+                quantity=line.quantity,
+                line_total=line.unit_price * line.quantity,
+                parts=[
+                    LinePartOut(
+                        id=link_id,
+                        part_id=part_id,
+                        sku=sku or "",
+                        description=desc,
+                        quantity=qty,
+                        required=qty * line.quantity,
+                        in_stock=in_stock,
+                        estimated_price=price,
+                    )
+                    for link_id, part_id, sku, desc, qty, price, in_stock in (
+                        db.line_parts_for(s, line.id)
+                    )
+                ],
+            )
+            for line in db.so_lines_for(s, so_id)
+        ]
+
+
+@router.post(
+    "/sales-orders/{so_id}/lines/{line_id}/parts",
+    response_model=list[SalesOrderLineOut],
+    status_code=201,
+)
+def add_line_part(
+    so_id: int, line_id: int, body: LinePartIn
+) -> list[SalesOrderLineOut]:
+    """Link a part to a sold line item. Manual by design: WooCommerce knows the
+    SKU it sold, not the parts behind it."""
+    new_id = db.next_line_part_id()
+    _guard(db.add_line_part, new_id, line_id, body.part_id, body.quantity)
+    return list_sales_order_lines(so_id)
+
+
+@router.patch("/sales-orders/lines/parts/{link_id}", response_model=OkOut)
+def patch_line_part(link_id: int, body: LinePartPatch) -> OkOut:
+    _guard(db.edit_line_part, link_id, body.quantity)
+    return OkOut(ok=True)
+
+
+@router.delete("/sales-orders/lines/parts/{link_id}", response_model=OkOut)
+def delete_line_part(link_id: int) -> OkOut:
+    _guard(db.remove_line_part, link_id)
+    return OkOut(ok=True)
+
+
+@router.get("/sales-orders/{so_id}/shortages", response_model=list[SalesShortageOut])
+def sales_order_shortages(so_id: int) -> list[SalesShortageOut]:
+    """What booking would run short of -- what the confirm dialog warns with."""
+    with db.session() as s:
+        _get_so_or_404(s, so_id)
+        return [
+            SalesShortageOut(
+                part_id=part_id, description=desc, required=need, in_stock=have
+            )
+            for part_id, desc, need, have in db.so_shortages(s, so_id)
+        ]
+
+
+@router.post("/sales-orders/{so_id}/book", response_model=SalesOrderOut)
+def book_sales_order(so_id: int) -> SalesOrderOut:
+    """Consume the parts this sale used, FIFO. Shortages do not block: the
+    missing quantity becomes a debt a later PO receipt settles."""
+    _guard(db.book_sales_order, so_id)
+    return get_sales_order(so_id)
+
+
+@router.get("/sales-orders/{so_id}/stock", response_model=list[StockItemOut])
+def list_sales_order_stock(so_id: int) -> list[StockItemOut]:
+    """The stock rows this sale consumed, including any outstanding debt."""
+    with db.session() as s:
+        _get_so_or_404(s, so_id)
+        return [
+            _stock_out(r)
+            for r in s.execute(
+                _STOCK_SELECT.where(StockItem.consumed_by_so_id == so_id)
+            )
+        ]
+
+
+@router.post("/sales-orders/import", response_model=ImportResultOut)
+def import_sales_orders(body: ImportIn) -> ImportResultOut:
+    """Fetch orders from WooCommerce and store them. Idempotent: new orders are
+    created, unbooked ones updated, booked ones left alone."""
+    if settings is None:  # uvicorn run directly, no create_app
+        raise HTTPException(status_code=400, detail="settings not loaded")
+    result = _guard(
+        import_woocommerce.import_orders,
+        settings.get("woocommerce", "url"),
+        settings.get("woocommerce", "key"),
+        settings.get("woocommerce", "secret"),
+        body.after,
+        body.before,
+    )
+    return ImportResultOut(**result)
+
+
 # -- settings ---------------------------------------------------------------
 
 
@@ -1663,7 +1950,14 @@ def list_activity() -> list[ActivityOut]:
 
 
 class SearchResult(BaseModel):
-    type: Literal["part", "supplier", "supplier_part", "purchase_order", "build_order"]
+    type: Literal[
+        "part",
+        "supplier",
+        "supplier_part",
+        "purchase_order",
+        "build_order",
+        "sales_order",
+    ]
     id: int
     label: str
 
@@ -1730,6 +2024,18 @@ def search(q: str = "", include_inactive: bool = False) -> list[SearchResult]:
         for build_id in sorted(_ref_id_match(s, BuildOrder, BUILD_PREFIX, q)):
             results.append(
                 SearchResult(type="build_order", id=build_id, label=build_ref(build_id))
+            )
+
+        # a sale is findable by its own code, by WooCommerce's order number and
+        # by who bought it
+        so_q = select(SalesOrder).where(
+            _matches_all_words(q, SalesOrder.wc_number, SalesOrder.customer_name)
+        )
+        so_ids = {x.id for x in s.scalars(so_q.limit(SEARCH_LIMIT))}
+        so_ids |= _ref_id_match(s, SalesOrder, SO_PREFIX, q)
+        for so_id in sorted(so_ids)[:SEARCH_LIMIT]:
+            results.append(
+                SearchResult(type="sales_order", id=so_id, label=so_ref(so_id))
             )
 
     return results
