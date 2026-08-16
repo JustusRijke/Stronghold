@@ -7,6 +7,7 @@
 	import { expert } from '$lib/expert.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import type { StockItem } from '$lib/types';
+	import { STOCK_AVAILABLE, stockStatusLabel } from '$lib/status';
 
 	const id = $derived(Number($page.params.id));
 	let item = $state<StockItem | null>(null);
@@ -15,7 +16,7 @@
 	// a row belonging to a build's shortfall rather than to the shelf. Still
 	// true once it settles to zero, so an expert edit cannot turn it into stock
 	const owedToBuild = $derived(
-		!!item && item.status === 'Available' && !!item.consumed_by_build_id
+		!!item && item.status === STOCK_AVAILABLE && !!item.consumed_by_build_id
 	);
 	// an outstanding shortfall: one still owing stock, so still settleable
 	const isDebt = $derived(owedToBuild && !!item && item.count < 0);
@@ -74,7 +75,7 @@
 		<div class="content">
 			<div class="head">
 				<h1 class="h1">Stock item {item.id}</h1>
-				<span class="badge">{item.status}</span>
+				<span class="badge">{stockStatusLabel(item.status)}</span>
 				{#if isDebt}
 					<button class="btn" type="button" onclick={() => (settling = true)}>
 						Settle from stock
@@ -116,7 +117,7 @@
 						{/if}
 					</p>
 				{/if}
-				<p>Status: {item.status}</p>
+				<p>Status: {stockStatusLabel(item.status)}</p>
 				<p>
 					Value:
 					{#if item.unit_price === null}

@@ -23,6 +23,7 @@
 		statusFilter?: boolean; // render as a multi-select checklist of the distinct values present
 		statusOptions?: string[]; // full set of possible values shown in the checklist; defaults to values present in `rows`
 		statusDefaultHide?: string[]; // values unchecked (hidden) on first visit, e.g. ['Complete', 'Cancelled']
+		statusLabel?: (value: string) => string; // display text for a stored status code (filter menu)
 		cellHref?: (row: T) => string; // this cell links here instead of to the row
 		hideByDefault?: boolean; // start hidden (e.g. the debug-only id column)
 		truncate?: boolean; // clip overflow to one line with an ellipsis (+ title tooltip)
@@ -353,7 +354,7 @@
 													checked={!(saved.statusHidden[c.key] ?? []).includes(v)}
 													onchange={() => toggleStatus(c.key, v)}
 												/>
-												{v}
+												{c.statusLabel ? c.statusLabel(v) : v}
 											</label>
 										{/each}
 									</div>

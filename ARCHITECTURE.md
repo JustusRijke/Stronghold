@@ -188,8 +188,10 @@ step when one is actually needed.
   the part supplies SKU and description. `count` is float (parts may be
   measured, not just counted); `po_id`/`build_id` are nullable FKs to the PO it
   was received against / the build that produced or consumed it. `status` is
-  `Available` or `Consumed by build order` (stock never disappears -- see build
-  orders below); it replaces the old `active` flag for stock.
+  `available` or `consumed` (`models.StockStatus`; stock never disappears -- see
+  build orders below), and it replaces the old `active` flag for stock. Like
+  every enum column it is *stored* as a small int (`models.EnumCode`), so no
+  display text reaches the data file and rewording is never a migration.
 - `BuildOrder(id, part_id, quantity, status, ...)` -- an order to build an
   assembly `Part`. Produced incrementally: `produce_build(id, qty)` consumes the
   build's `BuildLine` snapshot FIFO for `qty` units and adds `qty` of the assembly as
@@ -249,7 +251,7 @@ Records are never physically deleted, so no reference can dangle and
 carry an `active` flag and are deactivated; UIs hide inactive records by
 default and pickers offer only active ones. Purchase orders, build orders and
 stock items have no `active` flag -- their `status` field carries the state
-(a build's lifecycle; stock's `Available` vs `Consumed by build order`).
+(a build's lifecycle; stock's `available` vs `consumed`).
 Referencers use plain FKs, no cascade. PO lines (order detail) and BOM lines
 (build detail) are not master data, so they are plainly removable -- a PO line
 only if not booked.

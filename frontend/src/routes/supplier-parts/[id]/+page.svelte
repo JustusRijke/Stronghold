@@ -7,8 +7,13 @@
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
 	import type { Part, PartPurchaseOrder, POLine, PurchaseOrder, StockItem, SupplierPart } from '$lib/types';
-	import { PO_STATUS_OPTIONS } from '$lib/status';
-	import { STATUS_OPTIONS as STOCK_STATUS_OPTIONS } from '$lib/validators';
+	import {
+		PO_STATUS_OPTIONS,
+		STOCK_AVAILABLE,
+		STOCK_CONSUMED,
+		stockStatusLabel,
+		STOCK_STATUS_OPTIONS
+	} from '$lib/status';
 
 	const id = $derived(Number($page.params.id));
 
@@ -21,7 +26,7 @@
 	// same definition as the backend's in_stock: Available rows only, so a
 	// build's outstanding debt (a negative row) nets out
 	const inStock = $derived(
-		stock.filter((s) => s.status === 'Available').reduce((sum, s) => sum + s.count, 0)
+		stock.filter((s) => s.status === STOCK_AVAILABLE).reduce((sum, s) => sum + s.count, 0)
 	);
 
 	const sections = [
@@ -165,7 +170,9 @@
 			width: '160px',
 			statusFilter: true,
 			statusOptions: [...STOCK_STATUS_OPTIONS],
-			statusDefaultHide: ['Consumed by build order']
+			statusDefaultHide: [STOCK_CONSUMED],
+			statusLabel: stockStatusLabel,
+			format: (v) => stockStatusLabel(String(v))
 		}
 	];
 </script>

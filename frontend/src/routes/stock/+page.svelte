@@ -1,8 +1,13 @@
 <script lang="ts">
 	import { api } from '$lib/api';
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
-	import { STATUS_OPTIONS } from '$lib/validators';
-	import { stockOrderLabel, stockOrderUrl } from '$lib/status';
+	import {
+		stockOrderLabel,
+		stockOrderUrl,
+		STOCK_CONSUMED,
+		stockStatusLabel,
+		STOCK_STATUS_OPTIONS
+	} from '$lib/status';
 
 	type Row = {
 		id: number;
@@ -11,6 +16,8 @@
 		count: number;
 		order: string;
 		order_url: string;
+		consumed_by: string;
+		consumed_by_url: string;
 		nonzero: boolean;
 		status: string;
 	};
@@ -24,6 +31,8 @@
 			count: i.count,
 			order: stockOrderLabel(i),
 			order_url: stockOrderUrl(i),
+			consumed_by: i.consumed_by_reference,
+			consumed_by_url: i.consumed_by_build_id ? `/build-orders/${i.consumed_by_build_id}` : '',
 			nonzero: i.count !== 0,
 			status: i.status
 		}));
@@ -45,6 +54,15 @@
 			cellHref: (r) => r.order_url
 		},
 		{
+			// blank for stock still on the shelf; the consumed rows are hidden by
+			// default, so this column is mostly empty until you unhide them
+			key: 'consumed_by',
+			header: 'Consumed by',
+			width: '130px',
+			mono: true,
+			cellHref: (r) => r.consumed_by_url
+		},
+		{
 			key: 'nonzero',
 			header: 'In stock',
 			width: '90px',
@@ -56,8 +74,10 @@
 			header: 'Status',
 			width: '200px',
 			statusFilter: true,
-			statusOptions: [...STATUS_OPTIONS],
-			statusDefaultHide: ['Consumed by build order']
+			statusOptions: STOCK_STATUS_OPTIONS,
+			statusDefaultHide: [STOCK_CONSUMED],
+			statusLabel: stockStatusLabel,
+			format: (v) => stockStatusLabel(String(v))
 		}
 	];
 </script>
