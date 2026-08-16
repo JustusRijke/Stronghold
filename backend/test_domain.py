@@ -9,6 +9,7 @@ from datetime import date
 from pathlib import Path
 
 import db
+import import_woocommerce
 import pytest
 from models import (
     BUILD_STATUS_CODES,
@@ -1366,3 +1367,52 @@ def test_virtual_parts_are_not_sellable_from_stock(database):
     # a virtual part holds no stock, so there is nothing for a sale to consume
     with pytest.raises(db.InventoryError):
         db.add_line_part(db.next_line_part_id(), line_id, part_id, 1.0)
+
+
+def test_import_survives_orders_it_cannot_fully_understand(database):
+    """The import is one transaction, so a row it chokes on would roll back
+    every order alongside it. Stores add their own statuses freely (Blocks
+    checkout writes 'checkout-draft'), and an order may carry no date."""
+    rows = [
+        {
+            "wc_order_id": 1,
+            "wc_number": "1",
+            "status": "processing",
+            "date_created": "2026-08-01",
+            "customer_name": "A",
+            "shipping_country": "NL",
+            "shipping_cost": 0.0,
+            "lines": [],
+        },
+        {
+            "wc_order_id": 2,
+            "wc_number": "2",
+            "status": "checkout-draft",  # not one of ours
+            "date_created": "2026-08-02",
+            "customer_name": "B",
+            "shipping_country": "NL",
+            "shipping_cost": 0.0,
+            "lines": [],
+        },
+        {
+            "wc_order_id": 3,
+            "wc_number": "3",
+            "status": "processing",
+            "date_created": "",  # _map_order's fallback for a missing date
+            "customer_name": "C",
+            "shipping_country": "NL",
+            "shipping_cost": 0.0,
+            "lines": [],
+        },
+    ]
+    result = {"imported": 0, "updated": 0, "skipped": 0, "notes": []}
+    import_woocommerce._import(rows, result)
+
+    assert result["imported"] == 3  # the good ones are NOT lost with the odd ones
+    with db.session() as s:
+        orders = s.scalars(select(SalesOrder).order_by(SalesOrder.id)).all()
+        assert [o.wc_order_id for o in orders] == [1, 2, 3]
+        assert orders[1].status == ""  # unknown status stored as unset
+        assert orders[2].date_created is None
+    # and the user is told why, rather than it happening silently
+    assert any("checkout-draft" in n for n in result["notes"])

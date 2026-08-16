@@ -1369,3 +1369,54 @@ def test_sales_order_can_be_booked_short(client):
         for r in client.get(f"/api/sales-orders/{so_id}/stock").json()
     ]
     assert counts == [(4.0, "consumed"), (-4.0, "available")]
+
+
+def test_sale_consumed_stock_reads_as_a_sale_in_the_stock_log(client):
+    """A sale's consumed slice inherits the source's po_id for pricing, so the
+    log has to test the sale stamp before the PO one -- otherwise the units that
+    left read as a second arrival on the order that first brought them in."""
+    part = client.post("/api/parts", json={"sku": "W1", "description": "Widget"}).json()
+    supplier = client.post("/api/suppliers", json={"name": "Acme"}).json()
+    sp = client.post(
+        "/api/supplier-parts",
+        json={
+            "supplier_id": supplier["id"],
+            "part_id": part["id"],
+            "sku": "A-1",
+            "pack_qty": 1,
+        },
+    ).json()
+    # the stock is bought before the sale that ships it, so the log is ordered
+    # receipt-then-sale (_seed_sale dates its order 2026-08-01)
+    po = client.post(
+        "/api/purchase-orders",
+        json={
+            "supplier_id": supplier["id"],
+            "description": "d",
+            "start_date": "2026-07-01",
+        },
+    ).json()
+    client.post(
+        f"/api/purchase-orders/{po['id']}/lines",
+        json={"supplier_part_id": sp["id"], "quantity": 10, "price": 4.0},
+    )
+    line = client.get(f"/api/purchase-orders/{po['id']}/lines").json()[0]
+    client.post(f"/api/po-lines/{line['id']}/book", json={"quantity": 10})
+
+    so_id = _seed_sale(client)
+    so_line = client.get(f"/api/sales-orders/{so_id}/lines").json()[0]["id"]
+    client.post(
+        f"/api/sales-orders/{so_id}/lines/{so_line}/parts",
+        json={"part_id": part["id"], "quantity": 3},
+    )
+    client.post(f"/api/sales-orders/{so_id}/book")
+
+    log = client.get(f"/api/parts/{part['id']}/stock-log").json()
+    # the receipt (7 left of 10) and the sale that took 3 -- not two receipts
+    assert [(e["kind"], e["quantity"]) for e in log] == [
+        ("received", 7),
+        ("consumed", -3),
+    ]
+    sale = log[1]
+    assert sale["order_label"] == "SO-0001"
+    assert sale["order_url"] == f"/sales-orders/{so_id}"
