@@ -8,7 +8,7 @@
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
 	import StocktakeDialog from '$lib/components/StocktakeDialog.svelte';
 	import NegativeStockDialog from '$lib/components/NegativeStockDialog.svelte';
-	import type { PartBuild, Part, BomLine, BomUsage, POLine, PartPurchaseOrder, PurchaseOrder, StockItem, StockLogEntry, Supplier, SupplierPart } from '$lib/types';
+	import type { PartBuild, Part, BomLine, BomUsage, POLine, PartPurchaseOrder, PartSalesOrder, PurchaseOrder, StockItem, StockLogEntry, Supplier, SupplierPart } from '$lib/types';
 
 	type PartPO = PartPurchaseOrder & { supplier_name: string };
 	import {
@@ -19,7 +19,10 @@
 		stockOrderUrl,
 		STOCK_CONSUMED,
 		stockStatusLabel,
-		STOCK_STATUS_OPTIONS
+		STOCK_STATUS_OPTIONS,
+		SO_DONE,
+		SO_STATUS_OPTIONS,
+		soStatusLabel
 	} from '$lib/status';
 
 	const id = $derived(Number($page.params.id));
@@ -45,6 +48,8 @@
 	// a sub-assembly is both built and consumed, so an assembly gets the
 	// consumed-by table as its own section as well
 	let consumedBy = $state<PartBuild[]>([]);
+	// sales that consume this part; the section only appears when there are any
+	let salesOrders = $state<PartSalesOrder[]>([]);
 
 	// new-bom-line inputs
 	let newComp = $state<number | ''>('');
@@ -164,7 +169,8 @@
 			allSuppliers,
 			partBuilds,
 			log,
-			usedInBuilds
+			usedInBuilds,
+			partSales
 		] = await Promise.all([
 			part.assembly ? api.bom(id) : Promise.resolve([]),
 			api.parts(),
@@ -175,8 +181,10 @@
 			api.suppliers(),
 			part.assembly ? (api.partBuilds(id) as Promise<PartBuild[]>) : api.partConsumedBy(id),
 			api.partStockLog(id),
-			part.assembly ? api.partConsumedBy(id) : Promise.resolve([])
+			part.assembly ? api.partConsumedBy(id) : Promise.resolve([]),
+			api.partSalesOrders(id)
 		]);
+		salesOrders = partSales;
 		consumedBy = usedInBuilds;
 		stockLog = log;
 		bom = bomLines;
@@ -214,7 +222,8 @@
 				]),
 		{ id: 'used-in', label: 'Used in' },
 		{ id: 'build-orders', label: 'Build orders' },
-		...(part?.assembly ? [{ id: 'used-in-builds', label: 'Used in build orders' }] : [])
+		...(part?.assembly ? [{ id: 'used-in-builds', label: 'Used in build orders' }] : []),
+		...(salesOrders.length ? [{ id: 'sales-orders', label: 'Sales orders' }] : [])
 	]);
 
 	function label(p: Part) {
@@ -397,6 +406,23 @@
 	}
 	const buildCols = $derived(buildColumns(!!part?.assembly));
 	const consumedByCols = $derived(buildColumns(false));
+
+	const salesCols: Column<PartSalesOrder>[] = [
+		{ key: 'reference', header: 'Sale', mono: true, width: '110px' },
+		{ key: 'date_created', header: 'Date', width: '120px' },
+		{ key: 'customer_name', header: 'Customer', truncate: true },
+		{ key: 'required', header: 'Required', mono: true, width: '100px' },
+		{
+			key: 'status',
+			header: 'Status',
+			width: '120px',
+			statusFilter: true,
+			statusOptions: SO_STATUS_OPTIONS,
+			statusDefaultHide: SO_DONE,
+			statusLabel: soStatusLabel
+		},
+		{ key: 'booked', header: 'Booked', bool: true, width: '90px' }
+	];
 	const usedInCols: Column<BomUsage>[] = [
 		{ key: 'parent_sku', header: 'Assembly', mono: true, width: '150px' },
 		{ key: 'parent_description', header: 'Description', truncate: true },
@@ -673,6 +699,20 @@
 						href={(b) => `/build-orders/${b.id}`}
 						storageKey={`/parts/${id}/used-in-builds`}
 						defaultSort={{ key: 'end_date', dir: 'desc' }}
+					/>
+				</section>
+			{/if}
+
+			{#if salesOrders.length}
+				<section id="sales-orders">
+					<h2 class="h2">Sales orders</h2>
+					<p class="muted">Sales that consume this part, and how much each needs of it.</p>
+					<DataTable
+						columns={salesCols}
+						rows={salesOrders}
+						href={(so) => `/sales-orders/${so.id}`}
+						storageKey={`/parts/${id}/sales-orders`}
+						defaultSort={{ key: 'date_created', dir: 'desc' }}
 					/>
 				</section>
 			{/if}

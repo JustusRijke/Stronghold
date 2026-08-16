@@ -18,7 +18,12 @@ import type {
 	DeploymentSettings,
 	Activity,
 	SearchResult,
-	StockValueReport
+	StockValueReport,
+	SalesOrder,
+	PartSalesOrder,
+	SalesOrderLine,
+	SalesShortage,
+	ImportResult
 } from './types';
 
 export class ApiError extends Error {
@@ -176,6 +181,22 @@ export const api = {
 	buildStock: (id: number) => get<StockItem[]>(`/build-orders/${id}/stock`),
 	resyncBuildLines: (id: number) =>
 		post<BuildOrder>(`/build-orders/${id}/resync-lines`, {}),
+
+	// sales orders
+	salesOrders: () => get<SalesOrder[]>('/sales-orders'),
+	salesOrder: (id: number) => get<SalesOrder>(`/sales-orders/${id}`),
+	salesOrderLines: (id: number) => get<SalesOrderLine[]>(`/sales-orders/${id}/lines`),
+	addLinePart: (id: number, lineId: number, b: { part_id: number; quantity: number }) =>
+		post<SalesOrderLine[]>(`/sales-orders/${id}/lines/${lineId}/parts`, b),
+	editLinePart: (linkId: number, quantity: number) =>
+		patch<{ ok: boolean }>(`/sales-orders/lines/parts/${linkId}`, { quantity }),
+	removeLinePart: (linkId: number) => del<{ ok: boolean }>(`/sales-orders/lines/parts/${linkId}`),
+	salesOrderShortages: (id: number) => get<SalesShortage[]>(`/sales-orders/${id}/shortages`),
+	bookSalesOrder: (id: number) => post<SalesOrder>(`/sales-orders/${id}/book`, {}),
+	salesOrderStock: (id: number) => get<StockItem[]>(`/sales-orders/${id}/stock`),
+	partSalesOrders: (id: number) => get<PartSalesOrder[]>(`/parts/${id}/sales-orders`),
+	importSalesOrders: (b: { after: string; before?: string | null }) =>
+		post<ImportResult>('/sales-orders/import', b),
 
 	// settings
 	settings: () => get<Setting[]>('/settings'),

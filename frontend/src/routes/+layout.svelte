@@ -19,6 +19,7 @@
 		['Supplier parts', '/supplier-parts'],
 		['Purchase orders', '/purchase-orders'],
 		['Build orders', '/build-orders'],
+		['Sales orders', '/sales-orders'],
 		['Reports', '/reports']
 	];
 
@@ -27,14 +28,16 @@
 		supplier: '/suppliers',
 		supplier_part: '/supplier-parts',
 		purchase_order: '/purchase-orders',
-		build_order: '/build-orders'
+		build_order: '/build-orders',
+		sales_order: '/sales-orders'
 	};
 	const SEARCH_LABEL: Record<SearchResult['type'], string> = {
 		part: 'Parts',
 		supplier: 'Suppliers',
 		supplier_part: 'Supplier parts',
 		purchase_order: 'Purchase orders',
-		build_order: 'Build orders'
+		build_order: 'Build orders',
+		sales_order: 'Sales orders'
 	};
 	const SEARCH_ORDER = Object.keys(SEARCH_LABEL) as SearchResult['type'][];
 
