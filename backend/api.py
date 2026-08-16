@@ -930,9 +930,10 @@ def list_part_consumed_by(part_id: int) -> list[PartBuildOut]:
 def list_part_sales_orders(part_id: int) -> list[PartSalesOrderOut]:
     """Sales orders that consume this part, with what each requires of it."""
     with db.session() as s:
+        totals = _so_totals(s)
         return [
             PartSalesOrderOut(
-                **_so_out(s, so).model_dump(),
+                **_so_out(s, so, totals).model_dump(),
                 required=required,
             )
             for so, required in s.execute(
@@ -1611,9 +1612,67 @@ def list_build_stock(build_id: int) -> list[StockItemOut]:
 # -- sales orders -----------------------------------------------------------
 
 
-def _so_out(s, so: SalesOrder) -> SalesOrderOut:
-    revenue = db.so_revenue(s, so.id)
-    estimated, realised = db.so_cost(s, so.id)
+def _so_totals(s) -> tuple[dict, dict, dict]:
+    """(revenue, estimated cost, realised cost) per sales order, as three
+    grouped queries rather than a handful per order -- the list page would
+    otherwise scale with orders times parts-per-order.
+
+    Estimated cost skips a part with no price, matching db.so_cost: a part
+    nobody has priced contributes nothing rather than poisoning the sum.
+    Orders with no priced part at all are simply absent from the map, which
+    _so_out reads back as None."""
+    revenue = dict(
+        s.execute(
+            select(
+                SalesOrderLine.so_id,
+                func.sum(SalesOrderLine.unit_price * SalesOrderLine.quantity),
+            ).group_by(SalesOrderLine.so_id)
+        ).all()
+    )
+    estimated = dict(
+        s.execute(
+            select(
+                SalesOrderLine.so_id,
+                func.sum(
+                    SalesOrderLinePart.quantity
+                    * SalesOrderLine.quantity
+                    * Part.estimated_price
+                ),
+            )
+            .join(SalesOrderLinePart, SalesOrderLinePart.line_id == SalesOrderLine.id)
+            .join(Part, SalesOrderLinePart.part_id == Part.id)
+            .where(Part.estimated_price.is_not(None))
+            .group_by(SalesOrderLine.so_id)
+        ).all()
+    )
+    realised = dict(
+        s.execute(
+            select(
+                StockItem.consumed_by_so_id,
+                func.sum(StockItem.unit_price * StockItem.count),
+            )
+            .where(
+                StockItem.consumed_by_so_id.is_not(None),
+                StockItem.status == STOCK_CONSUMED,
+                StockItem.unit_price.is_not(None),
+            )
+            .group_by(StockItem.consumed_by_so_id)
+        ).all()
+    )
+    return revenue, estimated, realised
+
+
+def _so_out(s, so: SalesOrder, totals: tuple[dict, dict, dict] | None = None):
+    if totals is None:
+        revenue = db.so_revenue(s, so.id)
+        estimated, realised = db.so_cost(s, so.id)
+    else:
+        revenue_by, estimated_by, realised_by = totals
+        revenue = revenue_by.get(so.id, 0.0)
+        estimated = estimated_by.get(so.id)
+        # an unbooked order has consumed nothing, so it has no realised cost --
+        # not a cost of zero
+        realised = realised_by.get(so.id) if so.booked else None
     return SalesOrderOut(
         id=so.id,
         reference=so_ref(so.id),
@@ -1643,8 +1702,9 @@ def _get_so_or_404(s, so_id: int) -> SalesOrder:
 @router.get("/sales-orders", response_model=list[SalesOrderOut])
 def list_sales_orders() -> list[SalesOrderOut]:
     with db.session() as s:
+        totals = _so_totals(s)
         return [
-            _so_out(s, so)
+            _so_out(s, so, totals)
             for so in s.scalars(select(SalesOrder).order_by(SalesOrder.id))
         ]
 
