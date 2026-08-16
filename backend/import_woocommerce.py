@@ -9,7 +9,13 @@ alone.
 
 import db
 import woocommerce
-from models import SalesOrder, SalesOrderLine, SalesOrderLinePart, so_ref
+from models import (
+    SalesOrder,
+    SalesOrderLine,
+    SalesOrderLinePart,
+    SalesOrderStatus,
+    so_ref,
+)
 
 
 def _apply_lines(s, so: SalesOrder, lines: list[dict], notes: list[str]) -> None:
@@ -50,6 +56,25 @@ def _apply_lines(s, so: SalesOrder, lines: list[dict], notes: list[str]) -> None
         s.delete(line)
 
 
+def _status(row: dict, notes: list[str]) -> str:
+    """The order's status, or "" if WooCommerce reports one we do not model.
+
+    Stores add statuses freely -- Blocks checkout writes `checkout-draft`, and
+    shipping/subscription plugins add their own -- so an unknown one is normal
+    data, not corruption. EnumCode stores "" as its unset code, so the order
+    still imports; refusing it would lose the whole batch over a label."""
+    value = row["status"]
+    try:
+        SalesOrderStatus(value)
+    except ValueError:
+        notes.append(
+            f"WooCommerce order {row['wc_order_id']}: unknown status {value!r}, "
+            f"imported without one"
+        )
+        return ""
+    return value
+
+
 @db._write
 def _import(s, orders: list[dict], result: dict) -> None:
     notes: list[str] = result["notes"]
@@ -61,6 +86,11 @@ def _import(s, orders: list[dict], result: dict) -> None:
             # leave that consumption describing something else
             result["skipped"] += 1
             continue
+        # resolve everything that can reject the row BEFORE touching the
+        # session: this is one transaction, so a raise here would roll back
+        # every order already imported in this run, not just this one
+        status = _status(row, notes)
+        created = row["date_created"]
         if so is None:
             so = SalesOrder(id=next_so_id, wc_order_id=row["wc_order_id"])
             s.add(so)
@@ -69,11 +99,12 @@ def _import(s, orders: list[dict], result: dict) -> None:
         else:
             result["updated"] += 1
         so.wc_number = row["wc_number"]
-        so.status = row["status"]
+        so.status = status
         so.customer_name = row["customer_name"]
         so.shipping_country = row["shipping_country"]
         so.shipping_cost = row["shipping_cost"]
-        so.date_created = db.date.fromisoformat(row["date_created"])
+        # _map_order falls back to "" when the order carries no date
+        so.date_created = db.date.fromisoformat(created) if created else None
         s.flush()  # the order must exist before its lines reference it
         _apply_lines(s, so, row["lines"], notes)
 
