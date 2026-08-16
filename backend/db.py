@@ -284,6 +284,11 @@ def _to_v3(s: Session) -> None:
 _MIGRATIONS = {
     2: lambda s: _drop_columns(s, 2),
     3: _to_v3,
+    # 4 only added tables and a nullable column: create_all already built them
+    # and an older file simply has no INSERTs for them. The step still has to
+    # exist -- _migrate walks every version up to SCHEMA_VERSION and would
+    # KeyError on the gap.
+    4: lambda s: None,
 }
 
 
