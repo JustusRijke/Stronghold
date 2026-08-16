@@ -18,8 +18,12 @@ from datetime import date, datetime
 from pathlib import Path
 
 from models import (
+    BUILD_STATUS_CODES,
+    PO_STATUS_CODES,
+    PRICE_BASIS_CODES,
     STOCK_AVAILABLE,
     STOCK_CONSUMED,
+    STOCK_STATUS_CODES,
     Activity,
     Base,
     BomLine,
@@ -27,6 +31,7 @@ from models import (
     BuildLine,
     BuildOrder,
     BuildStatus,
+    EnumCode,
     Part,
     POLine,
     POStatus,
@@ -209,26 +214,73 @@ def _drop_columns(s: Session, step: int) -> None:
         s.execute(text(f"ALTER TABLE {table} DROP COLUMN {column}"))
 
 
+def _code_for(codes: dict, member) -> int:
+    """The stored int for an enum member. Inverts the models code map so the
+    migration cannot drift from what EnumCode actually writes."""
+    return next(k for k, v in codes.items() if v == member)
+
+
+# What each enum column held as text before v3, mapped to the code it stores
+# now. Stock status appears twice over: the 1.0 display prose, and the enum's
+# own value, which was briefly what went on disk.
+_V3_TEXT_TO_CODE: dict[tuple[str, str], dict[str, int]] = {
+    ("stock_items", "status"): {
+        "Available": _code_for(STOCK_STATUS_CODES, StockStatus.AVAILABLE),
+        "Consumed by build order": _code_for(STOCK_STATUS_CODES, StockStatus.CONSUMED),
+        **{s.value: _code_for(STOCK_STATUS_CODES, s) for s in StockStatus},
+    },
+    ("stock_items", "price_basis"): {
+        b.value: _code_for(PRICE_BASIS_CODES, b) for b in PriceBasis
+    },
+    ("purchase_orders", "status"): {
+        p.value: _code_for(PO_STATUS_CODES, p) for p in POStatus
+    },
+    ("build_orders", "status"): {
+        b.value: _code_for(BUILD_STATUS_CODES, b) for b in BuildStatus
+    },
+}
+
+
+def _to_v3(s: Session) -> None:
+    """Store the enum columns as ints rather than text.
+
+    SQLite is dynamically typed, so the replayed rows sit as text in what are
+    now INTEGER columns; this rewrites them in place. Anything unrecognised is
+    left alone and logged -- a value we cannot map is bad data, and silently
+    zeroing it would lose a PO's state or make stock vanish from the on-hand
+    sums. It surfaces immediately either way: reading such a row fails."""
+    for (table, column), mapping in _V3_TEXT_TO_CODE.items():
+        for old, code in mapping.items():
+            s.execute(
+                text(f"UPDATE {table} SET {column} = :code WHERE {column} = :old"),  # noqa: S608
+                {"code": code, "old": old},
+            )
+        # "" is the no-status-yet default on POs and builds; these columns are
+        # NOT NULL, so it gets EnumCode's reserved code rather than a NULL
+        s.execute(
+            text(f"UPDATE {table} SET {column} = :unset WHERE {column} = ''"),  # noqa: S608
+            {"unset": EnumCode.UNSET},
+        )
+        left = (
+            s.execute(
+                text(
+                    f"SELECT DISTINCT {column} FROM {table} "  # noqa: S608
+                    f"WHERE typeof({column}) = 'text'"
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if left:
+            _log.warning("%s.%s: leaving unmappable values %s", table, column, left)
+
+
 # Steps that bring an older data file up to date, keyed by the SCHEMA_VERSION
 # they produce: {2: _to_v2} runs when a version-1 file is opened by a version-2
 # app. They transform *replayed data*, not the schema -- create_all already
 # built the current tables before the replay, which is also why Alembic buys us
 # nothing here. The exception is a dropped column, which needs both halves:
 # an _import_sql scaffold and a step here to take it down again.
-def _to_v3(s: Session) -> None:
-    """Rewrite the prose stock statuses to the short codes of
-    models.StockStatus. Display text moved to the frontend, so the stored value
-    no longer changes when the wording does."""
-    for old, new in (
-        ("Available", StockStatus.AVAILABLE),
-        ("Consumed by build order", StockStatus.CONSUMED),
-    ):
-        s.execute(
-            text("UPDATE stock_items SET status = :new WHERE status = :old"),
-            {"new": new.value, "old": old},
-        )
-
-
 _MIGRATIONS = {
     2: lambda s: _drop_columns(s, 2),
     3: _to_v3,

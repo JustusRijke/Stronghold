@@ -16,8 +16,8 @@ from importlib.metadata import PackageNotFoundError, version
 # to db._MIGRATIONS. 1 is the 1.0 baseline: the shape the app shipped 1.0 with.
 # 2 dropped purchase_orders.reference / build_orders.reference (derived from the
 # pk since; see models.po_ref).
-# 3 replaced the prose stock_items.status values ("Available", "Consumed by
-# build order") with the short codes in models.StockStatus.
+# 3 stores the enum columns (stock status and price basis, PO and build status)
+# as small ints instead of text -- see models.EnumCode.
 SCHEMA_VERSION = 3
 
 try:

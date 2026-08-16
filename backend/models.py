@@ -7,16 +7,66 @@ stock is "Available" or "Consumed by build order"; POs/builds use their
 lifecycle status. PO lines are order detail, plainly removable.
 """
 
+from collections.abc import Mapping
 from datetime import date, datetime
 from enum import StrEnum
 
 from sqlalchemy import (
     DateTime,
     ForeignKey,
+    Integer,
     String,
+    TypeDecorator,
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+class EnumCode(TypeDecorator):
+    """Store a StrEnum as a small int, hand it back as the enum member.
+
+    The data file is the source of truth and is read by humans, but a status
+    column holding prose is a column whose *stored* value changes whenever the
+    wording does. Codes are the storage encoding only: Python still sees the
+    enum, the JSON API still speaks the enum's string, and the numbers live in
+    one place -- the `_CODES` map below each enum.
+
+    The mapping is append-only. Renumbering an existing member silently
+    reinterprets every row already written, and a `git checkout` of an older
+    data file would not notice; add a new number instead.
+    """
+
+    impl = Integer
+    cache_ok = True
+
+    # POs and builds default to "" (no status yet), which is not an enum member.
+    # It gets a code of its own rather than being stored as NULL: these columns
+    # are NOT NULL, and the export omits NULL columns, so a NULL would come back
+    # as the *schema* default on restore instead of the empty state.
+    UNSET = 0
+
+    def __init__(self, enum_cls, codes: Mapping[int, StrEnum]) -> None:
+        super().__init__()
+        self._enum = enum_cls
+        self._to_py = codes
+        self._to_db = {v: k for k, v in codes.items()}
+        if self.UNSET in codes:
+            raise ValueError(f"{enum_cls.__name__}: {self.UNSET} is reserved for unset")
+        # a missing member would fail to store at all
+        missing = set(enum_cls) - set(codes.values())
+        if missing:
+            raise ValueError(f"{enum_cls.__name__} members without a code: {missing}")
+
+    def process_bind_param(self, value, dialect):
+        if value is None or value == "":
+            return self.UNSET
+        return self._to_db[self._enum(value)]
+
+    def process_result_value(self, value, dialect):
+        if value is None or value == self.UNSET:
+            return ""
+        return self._to_py[value]
+
 
 # An order's human code is its pk in the zero-padded shape the InvenTree import
 # produced (PO-0042). Derived, never stored: it was always a copy of the pk, so
@@ -48,6 +98,18 @@ class PriceBasis(StrEnum):
     NONE = "none"  # no order, no price
 
 
+# stored codes; append-only, never renumber (see EnumCode)
+PRICE_BASIS_CODES = {
+    1: PriceBasis.PO,
+    2: PriceBasis.BUILD,
+    3: PriceBasis.BUILD_PARTIAL,
+    4: PriceBasis.ESTIMATE,
+    5: PriceBasis.VIRTUAL,
+    6: PriceBasis.PO_NO_PRICE,
+    7: PriceBasis.NONE,
+}
+
+
 class BuildStatus(StrEnum):
     """The values a build's status may take. Mostly InvenTree BuildStatus
     labels, with two deliberate departures: Draft (ours, the status a new build
@@ -62,6 +124,15 @@ class BuildStatus(StrEnum):
     COMPLETE = "Complete"
 
 
+BUILD_STATUS_CODES = {
+    1: BuildStatus.DRAFT,
+    2: BuildStatus.PENDING,
+    3: BuildStatus.PRODUCTION,
+    4: BuildStatus.CANCELLED,
+    5: BuildStatus.COMPLETE,
+}
+
+
 class POStatus(StrEnum):
     """InvenTree PurchaseOrderStatus labels; the only values a PO's status may take."""
 
@@ -72,6 +143,17 @@ class POStatus(StrEnum):
     CANCELLED = "Cancelled"
     LOST = "Lost"
     RETURNED = "Returned"
+
+
+PO_STATUS_CODES = {
+    1: POStatus.PENDING,
+    2: POStatus.PLACED,
+    3: POStatus.ON_HOLD,
+    4: POStatus.COMPLETE,
+    5: POStatus.CANCELLED,
+    6: POStatus.LOST,
+    7: POStatus.RETURNED,
+}
 
 
 class Base(DeclarativeBase):
@@ -135,13 +217,18 @@ class BomLine(Base):
 
 class StockStatus(StrEnum):
     """Whether a stock row is on the shelf or has been consumed by an order.
-    The stored values are short codes, not display text: the label the user
-    sees lives in the frontend (see status.ts), so rewording it never means
-    migrating data. Schema 3 rewrote the prose values these replaced."""
+    The member values are the wire format (JSON, and the frontend's picklists);
+    the *stored* value is the int in STOCK_STATUS_CODES. The label the user
+    sees lives in the frontend (see status.ts)."""
 
     AVAILABLE = "available"
     CONSUMED = "consumed"
 
+
+STOCK_STATUS_CODES = {
+    1: StockStatus.AVAILABLE,
+    2: StockStatus.CONSUMED,
+}
 
 # the enum is the source of truth; these aliases keep the existing call sites
 STOCK_AVAILABLE = StockStatus.AVAILABLE
@@ -173,13 +260,17 @@ class StockItem(Base):
     consumed_by_build_id: Mapped[int | None] = mapped_column(
         ForeignKey("build_orders.id"), default=None
     )
-    status: Mapped[str] = mapped_column(default=STOCK_AVAILABLE)
+    status: Mapped[str] = mapped_column(
+        EnumCode(StockStatus, STOCK_STATUS_CODES), default=STOCK_AVAILABLE
+    )
     # cached unit price of THIS stock, which is not the part's price: stock is
     # worth what its own order paid, and only falls back to the part estimate
     # when its order does not price it. price_basis records which (see
     # db.refresh_stock_price / PriceBasis).
     unit_price: Mapped[float | None] = mapped_column(default=None)
-    price_basis: Mapped[str] = mapped_column(default=PriceBasis.NONE)
+    price_basis: Mapped[str] = mapped_column(
+        EnumCode(PriceBasis, PRICE_BASIS_CODES), default=PriceBasis.NONE
+    )
     price_po_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_orders.id"))
     # set when a stocktake created this row (a correction, not a PO or build).
     # Naive local time, like Activity.at.
@@ -226,7 +317,7 @@ class PurchaseOrder(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     supplier_id: Mapped[int] = mapped_column(ForeignKey(Supplier.id))
-    status: Mapped[str] = mapped_column(default="")
+    status: Mapped[str] = mapped_column(EnumCode(POStatus, PO_STATUS_CODES), default="")
     # the order date: NOT NULL because it is the sort key for "latest price" --
     # a dateless order cannot be ranked. Defaulted to today in db.create_po
     start_date: Mapped[date]
@@ -264,7 +355,9 @@ class BuildOrder(Base):
     # the app (their output is real stock rows); set by the InvenTree migration,
     # which cannot reconstruct output InvenTree has since deleted.
     imported_produced: Mapped[int] = mapped_column(default=0)
-    status: Mapped[str] = mapped_column(default="")
+    status: Mapped[str] = mapped_column(
+        EnumCode(BuildStatus, BUILD_STATUS_CODES), default=""
+    )
     description: Mapped[str] = mapped_column(default="")
     start_date: Mapped[date | None] = mapped_column(default=None)
     end_date: Mapped[date | None] = mapped_column(default=None)  # target completion

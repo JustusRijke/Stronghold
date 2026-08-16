@@ -11,20 +11,29 @@ from pathlib import Path
 import db
 import pytest
 from models import (
+    BUILD_STATUS_CODES,
+    PO_STATUS_CODES,
+    PRICE_BASIS_CODES,
     STOCK_AVAILABLE,
     STOCK_CONSUMED,
+    STOCK_STATUS_CODES,
     Activity,
     Booking,
     BuildLine,
     BuildOrder,
+    BuildStatus,
+    EnumCode,
     Part,
     POLine,
+    POStatus,
+    PriceBasis,
     PurchaseOrder,
     StockItem,
     StockStatus,
     po_ref,
 )
 from sqlalchemy import select
+from sqlalchemy import text as select_text
 from version import RELEASE_VERSION, SCHEMA_VERSION
 
 
@@ -840,24 +849,86 @@ def test_v1_data_file_drops_the_stored_order_references(tmp_path):
     assert po_ref(7) == "PO-0007"
 
 
-def test_v2_data_file_rewrites_the_prose_stock_statuses(tmp_path):
-    """The real schema 2 -> 3 step. Unlike a dropped column this replays fine --
-    the values are just stale prose -- so the danger is it passing unnoticed:
-    every status filter would silently match nothing."""
+def _code_of(codes, member):
+    return next(k for k, v in codes.items() if v == member)
+
+
+def _split_values(values):
+    """Split an INSERT's VALUES list on the commas between columns, leaving
+    the ones inside quoted strings alone."""
+    out, cur, quoted = [], "", False
+    for ch in values:
+        if ch == "'":
+            quoted = not quoted
+        if ch == "," and not quoted:
+            out.append(cur.strip())
+            cur = ""
+        else:
+            cur += ch
+    out.append(cur.strip())
+    return out
+
+
+def test_v2_data_file_stores_enum_columns_as_ints(tmp_path):
+    """The real schema 2 -> 3 step: the four enum columns held text, and now
+    hold codes. Unlike a dropped column this replays fine (SQLite is
+    dynamically typed, so the old text sits happily in an INTEGER column), so
+    the danger is it passing unnoticed -- every status comparison would then
+    silently match nothing."""
     data_file = tmp_path / "inventory.sql"
     db.init(data_file)
     db.create_part(1, "BOLT-M3", "M3 bolt")
+    db.create_supplier(1, "Acme")
     db.create_item(1, 1)
     db.set_count(1, 20)
     db.create_item(2, 1)
     db.set_item_status(2, StockStatus.CONSUMED)
+    db.create_po(7, 1, status=POStatus.PLACED)
+    db.create_po(8, 1)  # no status: the "" case, which is not an enum member
+    db.create_part(2, "ASM", "an assembly")
+    db.set_part_assembly(2, True)
+    db.add_bomline(db.next_bomline_id(), 2, 1, 1.0)
+    db.create_build(3, 2, 1, status=BuildStatus.PRODUCTION)
 
-    # rewrite the export as a 2.x app wrote it: the display text in the column
-    text = data_file.read_text(encoding="utf-8")
-    text = text.replace(f"'{StockStatus.AVAILABLE.value}'", "'Available'").replace(
-        f"'{StockStatus.CONSUMED.value}'", "'Consumed by build order'"
-    )
-    data_file.write_text(text, encoding="utf-8")
+    # rewrite the export as a 2.x app wrote it: the text form in every column.
+    # Substituting by column position, since a bare code like "1" appears all
+    # over an INSERT (ids, counts) and a blind replace would corrupt them.
+    v2_text = {
+        ("stock_items", "status"): {
+            _code_of(STOCK_STATUS_CODES, StockStatus.AVAILABLE): "Available",
+            _code_of(STOCK_STATUS_CODES, StockStatus.CONSUMED): (
+                "Consumed by build order"
+            ),
+        },
+        ("stock_items", "price_basis"): {
+            _code_of(PRICE_BASIS_CODES, b): b.value for b in PriceBasis
+        },
+        ("purchase_orders", "status"): {
+            _code_of(PO_STATUS_CODES, p): p.value for p in POStatus
+        },
+        ("build_orders", "status"): {
+            _code_of(BUILD_STATUS_CODES, b): b.value for b in BuildStatus
+        },
+    }
+    out = []
+    for line in data_file.read_text(encoding="utf-8").splitlines(keepends=True):
+        m = re.match(r"INSERT INTO (\w+) \(([^)]*)\) VALUES \((.*)\);", line)
+        if m and any(t == m.group(1) for t, _ in v2_text):
+            cols = [c.strip() for c in m.group(2).split(", ")]
+            vals = _split_values(m.group(3))
+            for i, col in enumerate(cols):
+                mapping = v2_text.get((m.group(1), col))
+                if mapping is None:
+                    continue
+                code = int(vals[i])
+                vals[i] = f"'{mapping[code]}'" if code != EnumCode.UNSET else "''"
+            joined = ", ".join(vals)
+            line = (
+                f"INSERT INTO {m.group(1)} ({m.group(2)}) "  # noqa: S608
+                f"VALUES ({joined});\n"
+            )
+        out.append(line)
+    data_file.write_text("".join(out), encoding="utf-8")
     _set_stamp(data_file, 2)
     assert "'Consumed by build order'" in data_file.read_text(encoding="utf-8")
 
@@ -865,11 +936,52 @@ def test_v2_data_file_rewrites_the_prose_stock_statuses(tmp_path):
 
     assert db.data_schema_version() == SCHEMA_VERSION
     with db.session() as s:
+        # the enum comes back out of Python untouched...
         assert s.get(StockItem, 1).status == StockStatus.AVAILABLE
         assert s.get(StockItem, 2).status == StockStatus.CONSUMED
+        assert s.get(PurchaseOrder, 7).status == POStatus.PLACED
+        assert s.get(PurchaseOrder, 8).status == ""  # no status stays no status
+        assert s.get(BuildOrder, 3).status == BuildStatus.PRODUCTION
         assert s.get(StockItem, 1).count == 20  # the rest of the row is untouched
-    # and the prose is gone from the file, not just from the working db
-    assert "Consumed by build order" not in data_file.read_text(encoding="utf-8")
+        # ...while the column underneath holds an int
+        stored = s.execute(
+            select_text("SELECT typeof(status), status FROM stock_items WHERE id = 2")
+        ).one()
+        assert stored[0] == "integer"
+        assert stored[1] == _code_of(STOCK_STATUS_CODES, StockStatus.CONSUMED)
+    # and no prose survives in the file
+    written = data_file.read_text(encoding="utf-8")
+    assert "Consumed by build order" not in written
+    assert "'Placed'" not in written and "'Production'" not in written
+
+
+def test_v2_migration_also_converts_the_enum_values_themselves(tmp_path):
+    """Regression: stock status has been on disk in two text forms -- the 1.0
+    prose ("Available") and, briefly, the enum's own value ("available"). The
+    step first mapped only the prose, so a file holding the latter kept its
+    text and every stock read then failed on the way out."""
+    data_file = tmp_path / "inventory.sql"
+    db.init(data_file)
+    db.create_part(1, "BOLT-M3", "M3 bolt")
+    db.create_item(1, 1)
+    db.set_count(1, 20)
+
+    code = _code_of(STOCK_STATUS_CODES, StockStatus.AVAILABLE)
+    text = data_file.read_text(encoding="utf-8").replace(
+        f", 1, {code}, ", f", 1, '{StockStatus.AVAILABLE.value}', "
+    )
+    data_file.write_text(text, encoding="utf-8")
+    _set_stamp(data_file, 2)
+    assert f"'{StockStatus.AVAILABLE.value}'" in data_file.read_text(encoding="utf-8")
+
+    db.init(data_file)
+
+    with db.session() as s:
+        assert s.get(StockItem, 1).status == StockStatus.AVAILABLE
+        stored = s.execute(
+            select_text("SELECT typeof(status) FROM stock_items WHERE id = 1")
+        ).scalar()
+        assert stored == "integer"
 
 
 def test_newer_data_file_refuses_to_open(database):

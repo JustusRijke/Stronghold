@@ -189,9 +189,9 @@ step when one is actually needed.
   measured, not just counted); `po_id`/`build_id` are nullable FKs to the PO it
   was received against / the build that produced or consumed it. `status` is
   `available` or `consumed` (`models.StockStatus`; stock never disappears -- see
-  build orders below), and it replaces the old `active` flag for stock. The
-  stored value is a short code, not the label the UI shows: keeping the two
-  apart is what stops a rewording from being a data migration.
+  build orders below), and it replaces the old `active` flag for stock. Like
+  every enum column it is *stored* as a small int (`models.EnumCode`), so no
+  display text reaches the data file and rewording is never a migration.
 - `BuildOrder(id, part_id, quantity, status, ...)` -- an order to build an
   assembly `Part`. Produced incrementally: `produce_build(id, qty)` consumes the
   build's `BuildLine` snapshot FIFO for `qty` units and adds `qty` of the assembly as

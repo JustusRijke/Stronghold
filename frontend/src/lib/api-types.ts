@@ -1360,9 +1360,9 @@ export interface components {
         /**
          * StockStatus
          * @description Whether a stock row is on the shelf or has been consumed by an order.
-         *     The stored values are short codes, not display text: the label the user
-         *     sees lives in the frontend (see status.ts), so rewording it never means
-         *     migrating data. Schema 3 rewrote the prose values these replaced.
+         *     The member values are the wire format (JSON, and the frontend's picklists);
+         *     the *stored* value is the int in STOCK_STATUS_CODES. The label the user
+         *     sees lives in the frontend (see status.ts).
          * @enum {string}
          */
         StockStatus: "available" | "consumed";
