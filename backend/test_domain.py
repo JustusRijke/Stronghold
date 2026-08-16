@@ -28,6 +28,9 @@ from models import (
     POStatus,
     PriceBasis,
     PurchaseOrder,
+    SalesOrder,
+    SalesOrderLine,
+    SalesOrderStatus,
     StockItem,
     StockStatus,
     po_ref,
@@ -1201,3 +1204,165 @@ def test_set_count_cannot_cross_zero(database):
     # settled to zero it is still the build's row, not shelf stock
     with pytest.raises(db.InventoryError):
         db.set_count(debt.id, 5)
+
+
+def _seed_sale(so_id=1, wc_order_id=101, status=SalesOrderStatus.PROCESSING, qty=1.0):
+    """A sales order with one line, as the WooCommerce import would have left it.
+    There is no create route: WooCommerce owns the order, we only map parts to it."""
+    with db.session() as s:
+        s.add(
+            SalesOrder(
+                id=so_id,
+                wc_order_id=wc_order_id,
+                wc_number=str(wc_order_id),
+                customer_name="A Buyer",
+                shipping_country="NL",
+                shipping_cost=5.0,
+                status=status,
+                date_created=date(2026, 8, 1),
+            )
+        )
+        s.add(
+            SalesOrderLine(
+                id=so_id,
+                so_id=so_id,
+                wc_line_id=so_id * 10,
+                sku="",  # WooCommerce often has none; it is never matched on
+                description="A Product",
+                unit_price=50.0,
+                quantity=qty,
+            )
+        )
+        s.commit()
+    return so_id, so_id  # (so_id, line_id)
+
+
+def test_sales_order_flow(database):
+    part_id = db.next_part_id()
+    db.create_part(part_id, "W1", "Widget")
+    # two lots at different prices: FIFO must drain the older one first and each
+    # consumed row must inherit the price of the lot it came from
+    with db.session() as s:
+        s.add(StockItem(id=1, count=6.0, part_id=part_id, unit_price=2.0))
+        s.add(StockItem(id=2, count=10.0, part_id=part_id, unit_price=5.0))
+        s.commit()
+    so_id, line_id = _seed_sale(qty=2.0)
+
+    db.add_line_part(db.next_line_part_id(), line_id, part_id, 4.0)
+    with db.session() as s:
+        # 2 sold x 4 per unit
+        assert db.so_needs(s, so_id) == {part_id: 8.0}
+        assert db.so_shortages(s, so_id) == []
+        # an unbooked sale is demand: the parts have not left the shelf yet
+        assert db.part_demand(s)[part_id][0] == 8.0
+
+    db.book_sales_order(so_id)
+    with db.session() as s:
+        rows = s.scalars(select(StockItem).order_by(StockItem.id)).all()
+        # lot 1 drained, lot 2 partly taken; a consumed row split off each
+        assert [(r.id, r.count, r.status) for r in rows] == [
+            (1, 0.0, StockStatus.AVAILABLE),
+            (2, 8.0, StockStatus.AVAILABLE),
+            (3, 6.0, StockStatus.CONSUMED),
+            (4, 2.0, StockStatus.CONSUMED),
+        ]
+        # each consumed row kept the price of the lot it came from
+        assert [(r.unit_price, r.consumed_by_so_id) for r in rows[2:]] == [
+            (2.0, so_id),
+            (5.0, so_id),
+        ]
+        assert db.so_revenue(s, so_id) == 100.0
+        # realised: 6 @ 2.00 + 2 @ 5.00
+        assert db.so_cost(s, so_id)[1] == 22.0
+        # booked, so it asks for nothing more
+        assert part_id not in db.part_demand(s)
+        act = s.scalars(
+            select(Activity).where(Activity.action == "book_sales_order")
+        ).one()
+        assert json.loads(act.refs)[0]["label"] == "SO-0001"
+
+    # booking twice would consume the stock a second time
+    with pytest.raises(db.InventoryError):
+        db.book_sales_order(so_id)
+    # and the mapping is frozen once it has been acted on
+    with pytest.raises(db.InventoryError):
+        db.add_line_part(db.next_line_part_id(), line_id, part_id, 1.0)
+
+    assert "INSERT INTO sales_orders" in database.read_text(encoding="utf-8")
+
+
+def test_sales_order_short_debt_settled_by_purchase(database):
+    part_id = db.next_part_id()
+    db.create_part(part_id, "W1", "Widget")
+    supplier_id = db.next_supplier_id()
+    db.create_supplier(supplier_id, "Acme")
+    sp_id = db.next_supplier_part_id()
+    db.create_supplier_part(sp_id, supplier_id, "A-1", part_id, pack_qty=1)
+    with db.session() as s:
+        s.add(StockItem(id=1, count=3.0, part_id=part_id, unit_price=2.0))
+        s.commit()
+    so_id, line_id = _seed_sale()
+
+    db.add_line_part(db.next_line_part_id(), line_id, part_id, 10.0)
+    with db.session() as s:
+        assert db.so_shortages(s, so_id) == [(part_id, "Widget", 10.0, 3.0)]
+
+    # short by 7, but the sale still happened: book it anyway
+    db.book_sales_order(so_id)
+    with db.session() as s:
+        rows = s.scalars(select(StockItem).order_by(StockItem.id)).all()
+        # the shortfall is an adjacent pair, consumed first -- the ordering
+        # _settle_stock_debt depends on to find the row to reprice
+        assert [(r.id, r.count, r.status) for r in rows[-2:]] == [
+            (3, 7.0, STOCK_CONSUMED),
+            (4, -7.0, STOCK_AVAILABLE),
+        ]
+        assert rows[-1].consumed_by_so_id == so_id
+
+    # the parts arrive: the debt settles and the consumption reprices to what
+    # was actually paid, rather than staying at the estimate
+    po_id = db.next_po_id()
+    db.create_po(po_id, supplier_id)
+    line = db.next_line_id()
+    db.add_po_line(line, po_id, sp_id, 7, 4.0)
+    db.book_po_line(line, db.next_item_id(), 7)
+    with db.session() as s:
+        debt = s.get(StockItem, 4)
+        placeholder = s.get(StockItem, 3)
+        assert debt.count == 0.0  # settled, not deleted
+        assert placeholder.unit_price == 4.0
+        assert placeholder.price_basis == PriceBasis.PO
+        # 10 @ 4.00. The 3 units taken off the shelf were seeded with a bare
+        # unit_price and no order behind them (basis "none"), so the receipt is
+        # the first real price this part has had and refresh_part_price restates
+        # them at it -- the sale is costed at what the parts are known to cost.
+        assert db.so_cost(s, so_id)[1] == 40.0
+        # the settlement is reported against the sale, not a build
+        act = s.scalars(
+            select(Activity).where(Activity.action == "settle_stock_debt")
+        ).one()
+        assert "SO-0001" in act.message
+
+
+def test_cancelled_sales_orders_raise_no_demand(database):
+    part_id = db.next_part_id()
+    db.create_part(part_id, "W1", "Widget")
+    _, live_line = _seed_sale(so_id=1, wc_order_id=101)
+    _, dead_line = _seed_sale(
+        so_id=2, wc_order_id=102, status=SalesOrderStatus.CANCELLED
+    )
+    db.add_line_part(db.next_line_part_id(), live_line, part_id, 3.0)
+    db.add_line_part(db.next_line_part_id(), dead_line, part_id, 99.0)
+    with db.session() as s:
+        # only the live order counts; a cancelled sale needs nothing bought
+        assert db.part_demand(s)[part_id][0] == 3.0
+
+
+def test_virtual_parts_are_not_sellable_from_stock(database):
+    part_id = db.next_part_id()
+    db.create_part(part_id, "LAB", "Labour")
+    db.set_part_virtual(part_id, True)
+    _, line_id = _seed_sale()
+    # a virtual part holds no stock, so there is nothing for a sale to consume
+    with pytest.raises(db.InventoryError):
+        db.add_line_part(db.next_line_part_id(), line_id, part_id, 1.0)
