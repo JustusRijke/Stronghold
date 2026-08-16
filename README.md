@@ -8,7 +8,7 @@ Open-source inventory/stock tracking for small and medium businesses.
 - Maintain a part catalog (SKU + description); every stock item is linked to a
   part
 - Every list (parts, stock, suppliers, supplier parts, purchase orders, build
-  orders) is a
+  orders, sales orders) is a
   data grid with a search box under each column header; each row is a link to its
   detail page (left-click opens it, right-click opens it in a new tab), where all
   editing happens. Below each table a count reads "X of N rows": how many the
@@ -169,12 +169,27 @@ Open-source inventory/stock tracking for small and medium businesses.
   hides supplier parts, stock and purchase orders and offers a price field
   instead. Set an hourly rate there and every assembly listing it is priced
   accordingly; leave it blank and those assemblies stay "partial"
+- Import sales orders from a WooCommerce shop and book what they consumed.
+  WooCommerce stays the authority on the sale itself (customer, status, prices,
+  line items -- all read-only here); what it cannot know is which *parts* a sold
+  product is made of, so you link those by hand, per unit sold. Booking an order
+  then consumes them from stock oldest-first, exactly like a build consumes its
+  components, and each consumed row keeps the price that stock actually cost.
+  Short stock does not block a sale: the shortfall becomes a debt that a later
+  purchase order settles, repricing the sale at what you really paid. Each order
+  page shows margin two ways -- estimated (from the parts' current prices) and,
+  once booked, realised (from what the stock cost) -- with shipping shown but
+  excluded, being a pass-through rather than margin on the goods. Unbooked sales
+  count as demand on the parts overview. The import is a button with a date
+  range (last 7 days by default) and is safe to repeat: new orders are created,
+  unbooked ones refreshed, booked ones left untouched. Connection details go in
+  `settings.toml`, never in the data file
 - A search box (top right) live-searches parts, suppliers, supplier parts,
-  purchase orders, and build orders by text (SKU, description, name, supplier
-  ref -- never by ID, though typing a full order code like "PO-0042" jumps to
-  that order), grouped by type; a checkbox includes inactive
-  records, otherwise only active ones show. Click a result to jump straight
-  to its detail page
+  purchase orders, build orders, and sales orders by text (SKU, description,
+  name, supplier ref, customer -- never by ID, though typing a full order code
+  like "PO-0042" or "SO-0007" jumps to that order), grouped by type; a checkbox
+  includes inactive records, otherwise only active ones show. Click a result to
+  jump straight to its detail page
 - An activity log (clock icon, top right) records what you did -- parts and
   orders created, stock received, builds produced, order lines and BOM
   quantities edited, settings changed -- as a filterable table of

@@ -49,6 +49,26 @@ data_file = "/srv/stronghold/inventory.sql"
 Every key in `settings.toml` is optional and falls back to a default, so the
 file only needs the values you actually want to change.
 
+## Connecting to WooCommerce
+
+Sales orders are imported from a WooCommerce shop. The connection goes in
+`settings.toml` and nowhere else -- these are credentials, and the data file is
+meant to be kept in git:
+
+```toml
+[woocommerce]
+url = "https://shop.example.com"   # the site root, nothing after it
+key = "ck_..."
+secret = "cs_..."
+```
+
+Generate the pair in WooCommerce under **Settings -> Advanced -> REST API**, with
+**Read** permission. Stronghold only ever reads from WooCommerce, so a read-only
+key is all it needs and all it should be given.
+
+Leave the section out (or blank) and the import button simply reports that
+WooCommerce is not configured; the rest of the app is unaffected.
+
 ## Your data is one readable file
 
 `inventory.sql` is your entire inventory as plain, readable text: one line per

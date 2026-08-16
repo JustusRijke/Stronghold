@@ -215,6 +215,27 @@ step when one is actually needed.
   price of the day -- InvenTree keeps no historical rate per build, so that
   baseline is the best figure available. A null (a row written before the
   column existed) still falls back to the part's current estimate.
+- `SalesOrder(id, wc_order_id, wc_number, customer_name, shipping_country,
+  shipping_cost, status, date_created, booked)` -- a WooCommerce order, imported
+  read-only. WooCommerce owns the commercial facts; Stronghold owns only what it
+  cannot know, the parts behind a sold product. Unlike every other master record
+  the `id` is **local** (max+1), not the source system's: this import runs
+  repeatedly into a non-empty database, so WooCommerce ids would collide.
+  `wc_order_id` (unique) carries the link and is what re-import matches on. The
+  code (`SO-0042`) is derived from the pk like `po_ref`/`build_ref`.
+  `SalesOrderLine(id, so_id, wc_line_id, sku, description, unit_price,
+  quantity)` is one WooCommerce line item, replaced wholesale by a re-import
+  (its `sku` is plain text, often empty, and never matched against `Part.sku`).
+  `SalesOrderLinePart(id, line_id, part_id, quantity)` is the manual mapping --
+  the only sales table the user writes to -- quantity being per sold unit, like
+  `BomLine`. `db.book_sales_order` consumes those parts through the same
+  `_consume_fifo` helper `produce_build` uses, stamping `consumed_by_so_id` and
+  producing nothing: a sale ships stock out rather than turning it into
+  something. Shortfalls become the same negative-count debt a short build
+  leaves, settled by a later receipt (`_settle_stock_debt` handles both, keyed
+  by `("build"|"sales-order", id)`, and skips the assembly-reprice step for a
+  sale, which has no output). Unbooked, non-cancelled orders count in
+  `db.part_demand`.
 - `Supplier(id, name)`, `SupplierPart(id, supplier_id, sku, part_id, ...)`
   (int PK; sku is a plain code, not unique), `PurchaseOrder(id, supplier_id,
   ...)`, `POLine(id, po_id, supplier_part_id, quantity, received, price)`,
@@ -294,5 +315,7 @@ Known ceilings, with their upgrade paths, deferred until they actually hurt
   setting appears.
 - In-memory substring filter on the parts page; add an index when parts grow
   large.
-- `_MIGRATIONS` is empty at 1.0: the mechanism ships, the first step arrives
-  with the first change that makes an older file wrong. See "Data versioning".
+- `_MIGRATIONS` now runs to schema 4: 2 dropped the stored order references, 3
+  moved the enum columns from text to int codes, 4 added the sales-order tables
+  (additive, so its step is a no-op -- but it must exist, since `_migrate` walks
+  every version in turn). See "Data versioning".
