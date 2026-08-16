@@ -1,8 +1,13 @@
 <script lang="ts">
 	import { api } from '$lib/api';
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
-	import { STATUS_OPTIONS } from '$lib/validators';
-	import { stockOrderLabel, stockOrderUrl } from '$lib/status';
+	import {
+		stockOrderLabel,
+		stockOrderUrl,
+		STOCK_CONSUMED,
+		stockStatusLabel,
+		STOCK_STATUS_OPTIONS
+	} from '$lib/status';
 
 	type Row = {
 		id: number;
@@ -56,8 +61,10 @@
 			header: 'Status',
 			width: '200px',
 			statusFilter: true,
-			statusOptions: [...STATUS_OPTIONS],
-			statusDefaultHide: ['Consumed by build order']
+			statusOptions: STOCK_STATUS_OPTIONS,
+			statusDefaultHide: [STOCK_CONSUMED],
+			statusLabel: stockStatusLabel,
+			format: (v) => stockStatusLabel(String(v))
 		}
 	];
 </script>

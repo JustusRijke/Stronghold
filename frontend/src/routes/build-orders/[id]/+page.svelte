@@ -6,7 +6,7 @@
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
 	import type { BuildLine, BuildOrder, StockItem } from '$lib/types';
-	import { BUILD_STATUS_OPTIONS as BUILD_STATUS } from '$lib/status';
+	import { BUILD_STATUS_OPTIONS as BUILD_STATUS, STOCK_AVAILABLE } from '$lib/status';
 	import { expert } from '$lib/expert.svelte';
 	import { STATUS_OPTIONS as STOCK_STATUS_OPTIONS } from '$lib/validators';
 
@@ -98,7 +98,7 @@
 	const available = $derived.by(() => {
 		const m = new Map<number, number>();
 		for (const s of stock)
-			if (s.status === 'Available') m.set(s.part_id, (m.get(s.part_id) ?? 0) + s.count);
+			if (s.status === STOCK_AVAILABLE) m.set(s.part_id, (m.get(s.part_id) ?? 0) + s.count);
 		return m;
 	});
 	// stock this build produced, whatever became of it: output later eaten by

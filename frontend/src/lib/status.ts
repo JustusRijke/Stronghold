@@ -16,6 +16,18 @@ export const BUILD_STATUS_OPTIONS = ['Draft', 'Pending', 'Production', 'Cancelle
 // builds in a finished state, hidden by default wherever builds are listed
 export const BUILD_DONE = ['Complete', 'Cancelled'];
 
+// Stock status: the backend stores short codes (models.StockStatus), the user
+// sees these words. Keeping the two apart is why a rewording is not a data
+// migration -- unlike the PO/build statuses above, which still store their label.
+export const STOCK_AVAILABLE = 'available';
+export const STOCK_CONSUMED = 'consumed';
+export const STOCK_STATUS_OPTIONS = [STOCK_AVAILABLE, STOCK_CONSUMED];
+const STOCK_STATUS_LABELS: Record<string, string> = {
+	[STOCK_AVAILABLE]: 'Available',
+	[STOCK_CONSUMED]: 'Consumed'
+};
+export const stockStatusLabel = (v: string) => STOCK_STATUS_LABELS[v] ?? v;
+
 // Where a stock row came from: the PO it was received on, else the build that
 // produced it, else (shortfall debt rows have neither) the build that owes it.
 type StockOrigin = {

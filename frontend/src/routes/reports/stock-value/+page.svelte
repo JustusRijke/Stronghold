@@ -2,7 +2,7 @@
 	import { api } from '$lib/api';
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
 	import type { StockValueReport } from '$lib/types';
-	import { stockOrderLabel, stockOrderUrl } from '$lib/status';
+	import { stockOrderLabel, stockOrderUrl, STOCK_CONSUMED, stockStatusLabel, STOCK_STATUS_OPTIONS } from '$lib/status';
 
 	// Part prices are cached in the database and kept current by the writes that
 	// change them, so the report just reads them -- no calculate step, no
@@ -141,8 +141,10 @@
 			header: 'Stock status',
 			width: '200px',
 			statusFilter: true,
-			statusOptions: ['Available', 'Consumed by build order'],
-			statusDefaultHide: ['Consumed by build order']
+			statusOptions: STOCK_STATUS_OPTIONS,
+			statusDefaultHide: [STOCK_CONSUMED],
+			statusLabel: stockStatusLabel,
+			format: (v) => stockStatusLabel(String(v))
 		}
 	];
 </script>

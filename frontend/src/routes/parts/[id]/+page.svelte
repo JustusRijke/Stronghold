@@ -11,8 +11,16 @@
 	import type { PartBuild, Part, BomLine, BomUsage, POLine, PartPurchaseOrder, PurchaseOrder, StockItem, StockLogEntry, Supplier, SupplierPart } from '$lib/types';
 
 	type PartPO = PartPurchaseOrder & { supplier_name: string };
-	import { BUILD_DONE, BUILD_STATUS_OPTIONS, PO_STATUS_OPTIONS, stockOrderLabel, stockOrderUrl } from '$lib/status';
-	import { STATUS_OPTIONS as STOCK_STATUS_OPTIONS } from '$lib/validators';
+	import {
+		BUILD_DONE,
+		BUILD_STATUS_OPTIONS,
+		PO_STATUS_OPTIONS,
+		stockOrderLabel,
+		stockOrderUrl,
+		STOCK_CONSUMED,
+		stockStatusLabel,
+		STOCK_STATUS_OPTIONS
+	} from '$lib/status';
 
 	const id = $derived(Number($page.params.id));
 
@@ -319,7 +327,9 @@
 			width: '160px',
 			statusFilter: true,
 			statusOptions: [...STOCK_STATUS_OPTIONS],
-			statusDefaultHide: ['Consumed by build order']
+			statusDefaultHide: [STOCK_CONSUMED],
+			statusLabel: stockStatusLabel,
+			format: (v) => stockStatusLabel(String(v))
 		}
 	];
 	const poCols: Column<PartPO>[] = [

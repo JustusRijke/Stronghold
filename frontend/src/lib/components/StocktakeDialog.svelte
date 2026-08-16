@@ -5,6 +5,7 @@
 	import { api } from '$lib/api';
 	import { toast } from '$lib/toast.svelte';
 	import type { StockItem } from '$lib/types';
+	import { STOCK_AVAILABLE } from '$lib/status';
 
 	interface Props {
 		partId: number;
@@ -41,7 +42,7 @@
 	// oldest first, matching the default the backend picks
 	const sources = $derived(
 		items
-			.filter((i) => i.part_id === partId && i.status === 'Available' && i.count > 0)
+			.filter((i) => i.part_id === partId && i.status === STOCK_AVAILABLE && i.count > 0)
 			.sort((a, b) => a.id - b.id)
 	);
 	const source = $derived(sources.find((i) => i.id === Number(sourceId)));
