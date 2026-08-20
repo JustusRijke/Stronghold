@@ -37,9 +37,10 @@ Your part mapping survives a re-import: links are matched to line items by their
 WooCommerce id, not by position. If a line disappears from the WooCommerce order
 entirely, its links go with it and the import reports that it did so.
 
-The connection details (site URL and a read-only API key pair) live in
-`settings.toml`, not in the app -- see the deployment page. They are credentials,
-and the data file is meant to be kept in git.
+The connection details (site URL and a read-only API key pair) are entered on
+the **Settings** page. The key and secret are stored encrypted, so the data file
+you keep in git never holds a readable credential -- see the deployment page for
+the key file that decrypts them.
 
 ## Linking parts to a line
 

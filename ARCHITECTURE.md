@@ -286,12 +286,40 @@ being reachable?
   read once at startup from the `settings.toml` named on the command line
   (stdlib `tomllib`), each key falling back to a default. Relative paths in it
   resolve against its own directory (`Settings.path_of`), so the settings file
-  can live next to the data. See `settings.toml.example`. The whole
-  InvenTree connection (url, username, password) lives here: `inventory.sql`
-  is tracked in git, so credentials must stay out of the database.
+  can live next to the data. See `settings.toml.example`. The InvenTree
+  connection (url, username, password) lives here, but that is a one-shot
+  migration script rather than the app -- see below for how the app's own
+  credentials are handled.
 - **Domain** (`db.DOMAIN_DEFAULTS`): data, e.g. the GUI title. Stored in the
   `settings` table (one row per changed key, unchanged keys read as their
   default), edited on the `/settings` page.
+
+### Credentials
+
+`inventory.sql` is tracked in git, so a credential in the `settings` table
+would be committed. They are therefore **encrypted at rest**:
+`db.SECRET_SETTINGS` names the domain settings that are credentials, and
+`get_setting`/`set_setting` transparently decrypt and encrypt those through
+`backend/crypto.py` (`cryptography.fernet`, so a hand-edited value fails to
+decrypt rather than yielding garbage).
+
+Three consequences worth stating, because each is a deliberate trade:
+
+- **The flag is code, not data.** A `secret` column on the row could be edited
+  to `false` in the data file, and the next export would write the plaintext.
+- **The value never leaves the backend.** `SettingOut` carries `value=""` plus
+  `configured: bool`, so an unchanged form field cannot round-trip a secret
+  back out, and `set_setting` logs that a secret changed without logging either
+  value (the activity log is exported too).
+- **The key is a separate, gitignored file** (`[secrets] key_file`), created at
+  first run with `0600`. Every failure path in `crypto.py` returns `None`
+  rather than raising, so a missing or unusable key degrades to "not
+  configured" and the user re-enters the credential -- it never stops the app
+  starting. That is the whole recovery story: losing the key costs the stored
+  credentials and nothing else.
+
+This is encryption, not hashing, and necessarily so: the WooCommerce client
+sends the real key and secret on every request, so the value has to come back.
 
 ## Logging
 

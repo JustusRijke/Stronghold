@@ -182,8 +182,10 @@ Open-source inventory/stock tracking for small and medium businesses.
   excluded, being a pass-through rather than margin on the goods. Unbooked sales
   count as demand on the parts overview. The import is a button with a date
   range (last 7 days by default) and is safe to repeat: new orders are created,
-  unbooked ones refreshed, booked ones left untouched. Connection details go in
-  `settings.toml`, never in the data file
+  unbooked ones refreshed, booked ones left untouched. The connection is
+  configured on the Settings page; the key and secret are stored **encrypted**
+  (the key that decrypts them is a separate file, never committed), so the data
+  file in git never holds a readable credential
 - A search box (top right) live-searches parts, suppliers, supplier parts,
   purchase orders, build orders, and sales orders by text (SKU, description,
   name, supplier ref, customer -- never by ID, though typing a full order code
