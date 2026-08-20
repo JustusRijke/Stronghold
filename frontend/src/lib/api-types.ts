@@ -883,6 +883,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/woocommerce/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Woocommerce
+         * @description Fetch a single order to prove the stored credentials work, so the user
+         *     can check them without running a real import.
+         */
+        post: operations["test_woocommerce_api_settings_woocommerce_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/stocktake-reasons": {
         parameters: {
             query?: never;
@@ -1620,12 +1641,27 @@ export interface components {
             /** Value */
             value: string;
         };
-        /** SettingOut */
+        /**
+         * SettingOut
+         * @description A domain setting. A credential's `value` is always "" -- the plaintext
+         *     never leaves the backend, so an unchanged form field cannot round-trip it
+         *     back out. `configured` says whether one is stored.
+         */
         SettingOut: {
             /** Key */
             key: string;
             /** Value */
             value: string;
+            /**
+             * Secret
+             * @default false
+             */
+            secret: boolean;
+            /**
+             * Configured
+             * @default false
+             */
+            configured: boolean;
         };
         /** SettleDebtIn */
         SettleDebtIn: {
@@ -3861,6 +3897,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeploymentSettingsOut"];
+                };
+            };
+        };
+    };
+    test_woocommerce_api_settings_woocommerce_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkOut"];
                 };
             };
         };

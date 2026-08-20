@@ -527,14 +527,14 @@ def test_build_flow(client):
     assert r.json()["status"] == "Complete"
 
 
+def _setting(client, key):
+    return next(s for s in client.get("/api/settings").json() if s["key"] == key)
+
+
 def test_settings(client):
-    assert {"key": "gui.title", "value": "Stronghold"} in client.get(
-        "/api/settings"
-    ).json()
+    assert _setting(client, "gui.title")["value"] == "Stronghold"
     client.put("/api/settings/gui.title", json={"value": "My Stock"})
-    assert {"key": "gui.title", "value": "My Stock"} in client.get(
-        "/api/settings"
-    ).json()
+    assert _setting(client, "gui.title")["value"] == "My Stock"
     assert client.put("/api/settings/nope", json={"value": "x"}).status_code == 400
 
 

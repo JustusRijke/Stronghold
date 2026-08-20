@@ -13,6 +13,7 @@ from typing import Literal
 
 import db
 import import_woocommerce
+import woocommerce
 from db import InventoryError
 from fastapi import APIRouter, HTTPException
 from models import (
@@ -475,8 +476,14 @@ class ImportResultOut(BaseModel):
 
 
 class SettingOut(BaseModel):
+    """A domain setting. A credential's `value` is always "" -- the plaintext
+    never leaves the backend, so an unchanged form field cannot round-trip it
+    back out. `configured` says whether one is stored."""
+
     key: str
     value: str
+    secret: bool = False
+    configured: bool = False
 
 
 class SettingIn(BaseModel):
@@ -1814,13 +1821,11 @@ def list_sales_order_stock(so_id: int) -> list[StockItemOut]:
 def import_sales_orders(body: ImportIn) -> ImportResultOut:
     """Fetch orders from WooCommerce and store them. Idempotent: new orders are
     created, unbooked ones updated, booked ones left alone."""
-    if settings is None:  # uvicorn run directly, no create_app
-        raise HTTPException(status_code=400, detail="settings not loaded")
     result = _guard(
         import_woocommerce.import_orders,
-        settings.get("woocommerce", "url"),
-        settings.get("woocommerce", "key"),
-        settings.get("woocommerce", "secret"),
+        db.get_setting("woocommerce.url"),
+        db.get_setting("woocommerce.key"),
+        db.get_setting("woocommerce.secret"),
         body.after,
         body.before,
     )
@@ -1830,18 +1835,22 @@ def import_sales_orders(body: ImportIn) -> ImportResultOut:
 # -- settings ---------------------------------------------------------------
 
 
+def _setting_out(key: str) -> SettingOut:
+    value = db.get_setting(key)
+    if key in db.SECRET_SETTINGS:
+        return SettingOut(key=key, value="", secret=True, configured=bool(value))
+    return SettingOut(key=key, value=value)
+
+
 @router.get("/settings", response_model=list[SettingOut])
 def list_settings() -> list[SettingOut]:
-    return [
-        SettingOut(key=key, value=db.get_setting(key))
-        for key in sorted(db.DOMAIN_DEFAULTS)
-    ]
+    return [_setting_out(key) for key in sorted(db.DOMAIN_DEFAULTS)]
 
 
 @router.put("/settings/{key}", response_model=SettingOut)
 def set_setting(key: str, body: SettingIn) -> SettingOut:
     _guard(db.set_setting, key, body.value)
-    return SettingOut(key=key, value=db.get_setting(key))
+    return _setting_out(key)
 
 
 class StocktakeReasonsOut(BaseModel):
@@ -1875,6 +1884,22 @@ def deployment_settings() -> DeploymentSettingsOut:
         schema_version=SCHEMA_VERSION,
         data_schema_version=db.data_schema_version(),
     )
+
+
+@router.post("/settings/woocommerce/test", response_model=OkOut)
+def test_woocommerce() -> OkOut:
+    """Fetch a single order to prove the stored credentials work, so the user
+    can check them without running a real import."""
+    url = db.get_setting("woocommerce.url")
+    key = db.get_setting("woocommerce.key")
+    secret = db.get_setting("woocommerce.secret")
+    if not url or not key or not secret:
+        raise HTTPException(status_code=400, detail="WooCommerce is not configured")
+    try:
+        woocommerce.fetch_orders(url, key, secret, date.today(), date.today())
+    except Exception as e:  # any transport or auth error is simply a failed test
+        raise HTTPException(status_code=400, detail=f"connection failed: {e}") from e
+    return OkOut(ok=True)
 
 
 @router.get("/settings/stocktake-reasons", response_model=StocktakeReasonsOut)
