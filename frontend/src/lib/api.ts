@@ -202,6 +202,7 @@ export const api = {
 	settings: () => get<Setting[]>('/settings'),
 	deploymentSettings: () => get<DeploymentSettings>('/settings/deployment'),
 	setSetting: (key: string, value: string) => put<Setting>(`/settings/${enc(key)}`, { value }),
+	testWooCommerce: () => post<{ ok: boolean }>('/settings/woocommerce/test', {}),
 
 	// reports
 	stockValue: () => get<StockValueReport>('/reports/stock-value'),
