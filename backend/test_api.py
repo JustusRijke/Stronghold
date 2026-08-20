@@ -1420,3 +1420,35 @@ def test_sale_consumed_stock_reads_as_a_sale_in_the_stock_log(client):
     sale = log[1]
     assert sale["order_label"] == "SO-0001"
     assert sale["order_url"] == f"/sales-orders/{so_id}"
+
+
+def test_credentials_never_leave_the_backend(client):
+    """The settings API reports whether a credential is set, never what it is:
+    a value it sent out could be round-tripped back by an unchanged form."""
+    assert _setting(client, "woocommerce.key") == {
+        "key": "woocommerce.key",
+        "value": "",
+        "secret": True,
+        "configured": False,
+    }
+    client.put("/api/settings/woocommerce.key", json={"value": "ck_supersecret"})
+    after = _setting(client, "woocommerce.key")
+    assert after["configured"] is True
+    assert after["value"] == ""  # still not disclosed
+    # and no route leaks it wholesale
+    assert "ck_supersecret" not in client.get("/api/settings").text
+
+    # the url is an ordinary setting: shown, and not flagged secret
+    client.put("/api/settings/woocommerce.url", json={"value": "https://shop.test"})
+    url = _setting(client, "woocommerce.url")
+    assert url["secret"] is False and url["value"] == "https://shop.test"
+
+    # clearing is explicit
+    client.put("/api/settings/woocommerce.key", json={"value": ""})
+    assert _setting(client, "woocommerce.key")["configured"] is False
+
+
+def test_woocommerce_test_route_needs_configuration(client):
+    """Unconfigured is a 400 with a message, not a crash on an empty URL."""
+    r = client.post("/api/settings/woocommerce/test")
+    assert r.status_code == 400 and "not configured" in r.json()["detail"]
