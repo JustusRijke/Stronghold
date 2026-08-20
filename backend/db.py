@@ -17,6 +17,7 @@ import tempfile
 from datetime import date, datetime
 from pathlib import Path
 
+import crypto
 from models import (
     BUILD_STATUS_CODES,
     PO_STATUS_CODES,
@@ -75,7 +76,21 @@ DOMAIN_DEFAULTS = {
     # "true" lifts the order status transition rules (so a cancelled order can
     # be un-cancelled) and lets stock counts be typed in directly.
     "expert.mode": "false",
+    # The WooCommerce store sales orders are imported from. The url is a plain
+    # setting; the key and secret are credentials -- see SECRET_SETTINGS.
+    "woocommerce.url": "",
+    "woocommerce.key": "",
+    "woocommerce.secret": "",
 }
+
+# Settings holding a credential. Their value is encrypted at rest (crypto.py)
+# because the settings table is exported to the git-tracked .sql, and it is
+# never logged or sent to the frontend.
+#
+# Declared here in code rather than as a column on the row: a flag stored in
+# the data file could be flipped off by hand, and the next export would write
+# the plaintext. Add a key here to make it a credential.
+SECRET_SETTINGS = frozenset({"woocommerce.key", "woocommerce.secret"})
 
 EXPERT_MODE_KEY = "expert.mode"
 
@@ -589,7 +604,15 @@ def get_setting(key: str) -> str:
         raise InventoryError(f"unknown setting '{key}'")
     with session() as s:
         row = s.get(Setting, key)
-    return DOMAIN_DEFAULTS[key] if row is None else row.value
+    if row is None:
+        return DOMAIN_DEFAULTS[key]
+    if key not in SECRET_SETTINGS:
+        return row.value
+    # A credential we cannot decrypt (key file missing, replaced, or the row
+    # hand-edited) reads as unset, so the app reports "not configured" and the
+    # user re-enters it. Raising here would take down every page that reads a
+    # setting over a value that is only recoverable by retyping it.
+    return crypto.decrypt(row.value) or ""
 
 
 @_write
@@ -597,12 +620,29 @@ def set_setting(s: Session, key: str, value: str) -> None:
     if key not in DOMAIN_DEFAULTS:
         raise InventoryError(f"unknown setting '{key}'")
     row = s.get(Setting, key)
+    secret = key in SECRET_SETTINGS
     old = DOMAIN_DEFAULTS[key] if row is None else row.value
+    stored = value
+    if secret and value:
+        stored = crypto.encrypt(value)
+        if stored is None:
+            raise InventoryError(
+                f"cannot store '{key}': no usable secrets key file. See the "
+                f"secrets_key_file setting in settings.toml."
+            )
     if row is None:
-        s.add(Setting(key=key, value=value))
+        s.add(Setting(key=key, value=stored))
     else:
-        row.value = value
-    if value != old:
+        row.value = stored
+    if stored == old:
+        return  # a no-op patch should not manufacture an activity row
+    if secret:
+        # the change is worth recording; the credential is not. Note this
+        # compares ciphertexts, so re-saving the same secret still logs -- two
+        # encryptions of one value differ, and peeking to compare would defeat
+        # the point.
+        _activity(s, "set_setting", f"Setting {key}: value changed", [])
+    else:
         _activity(s, "set_setting", f"Setting {key}: '{old}' -> '{value}'", [])
 
 

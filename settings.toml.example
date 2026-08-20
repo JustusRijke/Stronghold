@@ -20,14 +20,15 @@ auto_commit = false
 [gui]
 port = 8080
 
-[woocommerce]
-# The store sales orders are imported from. Leave blank to disable importing.
-# Generate a READ-ONLY key pair in WooCommerce under
-# Settings -> Advanced -> REST API. These are credentials, so they live here
-# and not in the data file, which is meant to be kept in git.
-url = ""               # site root, e.g. "https://shop.example.com"
-key = ""               # consumer key  (ck_...)
-secret = ""            # consumer secret (cs_...)
+[secrets]
+# Credentials (the WooCommerce key and secret) are entered on the app's
+# Settings page and stored encrypted in the data file. This is the key that
+# decrypts them, created automatically on first run.
+#
+# Do NOT commit it -- it is the one file that makes those encrypted values
+# readable. Back it up separately from your data. If you lose it, the app still
+# runs; you just re-enter the credentials it could no longer read.
+key_file = "secrets.key"
 
 [logging]
 level = "DEBUG"        # DEBUG, INFO, WARNING or ERROR

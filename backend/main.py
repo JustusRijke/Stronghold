@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import api
+import crypto
 import db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -83,6 +84,9 @@ def create_app(settings: Settings) -> FastAPI:
     api.settings = settings
     data_file = settings.path_of("db", "data_file")
     _report_startup(settings, data_file)
+    # before db.init: startup reads settings, and a credential read without a
+    # key loaded would look unset rather than merely unreadable
+    crypto.init(settings.path_of("secrets", "key_file"))
     db.init(data_file, settings.get("db", "auto_commit"))
     # prices are kept current by the writes that change them; recomputing at
     # startup covers rows written outside the app (an import, a restored .sql)
