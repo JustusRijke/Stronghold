@@ -122,8 +122,8 @@ def import_orders(base_url, key, secret, after, before=None) -> dict:
     the same shape the refresh-prices route reports."""
     if not base_url or not key or not secret:
         raise db.InventoryError(
-            "WooCommerce is not configured; set url, key and secret in the "
-            "[woocommerce] section of settings.toml"
+            "WooCommerce is not configured; set the url, key and secret on "
+            "the settings page"
         )
     orders = woocommerce.fetch_orders(base_url, key, secret, after, before)
     result = {"imported": 0, "updated": 0, "skipped": 0, "notes": []}

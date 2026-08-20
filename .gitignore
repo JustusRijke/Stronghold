@@ -39,3 +39,6 @@ go.sh
 
 # Personal scratch list, not a public roadmap
 TODO.md
+
+# the key that decrypts stored credentials -- never commit
+secrets.key

@@ -527,14 +527,14 @@ def test_build_flow(client):
     assert r.json()["status"] == "Complete"
 
 
+def _setting(client, key):
+    return next(s for s in client.get("/api/settings").json() if s["key"] == key)
+
+
 def test_settings(client):
-    assert {"key": "gui.title", "value": "Stronghold"} in client.get(
-        "/api/settings"
-    ).json()
+    assert _setting(client, "gui.title")["value"] == "Stronghold"
     client.put("/api/settings/gui.title", json={"value": "My Stock"})
-    assert {"key": "gui.title", "value": "My Stock"} in client.get(
-        "/api/settings"
-    ).json()
+    assert _setting(client, "gui.title")["value"] == "My Stock"
     assert client.put("/api/settings/nope", json={"value": "x"}).status_code == 400
 
 
@@ -1420,3 +1420,35 @@ def test_sale_consumed_stock_reads_as_a_sale_in_the_stock_log(client):
     sale = log[1]
     assert sale["order_label"] == "SO-0001"
     assert sale["order_url"] == f"/sales-orders/{so_id}"
+
+
+def test_credentials_never_leave_the_backend(client):
+    """The settings API reports whether a credential is set, never what it is:
+    a value it sent out could be round-tripped back by an unchanged form."""
+    assert _setting(client, "woocommerce.key") == {
+        "key": "woocommerce.key",
+        "value": "",
+        "secret": True,
+        "configured": False,
+    }
+    client.put("/api/settings/woocommerce.key", json={"value": "ck_supersecret"})
+    after = _setting(client, "woocommerce.key")
+    assert after["configured"] is True
+    assert after["value"] == ""  # still not disclosed
+    # and no route leaks it wholesale
+    assert "ck_supersecret" not in client.get("/api/settings").text
+
+    # the url is an ordinary setting: shown, and not flagged secret
+    client.put("/api/settings/woocommerce.url", json={"value": "https://shop.test"})
+    url = _setting(client, "woocommerce.url")
+    assert url["secret"] is False and url["value"] == "https://shop.test"
+
+    # clearing is explicit
+    client.put("/api/settings/woocommerce.key", json={"value": ""})
+    assert _setting(client, "woocommerce.key")["configured"] is False
+
+
+def test_woocommerce_test_route_needs_configuration(client):
+    """Unconfigured is a 400 with a message, not a crash on an empty URL."""
+    r = client.post("/api/settings/woocommerce/test")
+    assert r.status_code == 400 and "not configured" in r.json()["detail"]

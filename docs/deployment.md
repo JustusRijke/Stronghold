@@ -51,23 +51,34 @@ file only needs the values you actually want to change.
 
 ## Connecting to WooCommerce
 
-Sales orders are imported from a WooCommerce shop. The connection goes in
-`settings.toml` and nowhere else -- these are credentials, and the data file is
-meant to be kept in git:
+Sales orders are imported from a WooCommerce shop, and the connection is
+configured **on the app's own Settings page**, not here. Generate a read-only
+key pair in WooCommerce under **Settings -> Advanced -> REST API**, then enter
+the site URL, consumer key and consumer secret under "WooCommerce" on
+`/settings`. A **Test connection** button confirms them.
+
+The key and secret are stored **encrypted** in the data file, so the `.sql` you
+keep in git never contains a readable credential. What decrypts them is a
+separate key file, named here:
 
 ```toml
-[woocommerce]
-url = "https://shop.example.com"   # the site root, nothing after it
-key = "ck_..."
-secret = "cs_..."
+[secrets]
+key_file = "secrets.key"
 ```
 
-Generate the pair in WooCommerce under **Settings -> Advanced -> REST API**, with
-**Read** permission. Stronghold only ever reads from WooCommerce, so a read-only
-key is all it needs and all it should be given.
+It is created automatically on first run, next to `settings.toml` by default,
+with owner-only permissions.
 
-Leave the section out (or blank) and the import button simply reports that
-WooCommerce is not configured; the rest of the app is unaffected.
+Three things follow from that:
+
+- **Never commit it.** It is the one file that makes the encrypted values
+  readable. If your data lives in a git repo, add `secrets.key` to that repo's
+  `.gitignore` -- the default location puts it right beside your data.
+- **Back it up separately** from the data file. A backup containing both is a
+  backup of your credentials in plain form.
+- **Losing it is survivable.** The app still starts and everything else keeps
+  working; the WooCommerce credentials simply read as unset and you enter them
+  again on the settings page.
 
 ## Your data is one readable file
 

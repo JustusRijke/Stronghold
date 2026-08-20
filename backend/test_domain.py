@@ -8,6 +8,7 @@ import subprocess
 from datetime import date
 from pathlib import Path
 
+import crypto
 import db
 import import_woocommerce
 import pytest
@@ -32,6 +33,7 @@ from models import (
     SalesOrder,
     SalesOrderLine,
     SalesOrderStatus,
+    Setting,
     StockItem,
     StockStatus,
     po_ref,
@@ -1416,3 +1418,51 @@ def test_import_survives_orders_it_cannot_fully_understand(database):
         assert orders[2].date_created is None
     # and the user is told why, rather than it happening silently
     assert any("checkout-draft" in n for n in result["notes"])
+
+
+def test_credential_settings_are_encrypted_at_rest(database, tmp_path):
+    """A credential must survive the round trip without its plaintext ever
+    reaching the data file -- which is exported to git -- or the activity log."""
+    db.set_setting("woocommerce.url", "https://shop.example.com")
+    db.set_setting("woocommerce.key", "ck_supersecret")
+    db.set_setting("woocommerce.secret", "cs_topsecret")
+
+    assert db.get_setting("woocommerce.key") == "ck_supersecret"
+    assert db.get_setting("woocommerce.secret") == "cs_topsecret"
+    # a plain setting is untouched by any of this
+    assert db.get_setting("woocommerce.url") == "https://shop.example.com"
+
+    with db.session() as s:
+        stored = s.get(Setting, "woocommerce.key").value
+        assert stored != "ck_supersecret"
+        assert stored.startswith("gAAAAA")  # a Fernet token
+        # the change is recorded, the value is not
+        messages = [
+            a.message
+            for a in s.scalars(select(Activity).where(Activity.action == "set_setting"))
+        ]
+    assert "Setting woocommerce.key: value changed" in messages
+    assert not any("ck_supersecret" in m or "cs_topsecret" in m for m in messages)
+    # the url is not a credential, so it is logged in full
+    assert any("https://shop.example.com" in m for m in messages)
+
+    sql = database.read_text(encoding="utf-8")
+    assert "ck_supersecret" not in sql
+    assert "cs_topsecret" not in sql
+    assert "https://shop.example.com" in sql  # the plain one is readable
+
+
+def test_losing_the_key_file_costs_only_the_credentials(database, tmp_path):
+    """The documented failure mode: the key is gone, so the encrypted values
+    are unreadable -- and that is all. The app must not fall over."""
+    db.set_setting("woocommerce.url", "https://shop.example.com")
+    db.set_setting("woocommerce.key", "ck_supersecret")
+
+    crypto.init(tmp_path / "different.key")  # as if the file were lost/replaced
+
+    assert db.get_setting("woocommerce.key") == ""  # unreadable reads as unset
+    assert db.get_setting("woocommerce.url") == "https://shop.example.com"
+    assert db.get_setting("gui.title") == "Stronghold"
+    # and the user can simply enter it again
+    db.set_setting("woocommerce.key", "ck_reentered")
+    assert db.get_setting("woocommerce.key") == "ck_reentered"
