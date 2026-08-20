@@ -53,8 +53,14 @@ Two things are rejected:
 
 - **Virtual parts.** They hold no stock (they are labour rates for build
   costing), so there is nothing for a sale to draw down.
-- **Any change once the order is booked.** The mapping is what the consumption
-  was calculated from; it freezes at that point.
+- **Changing or removing a link once the order is booked.** Those units are
+  already out of stock, so honouring it would mean putting stock back on the
+  shelf and unwinding any shortfall it recorded.
+
+**Adding** a part to a booked order is fine, and is the normal way to correct a
+mapping you got wrong: link what was missing and book again. Booking only ever
+takes what has not been taken yet, so the parts already consumed are left
+alone.
 
 Until an order is booked, its parts count as **demand**: they show up in the
 "Needed" column on the part page and feed the suggested order quantity, the same
@@ -69,6 +75,14 @@ sale happened, but what the goods that went out were bought for.
 
 Nothing is produced. A build turns components into an assembly; a sale simply
 ships stock out.
+
+Booking is also how you mark a sale **handled**. An order with no parts linked
+books perfectly well: nothing leaves stock, and the Booked flag records that you
+have dealt with it. Plenty of sales work that way -- a service, a digital
+product, something shipped from stock you do not track here.
+
+If you link more parts afterwards, the button comes back as **Book added
+parts**: it consumes only the new ones.
 
 ### Booking when you are short
 
@@ -97,6 +111,11 @@ The order page shows margin two ways, side by side:
 | --- | --- | --- |
 | **Estimated** | The linked parts' current estimated prices | As soon as parts are linked |
 | **Realised** | What the stock this sale actually consumed cost | Once the order is booked |
+
+Each is shown as an amount and as a percentage. The percentage is margin over
+revenue -- a sale of 100.00 costing 22.00 reads 78% -- which is the usual retail
+sense of "margin", not markup over cost. The sales list shows the percentage,
+realised once the order is booked and the estimate before that.
 
 Revenue is the line items ex VAT. **Shipping is shown but excluded from margin**:
 what the customer paid for postage is a pass-through, not margin on the goods.

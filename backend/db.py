@@ -2569,11 +2569,17 @@ def _get_so_line(s: Session, line_id: int) -> SalesOrderLine:
 
 
 def _check_unbooked(s: Session, so: SalesOrder) -> None:
-    """Booking consumed stock against the mapping as it stood; letting it change
-    afterwards would leave the consumption describing something that no longer
-    exists."""
+    """Reject changing a link a booking has already acted on.
+
+    Adding a link to a booked order is fine -- booking again consumes the delta
+    (see so_outstanding). Changing or removing one is not: those units are
+    already out of stock, so honouring it would mean un-consuming them, putting
+    stock back on the shelf and unwinding any paired debt row."""
     if so.booked:
-        raise InventoryError(f"sales order {so.id} is booked, cannot edit its parts")
+        raise InventoryError(
+            f"sales order {so.id} is booked; its existing parts can no longer "
+            f"be changed (you can still add parts and book again)"
+        )
 
 
 @_write
@@ -2582,12 +2588,14 @@ def add_line_part(
 ) -> None:
     """Link a part to a sold line item: what this product consumes, per sold
     unit. Manual by design -- WooCommerce knows the SKU it sold, not the parts
-    behind it."""
+    behind it.
+
+    Allowed on a booked order too: booking again consumes what the new link
+    adds, without touching what already went out."""
     if quantity <= 0:
         raise InventoryError("quantity must be positive")
     line = _get_so_line(s, line_id)
     so = get_so(s, line.so_id)
-    _check_unbooked(s, so)
     part = get_part(s, part_id)
     if part.virtual:
         raise InventoryError(f"part {part_id} is virtual and holds no stock")
@@ -2666,12 +2674,45 @@ def so_needs(s: Session, so_id: int) -> dict[int, float]:
     return needs
 
 
+def so_consumed(s: Session, so_id: int) -> dict[int, float]:
+    """{part_id: units} this order has already taken out of stock.
+
+    Consumed rows only: the paired debt row is negative Available, and counting
+    it would cancel out the very shortfall it records."""
+    return {
+        part_id: units
+        for part_id, units in s.execute(
+            select(StockItem.part_id, func.sum(StockItem.count))
+            .where(
+                StockItem.consumed_by_so_id == so_id,
+                StockItem.status == STOCK_CONSUMED,
+            )
+            .group_by(StockItem.part_id)
+        )
+    }
+
+
+def so_outstanding(s: Session, so_id: int) -> dict[int, float]:
+    """{part_id: units} mapped but not yet consumed -- what booking would take.
+
+    Booking is the delta, not the whole mapping, so a part linked after the
+    order was booked is picked up by booking again without re-consuming what
+    already went out."""
+    consumed = so_consumed(s, so_id)
+    out = {}
+    for part_id, need in so_needs(s, so_id).items():
+        remaining = need - consumed.get(part_id, 0.0)
+        if remaining > 1e-9:
+            out[part_id] = remaining
+    return out
+
+
 def so_shortages(s: Session, so_id: int) -> list[tuple[int, str, float, float]]:
     """(part_id, description, needed, in_stock) for every part this order would
     run short of. Read-only: booking goes ahead anyway (the shortfall becomes a
     debt), so this is what the produce-style confirm dialog warns with."""
     out = []
-    for part_id, need in sorted(so_needs(s, so_id).items()):
+    for part_id, need in sorted(so_outstanding(s, so_id).items()):
         have = (
             s.scalar(
                 select(func.coalesce(func.sum(StockItem.count), 0.0)).where(
@@ -2696,22 +2737,27 @@ def book_sales_order(s: Session, so_id: int) -> None:
     no output to cost. Shortages do not block: the missing quantity becomes a
     debt that a later PO receipt settles."""
     so = get_so(s, so_id)
-    if so.booked:
-        raise InventoryError(f"sales order {so_id} is already booked")
-    needs = so_needs(s, so_id)
-    if not needs:
-        raise InventoryError(f"sales order {so_id} has no parts linked to book")
+    # what is mapped but not yet taken. Booking an already-booked order is how
+    # parts linked afterwards get consumed, so this is the delta, not the whole
+    # mapping -- and an order with nothing outstanding is not an error.
+    needs = so_outstanding(s, so_id)
+    if so.booked and not needs:
+        raise InventoryError(f"sales order {so_id} has nothing left to book")
     next_id = (s.scalar(select(func.max(StockItem.id))) or 0) + 1
     for part_id, need in sorted(needs.items()):
         next_id = _consume_fifo(s, part_id, need, next_id, consumed_by_so_id=so_id)
+    was_booked = so.booked
     so.booked = True
     label = so_ref(so_id)
-    _activity(
-        s,
-        "book_sales_order",
-        f"Booked {label}: consumed {len(needs)} part(s) from stock",
-        [("sales-order", so_id, label)],
-    )
+    if not needs:
+        # a sale that consumes nothing is still a sale: booking records that it
+        # has been dealt with (services, digital goods, stock handled elsewhere)
+        message = f"Booked {label}: no parts to consume"
+    elif was_booked:
+        message = f"Booked {label}: consumed {len(needs)} further part(s) from stock"
+    else:
+        message = f"Booked {label}: consumed {len(needs)} part(s) from stock"
+    _activity(s, "book_sales_order", message, [("sales-order", so_id, label)])
 
 
 def so_revenue(s: Session, so_id: int) -> float:

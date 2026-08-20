@@ -1469,6 +1469,8 @@ export interface components {
             date_created: string | null;
             /** Booked */
             booked: boolean;
+            /** Unbooked Parts */
+            unbooked_parts: number;
             /** Revenue */
             revenue: number;
             /** Estimated Cost */
@@ -1479,6 +1481,10 @@ export interface components {
             estimated_margin: number | null;
             /** Realised Margin */
             realised_margin: number | null;
+            /** Estimated Margin Pct */
+            estimated_margin_pct: number | null;
+            /** Realised Margin Pct */
+            realised_margin_pct: number | null;
             /** Required */
             required: number;
         };
@@ -1598,6 +1604,8 @@ export interface components {
             date_created: string | null;
             /** Booked */
             booked: boolean;
+            /** Unbooked Parts */
+            unbooked_parts: number;
             /** Revenue */
             revenue: number;
             /** Estimated Cost */
@@ -1608,6 +1616,10 @@ export interface components {
             estimated_margin: number | null;
             /** Realised Margin */
             realised_margin: number | null;
+            /** Estimated Margin Pct */
+            estimated_margin_pct: number | null;
+            /** Realised Margin Pct */
+            realised_margin_pct: number | null;
         };
         /**
          * SalesShortageOut

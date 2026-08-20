@@ -1452,3 +1452,63 @@ def test_woocommerce_test_route_needs_configuration(client):
     """Unconfigured is a 400 with a message, not a crash on an empty URL."""
     r = client.post("/api/settings/woocommerce/test")
     assert r.status_code == 400 and "not configured" in r.json()["detail"]
+
+
+def test_margin_is_reported_as_a_percentage(client):
+    """Margin over revenue, so a 100.00 sale costing 12.00 reads 88%."""
+    part = client.post("/api/parts", json={"sku": "W1", "description": "Widget"}).json()
+    supplier = client.post("/api/suppliers", json={"name": "Acme"}).json()
+    sp = client.post(
+        "/api/supplier-parts",
+        json={
+            "supplier_id": supplier["id"],
+            "part_id": part["id"],
+            "sku": "A-1",
+            "pack_qty": 1,
+        },
+    ).json()
+    po = client.post(
+        "/api/purchase-orders", json={"supplier_id": supplier["id"], "description": "d"}
+    ).json()
+    client.post(
+        f"/api/purchase-orders/{po['id']}/lines",
+        json={"supplier_part_id": sp["id"], "quantity": 10, "price": 4.0},
+    )
+    line = client.get(f"/api/purchase-orders/{po['id']}/lines").json()[0]
+    client.post(f"/api/po-lines/{line['id']}/book", json={"quantity": 10})
+
+    so_id = _seed_sale(client)  # one line, 50.00 x 1
+    so_line = client.get(f"/api/sales-orders/{so_id}/lines").json()[0]["id"]
+    client.post(
+        f"/api/sales-orders/{so_id}/lines/{so_line}/parts",
+        json={"part_id": part["id"], "quantity": 3},
+    )
+    before = client.get(f"/api/sales-orders/{so_id}").json()
+    # revenue 50, cost 12 -> 76%
+    assert before["estimated_margin_pct"] == 76.0
+    assert before["realised_margin_pct"] is None  # not booked yet
+
+    after = client.post(f"/api/sales-orders/{so_id}/book").json()
+    assert after["realised_margin_pct"] == 76.0
+
+
+def test_booking_stays_available_while_parts_are_outstanding(client):
+    """unbooked_parts is what the page uses to offer 'Book added parts'."""
+    part = client.post("/api/parts", json={"sku": "W1", "description": "Widget"}).json()
+    item = client.post("/api/stock", json={"part_id": part["id"]}).json()
+    client.patch(f"/api/stock/{item['id']}", json={"count": 100})
+    so_id = _seed_sale(client)
+    so_line = client.get(f"/api/sales-orders/{so_id}/lines").json()[0]["id"]
+
+    # an order with nothing linked books anyway, and asks for nothing more
+    assert client.get(f"/api/sales-orders/{so_id}").json()["unbooked_parts"] == 0
+    assert client.post(f"/api/sales-orders/{so_id}/book").json()["booked"] is True
+
+    # linking after booking is allowed and re-opens booking
+    client.post(
+        f"/api/sales-orders/{so_id}/lines/{so_line}/parts",
+        json={"part_id": part["id"], "quantity": 2},
+    )
+    assert client.get(f"/api/sales-orders/{so_id}").json()["unbooked_parts"] == 1
+    client.post(f"/api/sales-orders/{so_id}/book")
+    assert client.get(f"/api/sales-orders/{so_id}").json()["unbooked_parts"] == 0

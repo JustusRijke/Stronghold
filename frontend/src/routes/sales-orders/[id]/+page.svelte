@@ -87,6 +87,8 @@
 	}
 
 	const money = (v: number | null | undefined) => (v == null ? '--' : Number(v).toFixed(2));
+	// margin over revenue; null whenever the cost is unknown or revenue is zero
+	const pct = (v: number | null | undefined) => (v == null ? '--' : `${Number(v).toFixed(1)}%`);
 	const linked = $derived(lines.some((l) => l.parts.length > 0));
 
 	const consumedCols: Column<StockItem>[] = [
@@ -174,6 +176,11 @@
 							<td class="mono">{money(so.estimated_margin)}</td>
 							<td class="mono">{money(so.realised_margin)}</td>
 						</tr>
+						<tr>
+							<th>Margin %</th>
+							<td class="mono">{pct(so.estimated_margin_pct)}</td>
+							<td class="mono">{pct(so.realised_margin_pct)}</td>
+						</tr>
 					</tbody>
 				</table>
 				{#if !so.booked}
@@ -184,9 +191,11 @@
 			<section id="lines">
 				<div class="head">
 					<h2 class="h2">Line items</h2>
-					{#if !so.booked}
-						<button class="btn" onclick={() => dialog?.showModal()} disabled={!linked}>
-							Book order
+					<!-- bookable while unbooked, and again once parts have been added
+					     to an order already booked (booking consumes the delta) -->
+					{#if !so.booked || so.unbooked_parts > 0}
+						<button class="btn" onclick={() => dialog?.showModal()}>
+							{so.booked ? 'Book added parts' : 'Book order'}
 						</button>
 					{/if}
 				</div>
@@ -273,7 +282,7 @@
 								{/if}
 							</tbody>
 						</table>
-						{#if !so.booked && addingTo !== line.id}
+						{#if addingTo !== line.id}
 							<button class="btn ghost small" onclick={() => (addingTo = line.id)}>
 								Link a part
 							</button>
@@ -304,10 +313,18 @@
 	</div>
 
 	<dialog bind:this={dialog} class="book">
-		<h2 class="h2">Book this order?</h2>
+		<h2 class="h2">{so.booked ? 'Book the added parts?' : 'Book this order?'}</h2>
 		<p class="muted">
-			Consumes the linked parts from stock, oldest first. WooCommerce owns the sale
-			itself; this only records what it took off the shelf.
+			{#if so.booked}
+				Consumes what has been linked since this order was booked, oldest stock first.
+				What already went out is untouched.
+			{:else if so.unbooked_parts === 0}
+				No parts are linked, so nothing comes out of stock. Booking just records that
+				this order has been dealt with -- for a sale that consumes no stock of its own.
+			{:else}
+				Consumes the linked parts from stock, oldest first. WooCommerce owns the sale
+				itself; this only records what it took off the shelf.
+			{/if}
 		</p>
 		{#if shortages.length > 0}
 			<div class="warn">

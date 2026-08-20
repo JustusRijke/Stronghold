@@ -38,7 +38,7 @@ from models import (
     StockStatus,
     po_ref,
 )
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy import text as select_text
 from version import RELEASE_VERSION, SCHEMA_VERSION
 
@@ -1284,12 +1284,15 @@ def test_sales_order_flow(database):
         ).one()
         assert json.loads(act.refs)[0]["label"] == "SO-0001"
 
-    # booking twice would consume the stock a second time
+    # re-booking with nothing new mapped would consume the stock twice
     with pytest.raises(db.InventoryError):
         db.book_sales_order(so_id)
-    # and the mapping is frozen once it has been acted on
+    # an existing link is frozen: those units are already out of stock
+    link_id = db.next_line_part_id() - 1
     with pytest.raises(db.InventoryError):
-        db.add_line_part(db.next_line_part_id(), line_id, part_id, 1.0)
+        db.edit_line_part(link_id, 1.0)
+    with pytest.raises(db.InventoryError):
+        db.remove_line_part(link_id)
 
     assert "INSERT INTO sales_orders" in database.read_text(encoding="utf-8")
 
@@ -1466,3 +1469,54 @@ def test_losing_the_key_file_costs_only_the_credentials(database, tmp_path):
     # and the user can simply enter it again
     db.set_setting("woocommerce.key", "ck_reentered")
     assert db.get_setting("woocommerce.key") == "ck_reentered"
+
+
+def test_parts_added_after_booking_are_booked_by_the_delta(database):
+    """Booking a booked order consumes what was linked since -- not the whole
+    mapping again, which would take the first parts out of stock twice."""
+    a = db.next_part_id()
+    db.create_part(a, "A", "Part A")
+    b = db.next_part_id()
+    db.create_part(b, "B", "Part B")
+    with db.session() as s:
+        s.add(StockItem(id=1, count=100.0, part_id=a, unit_price=2.0))
+        s.add(StockItem(id=2, count=100.0, part_id=b, unit_price=3.0))
+        s.commit()
+    so_id, line_id = _seed_sale(qty=2.0)
+
+    db.add_line_part(db.next_line_part_id(), line_id, a, 3.0)  # 2 x 3 = 6 of A
+    db.book_sales_order(so_id)
+    with db.session() as s:
+        assert db.so_consumed(s, so_id) == {a: 6.0}
+        assert db.so_outstanding(s, so_id) == {}
+
+    # linking a part to a booked order is allowed; booking again takes only it
+    db.add_line_part(db.next_line_part_id(), line_id, b, 5.0)  # 2 x 5 = 10 of B
+    with db.session() as s:
+        assert db.so_outstanding(s, so_id) == {b: 10.0}
+    db.book_sales_order(so_id)
+    with db.session() as s:
+        assert db.so_consumed(s, so_id) == {a: 6.0, b: 10.0}
+        # A was not consumed a second time
+        assert s.get(StockItem, 1).count == 94.0
+        assert s.get(StockItem, 2).count == 90.0
+
+    # nothing new mapped: booking again would be a double consumption
+    with pytest.raises(db.InventoryError):
+        db.book_sales_order(so_id)
+
+
+def test_an_order_that_consumes_nothing_can_still_be_booked(database):
+    """Some sales draw no stock (a service, a digital product). Booking one is
+    how the user records that it has been dealt with."""
+    so_id, _ = _seed_sale()
+    db.book_sales_order(so_id)  # no parts linked at all
+    with db.session() as s:
+        assert db.get_so(s, so_id).booked is True
+        assert s.scalar(select(func.count(StockItem.id))) == 0
+        act = s.scalars(
+            select(Activity).where(Activity.action == "book_sales_order")
+        ).one()
+        assert "no parts to consume" in act.message
+    with pytest.raises(db.InventoryError):
+        db.book_sales_order(so_id)

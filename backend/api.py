@@ -407,11 +407,18 @@ class SalesOrderOut(BaseModel):
     status: str
     date_created: date | None
     booked: bool
+    # parts mapped but not yet taken out of stock. Non-zero on a booked order
+    # means parts were linked after booking; booking again consumes them.
+    unbooked_parts: int
     revenue: float  # ex VAT, excluding shipping
     estimated_cost: float | None
     realised_cost: float | None
     estimated_margin: float | None
     realised_margin: float | None
+    # margin over revenue, as a percentage. Null when the cost is unknown or
+    # there is no revenue to be a percentage of.
+    estimated_margin_pct: float | None
+    realised_margin_pct: float | None
 
 
 class PartSalesOrderOut(SalesOrderOut):
@@ -1619,10 +1626,10 @@ def list_build_stock(build_id: int) -> list[StockItemOut]:
 # -- sales orders -----------------------------------------------------------
 
 
-def _so_totals(s) -> tuple[dict, dict, dict]:
-    """(revenue, estimated cost, realised cost) per sales order, as three
-    grouped queries rather than a handful per order -- the list page would
-    otherwise scale with orders times parts-per-order.
+def _so_totals(s) -> tuple[dict, dict, dict, dict]:
+    """(revenue, estimated cost, realised cost, outstanding parts) per sales
+    order, as four grouped queries rather than a handful per order -- the list
+    page would otherwise scale with orders times parts-per-order.
 
     Estimated cost skips a part with no price, matching db.so_cost: a part
     nobody has priced contributes nothing rather than poisoning the sum.
@@ -1666,20 +1673,58 @@ def _so_totals(s) -> tuple[dict, dict, dict]:
             .group_by(StockItem.consumed_by_so_id)
         ).all()
     )
-    return revenue, estimated, realised
+    # what each order still has to take out of stock: mapped minus consumed,
+    # per (order, part). Mirrors db.so_outstanding, batched over every order.
+    mapped = s.execute(
+        select(
+            SalesOrderLine.so_id,
+            SalesOrderLinePart.part_id,
+            func.sum(SalesOrderLinePart.quantity * SalesOrderLine.quantity),
+        )
+        .join(SalesOrderLinePart, SalesOrderLinePart.line_id == SalesOrderLine.id)
+        .group_by(SalesOrderLine.so_id, SalesOrderLinePart.part_id)
+    ).all()
+    taken = {
+        (so_id, part_id): units
+        for so_id, part_id, units in s.execute(
+            select(
+                StockItem.consumed_by_so_id,
+                StockItem.part_id,
+                func.sum(StockItem.count),
+            )
+            .where(
+                StockItem.consumed_by_so_id.is_not(None),
+                StockItem.status == STOCK_CONSUMED,
+            )
+            .group_by(StockItem.consumed_by_so_id, StockItem.part_id)
+        )
+    }
+    outstanding: dict[int, int] = {}
+    for so_id, part_id, units in mapped:
+        if units - taken.get((so_id, part_id), 0.0) > 1e-9:
+            outstanding[so_id] = outstanding.get(so_id, 0) + 1
+    return revenue, estimated, realised, outstanding
 
 
-def _so_out(s, so: SalesOrder, totals: tuple[dict, dict, dict] | None = None):
+def _so_out(s, so: SalesOrder, totals: tuple[dict, dict, dict, dict] | None = None):
     if totals is None:
         revenue = db.so_revenue(s, so.id)
         estimated, realised = db.so_cost(s, so.id)
+        outstanding = len(db.so_outstanding(s, so.id))
     else:
-        revenue_by, estimated_by, realised_by = totals
+        revenue_by, estimated_by, realised_by, outstanding_by = totals
         revenue = revenue_by.get(so.id, 0.0)
         estimated = estimated_by.get(so.id)
         # an unbooked order has consumed nothing, so it has no realised cost --
         # not a cost of zero
         realised = realised_by.get(so.id) if so.booked else None
+        outstanding = outstanding_by.get(so.id, 0)
+
+    def pct(cost):
+        if cost is None or revenue == 0:
+            return None
+        return (revenue - cost) / revenue * 100
+
     return SalesOrderOut(
         id=so.id,
         reference=so_ref(so.id),
@@ -1691,11 +1736,14 @@ def _so_out(s, so: SalesOrder, totals: tuple[dict, dict, dict] | None = None):
         status=so.status,
         date_created=so.date_created,
         booked=so.booked,
+        unbooked_parts=outstanding,
         revenue=revenue,
         estimated_cost=estimated,
         realised_cost=realised,
         estimated_margin=None if estimated is None else revenue - estimated,
         realised_margin=None if realised is None else revenue - realised,
+        estimated_margin_pct=pct(estimated),
+        realised_margin_pct=pct(realised),
     )
 
 

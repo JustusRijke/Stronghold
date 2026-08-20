@@ -178,8 +178,12 @@ Open-source inventory/stock tracking for small and medium businesses.
   Short stock does not block a sale: the shortfall becomes a debt that a later
   purchase order settles, repricing the sale at what you really paid. Each order
   page shows margin two ways -- estimated (from the parts' current prices) and,
-  once booked, realised (from what the stock cost) -- with shipping shown but
-  excluded, being a pass-through rather than margin on the goods. Unbooked sales
+  once booked, realised (from what the stock cost) -- as both an amount and a
+  percentage of revenue, with shipping shown but excluded, being a pass-through
+  rather than margin on the goods. Booking is also how a sale is marked handled:
+  an order with no parts linked books fine and simply consumes nothing. Parts
+  can still be linked after booking -- booking again takes only the new ones,
+  while existing links are frozen (their stock has already gone out). Unbooked sales
   count as demand on the parts overview. The import is a button with a date
   range (last 7 days by default) and is safe to repeat: new orders are created,
   unbooked ones refreshed, booked ones left untouched. The connection is

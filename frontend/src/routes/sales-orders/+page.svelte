@@ -36,7 +36,7 @@
 			status: so.status,
 			revenue: so.revenue,
 			// realised once booked, else the estimate -- whichever we actually know
-			margin: so.realised_margin ?? so.estimated_margin,
+			margin: so.realised_margin_pct ?? so.estimated_margin_pct,
 			booked: so.booked
 		}));
 	}
@@ -78,7 +78,13 @@
 			statusLabel: soStatusLabel
 		},
 		{ key: 'revenue', header: 'Revenue', mono: true, width: '110px', format: (v) => money(v as number) },
-		{ key: 'margin', header: 'Margin', mono: true, width: '110px', format: (v) => money(v as number | null) },
+		{
+			key: 'margin',
+			header: 'Margin',
+			mono: true,
+			width: '100px',
+			format: (v) => (v === null ? '' : `${(v as number).toFixed(1)}%`)
+		},
 		{ key: 'booked', header: 'Booked', bool: true, width: '90px' }
 	];
 </script>
