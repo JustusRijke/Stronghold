@@ -49,9 +49,9 @@
 		]);
 		lines = ls;
 		consumed = stock;
-		// virtual parts hold no stock and are rejected by the backend, so they
-		// are not offered here either
-		parts = allParts.filter((p) => !p.virtual);
+		// virtual parts (labour) are offered too: a sale can consume them, and
+		// the backend records the cost without drawing any stock down
+		parts = allParts;
 		shortages = shorts;
 	}
 	$effect(() => {
@@ -270,6 +270,8 @@
 												rows={parts}
 												label={(p) => `${p.sku ? p.sku + ' - ' : ''}${p.description}`}
 												id={`addpart-${line.id}`}
+												onenter={() => addPart(line.id)}
+												wide
 											/>
 										</td>
 										<td class="num"><input type="number" min="0" step="any" bind:value={newQty} /></td>
@@ -298,8 +300,9 @@
 				{:else}
 					<p class="muted">
 						What this sale took off the shelf, at the price that stock actually cost. A
-						negative Available row is a shortfall still owed; receiving those parts on a
-						purchase order settles it.
+						negative Available row is a shortfall still owed. Receiving those parts on a
+						purchase order settles it automatically; if the stock is already on the
+						shelf (a build produced it, say), settle it by hand from the stock item.
 					</p>
 					<DataTable
 						columns={consumedCols}
@@ -336,9 +339,10 @@
 				</ul>
 				<p class="muted">
 					You can book anyway -- the full quantity is consumed and the missing parts are
-					recorded as negative stock, valued at the part's estimated price. Receiving them
-					on a purchase order clears the shortfall and reprices this sale at what you
-					actually paid.
+					recorded as negative stock, valued at the part's estimated price. Receiving
+					them on a purchase order clears the shortfall automatically; stock that is
+					already on the shelf is settled by hand from the stock item. Either way this
+					sale is repriced at what it actually cost.
 				</p>
 			</div>
 		{/if}
@@ -417,7 +421,8 @@
 	.num {
 		text-align: right;
 	}
-	table.parts input {
+	/* the quantity boxes are narrow and right-aligned */
+	table.parts input[type='number'] {
 		width: 90px;
 		text-align: right;
 	}
