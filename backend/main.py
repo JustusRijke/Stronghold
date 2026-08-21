@@ -35,7 +35,7 @@ async def _lifespan(_app: FastAPI):
     yield
     if db._engine is None:  # startup failed before db.init
         return
-    _log.info("shutting down: writing %s", db._export_path)
+    _log.info("shutting down: writing %s", db._export_dir)
     db.export()
 
 
@@ -72,11 +72,11 @@ def _mount_frontend() -> None:
 
 
 def _report_startup(settings: Settings, data_file: Path) -> None:
-    """Say which version, settings file, data file and log file are in use."""
+    """Say which version, settings file, data directory and log file are in use."""
     log = logging.getLogger(__name__)
     log.info("Stronghold %s (data schema version %s)", APP_VERSION, SCHEMA_VERSION)
     log.info("settings: %s", settings.path)
-    log.info("data file: %s", data_file.resolve())
+    log.info("data: %s", data_file.resolve())
     log.info("log file: %s", settings.path_of("logging", "file").resolve())
 
 

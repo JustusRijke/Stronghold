@@ -1931,7 +1931,9 @@ def deployment_settings() -> DeploymentSettingsOut:
     return DeploymentSettingsOut(
         path=str(settings.path),
         text=settings.text,
-        data_file=str(settings.path_of("db", "data_file").resolve()),
+        # the directory actually in use: naming a pre-split .sql resolves to
+        # the directory beside it. Field name kept -- it is the wire contract.
+        data_file=str(db._export_dir.resolve()),
         app_version=APP_VERSION,
         schema_version=SCHEMA_VERSION,
         data_schema_version=db.data_schema_version(),
