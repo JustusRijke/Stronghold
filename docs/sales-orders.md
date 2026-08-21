@@ -49,10 +49,8 @@ adds one; the quantity is *per unit sold*, so a line that sold 3 of a product
 consuming 2 brackets each needs `2`, and Stronghold works out that the order
 needs 6.
 
-Two things are rejected:
+One thing is rejected:
 
-- **Virtual parts.** They hold no stock (they are labour rates for build
-  costing), so there is nothing for a sale to draw down.
 - **Changing or removing a link once the order is booked.** Those units are
   already out of stock, so honouring it would mean putting stock back on the
   shelf and unwinding any shortfall it recorded.
@@ -65,6 +63,11 @@ alone.
 Linking a part the line already lists **adds to** it rather than complaining:
 link two more of the same nut and the quantity goes from 2 to 4. A line holds
 one quantity per part, so there is never a second row for the same one.
+
+**Virtual parts (labour) can be linked too.** They hold no stock, so nothing is
+drawn down -- but the sale really did cost that time, so booking records it as a
+consumed row at the part's rate and it counts in the cost and margin, exactly
+the way a build records labour.
 
 Until an order is booked, its parts count as **demand**: they show up in the
 "Needed" column on the part page and feed the suggested order quantity, the same
@@ -104,8 +107,11 @@ figure and is deducted from stock value until it is settled.
 
 Receiving those parts on a purchase order settles the debt automatically and
 reprices the consumption to what you actually paid, so the sale stops being
-costed at a guess. You can also settle it from stock already on the shelf -- see
-the stock page.
+costed at a guess.
+
+Stock that arrives any other way -- a build that produced the part, or stock
+that was already on the shelf -- does **not** settle it on its own. Use **Settle
+from stock** on the negative stock item; see the stock page.
 
 ## Margin
 
