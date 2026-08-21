@@ -5,6 +5,7 @@ import json
 import re
 import sqlite3
 import subprocess
+import time
 from datetime import date
 from pathlib import Path
 
@@ -64,7 +65,7 @@ def test_parts_and_stock_flow(database):
         # manual qty adjustments are logged (the 3->7 and 7->3 changes)
         adj = s.scalars(select(Activity).where(Activity.action == "set_count")).all()
         assert len(adj) == 2 and "Adjusted stock" in adj[0].message
-    sql = database.read_text(encoding="utf-8")
+    sql = _exported(database)
     assert "INSERT INTO parts" in sql
     assert "INSERT INTO stock_items" in sql
 
@@ -135,7 +136,7 @@ def test_purchasing_flow(database):
         db.edit_po_line(line_id, 999)
     with pytest.raises(db.InventoryError):
         db.edit_po(1, status="Cancelled", start_date=date.today())
-    sql = database.read_text(encoding="utf-8")
+    sql = _exported(database)
     assert "INSERT INTO bookings" in sql
 
 
@@ -167,7 +168,7 @@ def test_bom_flow(database):
         lines = db.bom_for(s, 1)
         assert len(lines) == 1
         assert lines[0][1] == 2 and lines[0][4] == 5.0
-    sql = database.read_text(encoding="utf-8")
+    sql = _exported(database)
     assert "INSERT INTO bom_lines" in sql
 
 
@@ -292,7 +293,7 @@ def test_build_flow(database):
         ).all()
         # the consumed rows keep pointing at the build that PRODUCED them
         assert {c.build_id for c in eaten} == {build_id}
-    sql = database.read_text(encoding="utf-8")
+    sql = _exported(database)
     assert "INSERT INTO build_orders" in sql
 
 
@@ -698,7 +699,7 @@ def test_export_restore_roundtrip(database, tmp_path):
     db.create_part(1, "BOLT-M3", "M3 bolt")
     db.create_item(1, 1)
     db.set_count(1, 4)
-    sql = database.read_text(encoding="utf-8")
+    sql = _exported(database)
     # restore into a raw empty db: the export's CREATE TABLEs must stand alone,
     # and the INSERTs must survive omitting NULL/derived columns
     fresh = tmp_path / "restored.db"
@@ -706,6 +707,49 @@ def test_export_restore_roundtrip(database, tmp_path):
         conn.executescript(sql)
     with sqlite3.connect(fresh) as conn:
         assert conn.execute("SELECT count FROM stock_items").fetchone()[0] == 4
+
+
+def test_a_write_touches_only_the_files_it_changes(database):
+    """The point of the split: a write must leave the tables it did not touch
+    alone on disk, or the per-table layout buys nothing over one big file.
+    (A stock write is *not* an example -- it refreshes Part.estimated_price,
+    so parts.sql legitimately changes with it.)"""
+    db.create_part(1, "BOLT-M3", "M3 bolt")
+    db.create_supplier(1, "Acme")
+    untouched = ("parts", "stock_items")
+    # mtime, not content: the exporter would rewrite these to the same bytes,
+    # which is exactly the churn the skip exists to avoid
+    time.sleep(0.01)  # filesystem timestamp granularity
+    before = {t: (database / f"{t}.sql").stat().st_mtime_ns for t in untouched}
+
+    db.edit_supplier(1, "Acme Ltd")
+
+    assert "Acme Ltd" in _table_sql(database, "suppliers")
+    after = {t: (database / f"{t}.sql").stat().st_mtime_ns for t in untouched}
+    assert after == before
+
+
+def test_a_pre_split_single_sql_file_still_opens(tmp_path):
+    """Data written before the split is one inventory.sql. It must open, and be
+    re-exported as a directory beside it -- without deleting the original."""
+    legacy = tmp_path / "inventory.sql"
+    db.init(tmp_path / "inventory")  # write a current dataset ...
+    db.create_part(1, "BOLT-M3", "M3 bolt")
+    db.create_item(1, 1)
+    db.set_count(1, 4)
+    legacy.write_text(_exported(tmp_path / "inventory"), encoding="utf-8")
+    for stale in (tmp_path / "inventory").glob("*.sql"):  # ... then keep only it
+        stale.unlink()
+    (tmp_path / "inventory").rmdir()
+
+    db.init(legacy)
+
+    assert db._export_dir == tmp_path / "inventory"
+    with db.session() as s:
+        assert s.get(Part, 1).sku == "BOLT-M3"
+        assert s.get(StockItem, 1).count == 4
+    assert legacy.exists()  # the app never deletes data it did not write
+    assert "BOLT-M3" in _table_sql(tmp_path / "inventory", "parts")
 
 
 def test_startup_rebuilds_db_from_sql(database):
@@ -769,21 +813,21 @@ def test_suspended_export_still_persists_on_force(database):
     nothing and the data file was left empty."""
     db.suspend_export()
     db.create_part(1, "BULK", "loaded in bulk")
-    assert "BULK" not in database.read_text(encoding="utf-8")  # suspended
+    assert "BULK" not in _exported(database)  # suspended
     db.export(force=True)
-    assert "BULK" in database.read_text(encoding="utf-8")
+    assert "BULK" in _exported(database)
 
     # a later init must clear the suspension, or writes stop being persisted
     db.init(database)
     db.create_part(2, "AFTER", "written after re-init")
-    assert "AFTER" in database.read_text(encoding="utf-8")
+    assert "AFTER" in _exported(database)
 
 
 def test_data_file_is_version_stamped(database):
     """The data file records what wrote it: a comment for whoever opens the
     file, and settings rows the app reads back."""
     db.create_part(1, "BOLT-M3", "M3 bolt")
-    text = database.read_text(encoding="utf-8")
+    text = _exported(database)
 
     assert f"data schema version {SCHEMA_VERSION}" in text.splitlines()[1]
     assert f"'{db.SCHEMA_VERSION_KEY}', '{SCHEMA_VERSION}'" in text
@@ -808,9 +852,7 @@ def test_older_data_file_is_migrated_on_open(database, monkeypatch):
 
     assert len(ran) == 1
     assert db.data_schema_version() == SCHEMA_VERSION
-    assert f"'{db.SCHEMA_VERSION_KEY}', '{SCHEMA_VERSION}'" in database.read_text(
-        encoding="utf-8"
-    )
+    assert f"'{db.SCHEMA_VERSION_KEY}', '{SCHEMA_VERSION}'" in _exported(database)
 
 
 def test_v1_data_file_drops_the_stored_order_references(tmp_path):
@@ -819,7 +861,7 @@ def test_v1_data_file_drops_the_stored_order_references(tmp_path):
     A *removed* column is the case that breaks a plain replay: these INSERTs
     name `reference`, which no longer exists, so without the scaffold in
     _import_sql the whole startup dies before _migrate can run."""
-    data_file = tmp_path / "inventory.sql"
+    data_file = tmp_path / "inventory"
     db.init(data_file)
     db.create_part(1, "ASM", "an assembly")
     db.set_part_assembly(1, True)
@@ -829,18 +871,28 @@ def test_v1_data_file_drops_the_stored_order_references(tmp_path):
 
     # rewrite the export as the 1.0 app wrote it: the reference column back in
     # each order's INSERT, carrying codes a user could edit (and had)
-    text = data_file.read_text(encoding="utf-8")
-    text = text.replace(
-        "INSERT INTO purchase_orders (id, supplier_id",
-        "INSERT INTO purchase_orders (reference, id, supplier_id",
-    ).replace("VALUES (7, 1", "VALUES ('whatever-they-typed', 7, 1")
-    text = text.replace(
-        "INSERT INTO build_orders (id, part_id",
-        "INSERT INTO build_orders (reference, id, part_id",
-    ).replace("VALUES (3, 1", "VALUES ('BO-XXXX', 3, 1")
-    data_file.write_text(text, encoding="utf-8")
+    _write_table_sql(
+        data_file,
+        "purchase_orders",
+        _table_sql(data_file, "purchase_orders")
+        .replace(
+            "INSERT INTO purchase_orders (id, supplier_id",
+            "INSERT INTO purchase_orders (reference, id, supplier_id",
+        )
+        .replace("VALUES (7, 1", "VALUES ('whatever-they-typed', 7, 1"),
+    )
+    _write_table_sql(
+        data_file,
+        "build_orders",
+        _table_sql(data_file, "build_orders")
+        .replace(
+            "INSERT INTO build_orders (id, part_id",
+            "INSERT INTO build_orders (reference, id, part_id",
+        )
+        .replace("VALUES (3, 1", "VALUES ('BO-XXXX', 3, 1"),
+    )
     _set_stamp(data_file, 1)
-    assert "whatever-they-typed" in data_file.read_text(encoding="utf-8")
+    assert "whatever-they-typed" in _exported(data_file)
 
     db.init(data_file)
 
@@ -851,7 +903,7 @@ def test_v1_data_file_drops_the_stored_order_references(tmp_path):
         assert s.get(BuildOrder, 3).quantity == 2
         assert not hasattr(s.get(PurchaseOrder, 7), "reference")
     # the hand-edited codes are gone for good, replaced by the derived ones
-    text = data_file.read_text(encoding="utf-8")
+    text = _exported(data_file)
     assert "whatever-they-typed" not in text and "BO-XXXX" not in text
     assert po_ref(7) == "PO-0007"
 
@@ -882,7 +934,7 @@ def test_v2_data_file_stores_enum_columns_as_ints(tmp_path):
     dynamically typed, so the old text sits happily in an INTEGER column), so
     the danger is it passing unnoticed -- every status comparison would then
     silently match nothing."""
-    data_file = tmp_path / "inventory.sql"
+    data_file = tmp_path / "inventory"
     db.init(data_file)
     db.create_part(1, "BOLT-M3", "M3 bolt")
     db.create_supplier(1, "Acme")
@@ -917,27 +969,28 @@ def test_v2_data_file_stores_enum_columns_as_ints(tmp_path):
             _code_of(BUILD_STATUS_CODES, b): b.value for b in BuildStatus
         },
     }
-    out = []
-    for line in data_file.read_text(encoding="utf-8").splitlines(keepends=True):
-        m = re.match(r"INSERT INTO (\w+) \(([^)]*)\) VALUES \((.*)\);", line)
-        if m and any(t == m.group(1) for t, _ in v2_text):
-            cols = [c.strip() for c in m.group(2).split(", ")]
-            vals = _split_values(m.group(3))
-            for i, col in enumerate(cols):
-                mapping = v2_text.get((m.group(1), col))
-                if mapping is None:
-                    continue
-                code = int(vals[i])
-                vals[i] = f"'{mapping[code]}'" if code != EnumCode.UNSET else "''"
-            joined = ", ".join(vals)
-            line = (
-                f"INSERT INTO {m.group(1)} ({m.group(2)}) "  # noqa: S608
-                f"VALUES ({joined});\n"
-            )
-        out.append(line)
-    data_file.write_text("".join(out), encoding="utf-8")
+    for table in {t for t, _ in v2_text}:
+        out = []
+        for line in _table_sql(data_file, table).splitlines(keepends=True):
+            m = re.match(r"INSERT INTO (\w+) \(([^)]*)\) VALUES \((.*)\);", line)
+            if m:
+                cols = [c.strip() for c in m.group(2).split(", ")]
+                vals = _split_values(m.group(3))
+                for i, col in enumerate(cols):
+                    mapping = v2_text.get((table, col))
+                    if mapping is None:
+                        continue
+                    code = int(vals[i])
+                    vals[i] = f"'{mapping[code]}'" if code != EnumCode.UNSET else "''"
+                joined = ", ".join(vals)
+                line = (
+                    f"INSERT INTO {table} ({m.group(2)}) "  # noqa: S608
+                    f"VALUES ({joined});\n"
+                )
+            out.append(line)
+        _write_table_sql(data_file, table, "".join(out))
     _set_stamp(data_file, 2)
-    assert "'Consumed by build order'" in data_file.read_text(encoding="utf-8")
+    assert "'Consumed by build order'" in _exported(data_file)
 
     db.init(data_file)
 
@@ -957,7 +1010,7 @@ def test_v2_data_file_stores_enum_columns_as_ints(tmp_path):
         assert stored[0] == "integer"
         assert stored[1] == _code_of(STOCK_STATUS_CODES, StockStatus.CONSUMED)
     # and no prose survives in the file
-    written = data_file.read_text(encoding="utf-8")
+    written = _exported(data_file)
     assert "Consumed by build order" not in written
     assert "'Placed'" not in written and "'Production'" not in written
 
@@ -967,19 +1020,22 @@ def test_v2_migration_also_converts_the_enum_values_themselves(tmp_path):
     prose ("Available") and, briefly, the enum's own value ("available"). The
     step first mapped only the prose, so a file holding the latter kept its
     text and every stock read then failed on the way out."""
-    data_file = tmp_path / "inventory.sql"
+    data_file = tmp_path / "inventory"
     db.init(data_file)
     db.create_part(1, "BOLT-M3", "M3 bolt")
     db.create_item(1, 1)
     db.set_count(1, 20)
 
     code = _code_of(STOCK_STATUS_CODES, StockStatus.AVAILABLE)
-    text = data_file.read_text(encoding="utf-8").replace(
-        f", 1, {code}, ", f", 1, '{StockStatus.AVAILABLE.value}', "
+    _write_table_sql(
+        data_file,
+        "stock_items",
+        _table_sql(data_file, "stock_items").replace(
+            f", 1, {code}, ", f", 1, '{StockStatus.AVAILABLE.value}', "
+        ),
     )
-    data_file.write_text(text, encoding="utf-8")
     _set_stamp(data_file, 2)
-    assert f"'{StockStatus.AVAILABLE.value}'" in data_file.read_text(encoding="utf-8")
+    assert f"'{StockStatus.AVAILABLE.value}'" in _exported(data_file)
 
     db.init(data_file)
 
@@ -1006,11 +1062,12 @@ def test_unstamped_data_file_opens_as_version_one(database):
     """Every file written before stamping existed matches the 1.0 schema, so it
     is read as version 1 and migrated up from there like any other old file."""
     db.create_part(1, "BOLT-M3", "M3 bolt")
-    text = database.read_text(encoding="utf-8")
     stripped = "\n".join(
-        line for line in text.splitlines() if db.SCHEMA_VERSION_KEY not in line
+        line
+        for line in _table_sql(database, "settings").splitlines()
+        if db.SCHEMA_VERSION_KEY not in line
     )
-    database.write_text(stripped + "\n", encoding="utf-8")
+    _write_table_sql(database, "settings", stripped + "\n")
 
     db.init(database)
     # migrated to current, and the part survived the trip
@@ -1025,8 +1082,27 @@ def test_release_version_has_no_dev_suffix():
     assert re.fullmatch(r"\d+\.\d+\.\d+", RELEASE_VERSION)
 
 
-def _set_stamp(sql_path, schema_version):
-    """Rewrite the exported file's schema stamp, as an older/newer app would."""
+def _exported(data_dir):
+    """The whole export as one string: the per-table files in dependency order,
+    which is exactly what a restore concatenates."""
+    return "".join(
+        _table_sql(data_dir, table.name)
+        for table in db.Base.metadata.sorted_tables
+        if (data_dir / f"{table.name}.sql").exists()
+    )
+
+
+def _table_sql(data_dir, table):
+    return (data_dir / f"{table}.sql").read_text(encoding="utf-8")
+
+
+def _write_table_sql(data_dir, table, text):
+    (data_dir / f"{table}.sql").write_text(text, encoding="utf-8")
+
+
+def _set_stamp(data_dir, schema_version):
+    """Rewrite the exported schema stamp, as an older/newer app would."""
+    sql_path = data_dir / "settings.sql"
     text = sql_path.read_text(encoding="utf-8")
     old = f"'{db.SCHEMA_VERSION_KEY}', '{SCHEMA_VERSION}'"
     new = f"'{db.SCHEMA_VERSION_KEY}', '{schema_version}'"
@@ -1048,7 +1124,7 @@ def test_auto_commit(tmp_path):
     git("init", "-q")
     git("config", "user.email", "t@t")
     git("config", "user.name", "T")
-    db.init(tmp_path / "inventory.sql", auto_commit=True)
+    db.init(tmp_path / "inventory", auto_commit=True)
     db.create_part(1, "BOLT-M3", "M3 bolt")
     db.set_setting("gui.title", "Warehouse")
     db.edit_part(1, "M3 bolt, zinc")  # no activity record
@@ -1060,7 +1136,7 @@ def test_auto_commit(tmp_path):
 
     # committing the data into the app's own repo is never what the user meant
     with pytest.raises(ValueError, match="app repo"):
-        db.init(Path(db.__file__).parent / "inventory.sql", auto_commit=True)
+        db.init(Path(db.__file__).parent / "inventory", auto_commit=True)
 
 
 def test_startup_commit_says_what_startup_did(tmp_path):
@@ -1082,7 +1158,7 @@ def test_startup_commit_says_what_startup_did(tmp_path):
     git("init", "-q")
     git("config", "user.email", "t@t")
     git("config", "user.name", "T")
-    data_file = tmp_path / "inventory.sql"
+    data_file = tmp_path / "inventory"
     db.init(data_file, auto_commit=True)
     db.create_part(1, "BOLT-M3", "M3 bolt")
     assert git("log", "--format=%s").splitlines()[0] == "Created part M3 bolt"
@@ -1100,7 +1176,8 @@ def test_startup_commit_says_what_startup_did(tmp_path):
     assert git("log", "--format=%s").splitlines()[0] == log[0]
 
 
-def _strip_stamps(sql_path):
+def _strip_stamps(data_dir):
+    sql_path = data_dir / "settings.sql"
     text = sql_path.read_text(encoding="utf-8")
     kept = [
         line
@@ -1128,19 +1205,17 @@ def test_uncommitted_changes_are_committed_before_reload(tmp_path):
     git("init", "-q")
     git("config", "user.email", "t@t")
     git("config", "user.name", "T")
-    data_file = tmp_path / "inventory.sql"
+    data_file = tmp_path / "inventory"
     db.init(data_file, auto_commit=True)
     db.create_part(1, "BOLT-M3", "M3 bolt")
 
     marker = "-- edited outside the app"
-    data_file.write_text(
-        data_file.read_text(encoding="utf-8") + marker + "\n", encoding="utf-8"
-    )
+    _write_table_sql(data_file, "parts", _table_sql(data_file, "parts") + marker + "\n")
     db.init(data_file, auto_commit=True)  # a restart: replays, then overwrites
 
     rescued = git("log", "--format=%h %s").splitlines()[1]
     assert rescued.endswith(db._UNCOMMITTED_MESSAGE)
-    assert marker in git("show", f"{rescued.split()[0]}:{data_file.name}")
+    assert marker in git("show", f"{rescued.split()[0]}:{data_file.name}/parts.sql")
 
 
 def test_non_purchasable_part(database):
@@ -1295,7 +1370,7 @@ def test_sales_order_flow(database):
     with pytest.raises(db.InventoryError):
         db.remove_line_part(link_id)
 
-    assert "INSERT INTO sales_orders" in database.read_text(encoding="utf-8")
+    assert "INSERT INTO sales_orders" in _exported(database)
 
 
 def test_sales_order_short_debt_settled_by_purchase(database):
@@ -1468,7 +1543,7 @@ def test_credential_settings_are_encrypted_at_rest(database, tmp_path):
     # the url is not a credential, so it is logged in full
     assert any("https://shop.example.com" in m for m in messages)
 
-    sql = database.read_text(encoding="utf-8")
+    sql = _exported(database)
     assert "ck_supersecret" not in sql
     assert "cs_topsecret" not in sql
     assert "https://shop.example.com" in sql  # the plain one is readable
