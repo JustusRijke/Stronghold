@@ -294,6 +294,18 @@ and fractional stock quantities (rounded to int `count`), are skipped/adjusted
 and listed in a printed report. Cancelled build orders are dropped; a fractional
 build quantity aborts the import (assemblies are whole).
 
+`backend/import_bom_notes.py` is a second one-shot, added when BOM line notes
+arrived after the migration had already run:
+
+    uv run python import_bom_notes.py <url> <username> <password> <settings.toml>
+
+It is non-destructive -- it opens an existing dataset the way the app does and
+only fills in notes on BOM lines it can match by (parent part, component part),
+which works because the migration copied the InvenTree pks verbatim. A line
+that already has a note here is left alone, so it never overwrites hand-typed
+text. Like the migration, it is exempt from the data-versioning rules: do not
+maintain it against later schema changes.
+
 ## No hard deletes (soft-delete convention)
 
 Records are never physically deleted, so no reference can dangle and the
