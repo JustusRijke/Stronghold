@@ -162,6 +162,7 @@ def migrate(url: str, username: str, password: str, data_file: Path) -> None:
                     parent_part_id=b["parent"],
                     component_part_id=b["component"],
                     quantity=float(b["quantity"]),
+                    note=b["note"],
                 )
             )
 
