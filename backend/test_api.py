@@ -29,13 +29,21 @@ def test_parts_crud_and_bom(client):
 
     # bom add / edit / delete
     client.post(
-        f"/api/parts/{asm}/bom", json={"component_part_id": comp, "quantity": 2}
+        f"/api/parts/{asm}/bom",
+        json={"component_part_id": comp, "quantity": 2, "note": "fit last"},
     )
     bom = client.get(f"/api/parts/{asm}/bom").json()
     assert len(bom) == 1 and bom[0]["component_sku"] == "C1"
+    assert bom[0]["note"] == "fit last"
     line_id = bom[0]["id"]
     client.patch(f"/api/bom/{line_id}", json={"quantity": 5})
     assert client.get(f"/api/parts/{asm}/bom").json()[0]["quantity"] == 5
+    # note edits independently of quantity, and blanks back to empty
+    client.patch(f"/api/bom/{line_id}", json={"note": "M3x8 only"})
+    line = client.get(f"/api/parts/{asm}/bom").json()[0]
+    assert line["note"] == "M3x8 only" and line["quantity"] == 5
+    client.patch(f"/api/bom/{line_id}", json={"note": ""})
+    assert client.get(f"/api/parts/{asm}/bom").json()[0]["note"] == ""
     client.delete(f"/api/bom/{line_id}")
     assert client.get(f"/api/parts/{asm}/bom").json() == []
 

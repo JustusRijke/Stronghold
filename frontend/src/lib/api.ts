@@ -101,10 +101,12 @@ export const api = {
 
 	// bom
 	bom: (partId: number) => get<BomLine[]>(`/parts/${partId}/bom`),
-	addBom: (partId: number, b: { component_part_id: number; quantity: number }) =>
+	addBom: (partId: number, b: { component_part_id: number; quantity: number; note?: string }) =>
 		post<BomLine[]>(`/parts/${partId}/bom`, b),
 	setBomQty: (lineId: number, quantity: number) =>
 		patch<{ ok: boolean }>(`/bom/${lineId}`, { quantity }),
+	setBomNote: (lineId: number, note: string) =>
+		patch<{ ok: boolean }>(`/bom/${lineId}`, { note }),
 	removeBom: (lineId: number) => del<{ ok: boolean }>(`/bom/${lineId}`),
 
 	// stock

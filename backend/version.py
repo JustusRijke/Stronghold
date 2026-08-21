@@ -26,7 +26,8 @@ from importlib.metadata import PackageNotFoundError, version
 # indexes count NULLs as distinct, so "no sku" is not a clash). parts.sku is
 # unique globally, supplier_parts.sku only within its supplier -- two suppliers
 # may use the same code, one supplier may not.
-SCHEMA_VERSION = 5
+# 6 added the optional bom_lines.note. Purely additive, like 4.
+SCHEMA_VERSION = 6
 
 try:
     APP_VERSION = version("stronghold")

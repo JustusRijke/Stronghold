@@ -260,6 +260,9 @@ class BomLine(Base):
     parent_part_id: Mapped[int] = mapped_column(ForeignKey(Part.id))
     component_part_id: Mapped[int] = mapped_column(ForeignKey(Part.id))
     quantity: Mapped[float]
+    # free text from the assembly's designer ("fit last", "M3x8 only"). Optional
+    # and never interpreted -- it rides along to the BOM table and nowhere else.
+    note: Mapped[str | None] = mapped_column(default=None)
 
 
 class StockStatus(StrEnum):
