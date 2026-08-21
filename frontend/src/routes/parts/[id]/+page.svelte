@@ -54,6 +54,7 @@
 	// new-bom-line inputs
 	let newComp = $state<number | ''>('');
 	let newQty = $state(1);
+	let newNote = $state('');
 
 	// "add PO" dialog: ask how many to purchase, then either bump an existing
 	// line on an open PO (Pending/Placed/On Hold) for this part's supplier(s),
@@ -250,7 +251,8 @@
 			mono: true,
 			width: '110px',
 			format: (v, r) => price(v as number | null, r.price_partial)
-		}
+		},
+		{ key: 'note', header: 'Note', edit: 'text', truncate: true }
 	];
 	const spCols: Column<SupplierPart & { supplier_name: string }>[] = [
 		{ key: 'sku', header: 'SKU', mono: true, width: '150px' },
@@ -455,15 +457,23 @@
 	async function addBomLine() {
 		if (newComp === '') return;
 		if (
-			await toast.run(() => api.addBom(id, { component_part_id: Number(newComp), quantity: newQty }))
+			await toast.run(() =>
+				api.addBom(id, {
+					component_part_id: Number(newComp),
+					quantity: newQty,
+					note: newNote
+				})
+			)
 		) {
 			newComp = '';
 			newQty = 1;
+			newNote = '';
 			bom = await api.bom(id);
 		}
 	}
-	async function setQty(lineId: number, q: number) {
-		await toast.run(() => api.setBomQty(lineId, q));
+	async function editBomLine(lineId: number, key: string, value: string | number | boolean) {
+		if (key === 'note') await toast.run(() => api.setBomNote(lineId, String(value)));
+		else await toast.run(() => api.setBomQty(lineId, Number(value)));
 	}
 	async function removeLine(lineId: number) {
 		if (!confirm('Remove this component?')) return;
@@ -600,7 +610,7 @@
 						rows={bom}
 						href={(l) => `/parts/${l.component_part_id}`}
 						storageKey={`/parts/${id}/bom`}
-						onEdit={(line, _key, value) => setQty(line.id, Number(value))}
+						onEdit={(line, key, value) => editBomLine(line.id, key, value)}
 						onRemove={(line) => removeLine(line.id)}
 					/>
 					<div class="bomrow add">
@@ -611,6 +621,7 @@
 							{/each}
 						</select>
 						<input class="qty" type="number" min="0" step="any" bind:value={newQty} />
+						<input type="text" placeholder="Note (optional)" bind:value={newNote} />
 						<button class="btn" onclick={addBomLine}>Add component</button>
 					</div>
 				</section>
