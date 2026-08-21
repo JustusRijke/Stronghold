@@ -34,6 +34,25 @@ export class ApiError extends Error {
 	}
 }
 
+// A domain rejection (400) has a plain string detail. A schema rejection (422)
+// has a LIST of {loc, msg, ...} objects instead, which stringifies to
+// "[object Object]" -- so pull the messages out and name the field they came
+// from, since the user cannot see the request body.
+function errorText(detail: unknown): string | undefined {
+	if (typeof detail === 'string') return detail;
+	if (!Array.isArray(detail)) return undefined;
+	const parts = detail
+		.map((e) => {
+			const msg = typeof e?.msg === 'string' ? e.msg : null;
+			if (!msg) return null;
+			// loc is like ["body", "quantity"]; the last entry is the field
+			const field = Array.isArray(e.loc) ? e.loc[e.loc.length - 1] : null;
+			return field && field !== 'body' ? `${field}: ${msg}` : msg;
+		})
+		.filter(Boolean);
+	return parts.length ? parts.join('; ') : undefined;
+}
+
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
 	const res = await fetch(`/api${path}`, {
 		method,
@@ -43,7 +62,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 	if (!res.ok) {
 		let detail = res.statusText;
 		try {
-			detail = (await res.json()).detail ?? detail;
+			detail = errorText((await res.json()).detail) ?? detail;
 		} catch {
 			/* non-JSON error body */
 		}

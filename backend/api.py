@@ -451,13 +451,17 @@ class SalesOrderLineOut(BaseModel):
     parts: list[LinePartOut]
 
 
+# quantity is deliberately unconstrained here: db.add_line_part and
+# db.edit_line_part already reject a non-positive one, and their message says
+# what is wrong in plain words. A Field(gt=0) would pre-empt them with a schema
+# 422, which is a worse error for the same mistake.
 class LinePartIn(BaseModel):
     part_id: int
-    quantity: float = Field(gt=0)
+    quantity: float
 
 
 class LinePartPatch(BaseModel):
-    quantity: float = Field(gt=0)
+    quantity: float
 
 
 class SalesShortageOut(BaseModel):

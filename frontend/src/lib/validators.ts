@@ -34,10 +34,10 @@ export const ImportIn = v.object({
 	});
 export const LinePartIn = v.object({
 	part_id: v.pipe(v.number(), v.integer()),
-	quantity: v.pipe(v.number(), v.gtValue(0, 'must be greater than 0')),
+	quantity: v.number(),
 	});
 export const LinePartPatch = v.object({
-	quantity: v.pipe(v.number(), v.gtValue(0, 'must be greater than 0')),
+	quantity: v.number(),
 	});
 export const NegativeStockIn = v.object({
 	part_id: v.pipe(v.number(), v.integer()),
