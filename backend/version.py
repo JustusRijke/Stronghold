@@ -22,7 +22,11 @@ from importlib.metadata import PackageNotFoundError, version
 # and stock_items.consumed_by_so_id). Purely additive, so there is nothing to
 # migrate -- but the stamp still moves, so an older Stronghold refuses the file
 # instead of dropping every sale on its next export.
-SCHEMA_VERSION = 4
+# 5 made the sku columns optional and unique: blank skus become NULL (the unique
+# indexes count NULLs as distinct, so "no sku" is not a clash). parts.sku is
+# unique globally, supplier_parts.sku only within its supplier -- two suppliers
+# may use the same code, one supplier may not.
+SCHEMA_VERSION = 5
 
 try:
     APP_VERSION = version("stronghold")

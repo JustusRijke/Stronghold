@@ -14,6 +14,7 @@ from enum import StrEnum
 from sqlalchemy import (
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     TypeDecorator,
@@ -208,7 +209,9 @@ class Setting(Base):
 
 class Part(Base):
     """The master catalog record every stock item references. The id is a local
-    max+1 primary key; sku is a plain human code that need not be unique.
+    max+1 primary key; sku is an optional human code, unique when set (a blank
+    is stored as NULL, and SQLite treats every NULL as distinct, so any number
+    of parts may go without one -- see db._normalise_sku).
     assembly marks a part built from other parts (its BomLine rows list the
     components). virtual marks a part with unlimited stock (e.g. labour): it
     never has a stock item and is only used for BOM price calculation; builds
@@ -219,7 +222,7 @@ class Part(Base):
     __tablename__ = "parts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    sku: Mapped[str] = mapped_column(String(64))
+    sku: Mapped[str | None] = mapped_column(String(64))
     description: Mapped[str]
     active: Mapped[bool] = mapped_column(default=True)
     assembly: Mapped[bool] = mapped_column(default=False)
@@ -229,6 +232,13 @@ class Part(Base):
     # server_default so restoring a pre-purchasable inventory.sql (whose INSERTs
     # do not name the column) still loads: existing parts default to purchasable
     purchasable: Mapped[bool] = mapped_column(default=True, server_default="1")
+    # A named index rather than unique=True on the column: SQLite renders that
+    # as an inline table constraint, which ALTER TABLE cannot drop. db.init has
+    # to take the index down before replaying an older file (whose rows may
+    # still hold the duplicate skus that migration 5 clears), so it
+    # must be droppable -- see db._SKU_INDEXES.
+    __table_args__ = (Index("ix_parts_sku_unique", "sku", unique=True),)
+
     # cached unit price, recomputed on the writes that can change it (see
     # db.refresh_part_price): the latest PO price for a bought part, the BOM
     # roll-up for an assembly. None means nothing prices it yet.
@@ -334,15 +344,23 @@ class Supplier(Base):
 
 class SupplierPart(Base):
     """A supplier's product for one of our parts. id mirrors the InvenTree
-    supplierpart pk during migration; sku is the supplier's own code (a plain
-    human code like Part.sku -- not unique; InvenTree data has placeholder skus
-    like "N/A" repeated per supplier)."""
+    supplierpart pk during migration; sku is the supplier's own code, optional
+    and unique *per supplier* -- two suppliers may well use the same code for
+    the same thing, but one supplier using it twice is a mistake. A blank sku
+    is stored as NULL, and NULLs do not collide, so one supplier may have any
+    number of parts with no code (see db._normalise_sku)."""
 
     __tablename__ = "supplier_parts"
 
+    # Unique per supplier, and droppable for the same reason Part's is: an
+    # older file still holds the duplicate skus migration 5 clears.
+    __table_args__ = (
+        Index("ix_supplier_parts_sku_unique", "supplier_id", "sku", unique=True),
+    )
+
     id: Mapped[int] = mapped_column(primary_key=True)
     supplier_id: Mapped[int] = mapped_column(ForeignKey(Supplier.id))
-    sku: Mapped[str] = mapped_column(String(64))
+    sku: Mapped[str | None] = mapped_column(String(64))
     part_id: Mapped[int] = mapped_column(ForeignKey(Part.id))
     description: Mapped[str] = mapped_column(default="")
     ean: Mapped[str] = mapped_column(default="")

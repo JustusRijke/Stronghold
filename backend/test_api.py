@@ -809,12 +809,12 @@ def test_part_price_cache(client):
     assert client.get(f"/api/parts/{bolt['id']}").json()["estimated_price"] == 0.1
 
     # a later order repricing it updates the cache on write
-    _priced_part(client, sup, "BOLT", price=1.0)  # unrelated part, same sku text
+    _priced_part(client, sup, "BOLT2", price=1.0)  # unrelated part
     sp2 = client.post(
         "/api/supplier-parts",
         json={
             "supplier_id": sup["id"],
-            "sku": "SP-BOLT2",
+            "sku": "SP-BOLT-REPRICE",
             "part_id": bolt["id"],
             "description": "",
             "ean": "",
@@ -1507,3 +1507,90 @@ def test_booking_stays_available_while_parts_are_outstanding(client):
     assert client.get(f"/api/sales-orders/{so_id}").json()["unbooked_parts"] == 1
     client.post(f"/api/sales-orders/{so_id}/book")
     assert client.get(f"/api/sales-orders/{so_id}").json()["unbooked_parts"] == 0
+
+
+def test_sku_is_optional_but_unique(client):
+    # a part needs no sku at all, and any number may go without one
+    a = client.post("/api/parts", json={"description": "no sku"}).json()
+    b = client.post("/api/parts", json={"description": "also none"}).json()
+    assert a["sku"] is None and b["sku"] is None
+
+    # a blank sku means "no sku", so blanks never collide
+    for blank in ("", "  "):
+        p = client.post("/api/parts", json={"sku": blank, "description": "x"}).json()
+        assert p["sku"] is None
+
+    # a real sku is stored, trimmed, and can only be used once
+    one = client.post(
+        "/api/parts", json={"sku": " M3-BOLT ", "description": "1"}
+    ).json()
+    assert one["sku"] == "M3-BOLT"
+    clash = client.post("/api/parts", json={"sku": "M3-BOLT", "description": "2"})
+    assert clash.status_code == 400 and "already used" in clash.json()["detail"]
+
+    # ...including by patching an existing part onto a taken sku
+    assert (
+        client.patch(f"/api/parts/{a['id']}", json={"sku": "M3-BOLT"}).status_code
+        == 400
+    )
+    # but re-saving a part's own sku is not a clash
+    assert (
+        client.patch(f"/api/parts/{one['id']}", json={"sku": "M3-BOLT"}).status_code
+        == 200
+    )
+
+    # an explicit null clears it, freeing the sku for another part
+    assert (
+        client.patch(f"/api/parts/{one['id']}", json={"sku": None}).json()["sku"]
+        is None
+    )
+    assert (
+        client.post(
+            "/api/parts", json={"sku": "M3-BOLT", "description": "3"}
+        ).status_code
+        == 201
+    )
+
+
+def test_supplier_part_sku_is_optional_but_unique_per_supplier(client):
+    a = client.post("/api/suppliers", json={"name": "A"}).json()["id"]
+    b = client.post("/api/suppliers", json={"name": "B"}).json()["id"]
+    part = client.post("/api/parts", json={"description": "p"}).json()["id"]
+
+    def add(supplier_id, sku):
+        return client.post(
+            "/api/supplier-parts",
+            json={"supplier_id": supplier_id, "sku": sku, "part_id": part},
+        )
+
+    # one supplier may have any number of parts with no sku
+    assert add(a, None).json()["sku"] is None
+    assert add(a, "").json()["sku"] is None
+    assert add(a, "   ").json()["sku"] is None
+
+    # a real sku is unique within the supplier...
+    assert add(a, "X-1").json()["sku"] == "X-1"
+    clash = add(a, "X-1")
+    assert (
+        clash.status_code == 400
+        and "already used by this supplier" in clash.json()["detail"]
+    )
+
+    # ...but two suppliers may each use it: it is their own code, not ours
+    assert add(b, "X-1").json()["sku"] == "X-1"
+
+    # an existing supplier part's sku is editable, and a blank clears it
+    sp = add(a, "OLD").json()["id"]
+    assert (
+        client.patch(f"/api/supplier-parts/{sp}", json={"sku": "NEW"}).json()["sku"]
+        == "NEW"
+    )
+    taken = client.patch(f"/api/supplier-parts/{sp}", json={"sku": "X-1"})
+    assert (
+        taken.status_code == 400
+        and "already used by this supplier" in taken.json()["detail"]
+    )
+    assert (
+        client.patch(f"/api/supplier-parts/{sp}", json={"sku": ""}).json()["sku"]
+        is None
+    )

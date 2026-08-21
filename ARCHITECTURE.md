@@ -193,7 +193,9 @@ step when one is actually needed.
 
 - `Part(id, sku, description, active, assembly, virtual, purchasable)` -- the
   master catalog record every stock item references. `id` is a local max+1
-  primary key; `sku` is a plain human code. `assembly` marks a part built from
+  primary key; `sku` is an optional human code, unique when set -- a blank is
+  stored as NULL, and SQLite counts every NULL as distinct, so any number of
+  parts may have none. `assembly` marks a part built from
   other parts; `virtual` marks one with unlimited stock (e.g. labour) that never
   has a stock item and is only used for BOM pricing -- builds never consume it.
   `assembly` and `virtual` are mutually exclusive. `purchasable` (default true)
@@ -256,7 +258,13 @@ step when one is actually needed.
   sale, which has no output). Unbooked, non-cancelled orders count in
   `db.part_demand`.
 - `Supplier(id, name)`, `SupplierPart(id, supplier_id, sku, part_id, ...)`
-  (int PK; sku is a plain code, not unique), `PurchaseOrder(id, supplier_id,
+  (int PK; `sku` is the supplier's own code -- optional, and unique *per
+  supplier* rather than globally: two suppliers may use the same code for the
+  same thing, one supplier using it twice is a mistake. A blank is NULL, as in
+  `Part.sku`; a duplicate that is not blank -- a repeated "N/A" placeholder,
+  say -- is cleared by migration 5 and reported in the log, since what counts
+  as a placeholder is the user's convention, not the app's),
+  `PurchaseOrder(id, supplier_id,
   ...)`, `POLine(id, po_id, supplier_part_id, quantity, received, price)`,
   `Booking` -- the buy side. Every PK is an integer, matching InvenTree's pks
   so the migration can copy them verbatim. Receiving a PO line creates a stock
@@ -362,7 +370,17 @@ Known ceilings, with their upgrade paths, deferred until they actually hurt
   setting appears.
 - In-memory substring filter on the parts page; add an index when parts grow
   large.
-- `_MIGRATIONS` now runs to schema 4: 2 dropped the stored order references, 3
+- `_MIGRATIONS` now runs to schema 5: 2 dropped the stored order references, 3
   moved the enum columns from text to int codes, 4 added the sales-order tables
   (additive, so its step is a no-op -- but it must exist, since `_migrate` walks
-  every version in turn). See "Data versioning".
+  every version in turn), 5 made `parts.sku` optional and unique. See "Data
+  versioning".
+- Step 5 needed the mirror image of the `_DROPPED_COLUMNS` scaffold: an older
+  file may hold rows that *violate* a constraint the current schema has (many
+  parts sharing an empty sku), so the replay would fail before `_migrate` could
+  clean them. `_import_sql` therefore drops the unique indexes in
+  `db._SKU_INDEXES` before replaying and `db._rebuild_sku_indexes` recreates
+  them afterwards -- on every startup, since the drop is unconditional. That is
+  also why each constraint is a named `Index` rather than `unique=True` on the
+  column: SQLite renders the latter inline, where `ALTER TABLE` cannot reach
+  it.

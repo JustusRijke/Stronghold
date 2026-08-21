@@ -327,7 +327,8 @@
 							id="newline-sp"
 							bind:value={newSpId}
 							rows={supplierParts}
-							label={(p) => (p.description ? `${p.sku} - ${p.description}` : p.sku)}
+							label={(p) =>
+								p.sku && p.description ? `${p.sku} - ${p.description}` : p.sku || p.description}
 							placeholder="Supplier part…"
 						/>
 						<input class="qty" type="number" min="1" bind:value={newQty} />

@@ -51,7 +51,7 @@
 	let newPartDesc = $state('');
 	async function createPart() {
 		try {
-			const p = await api.createPart({ sku: newPartSku, description: newPartDesc });
+			const p = await api.createPart({ sku: newPartSku.trim() || null, description: newPartDesc });
 			parts = [p, ...parts];
 			partId = p.id;
 			newPart = false;
@@ -67,7 +67,7 @@
 		try {
 			const sp = await api.createSupplierPart({
 				supplier_id: Number(supplierId),
-				sku,
+				sku: sku.trim() || null,
 				part_id: Number(partId),
 				description,
 				ean,
@@ -93,7 +93,7 @@
 	<PickerNew title="New supplier" bind:open={newSupplier} onsave={createSupplier}>
 		<label class="field req"><span>Name</span><input bind:value={newSupplierName} /></label>
 	</PickerNew>
-	<label class="field req"><span>Supplier SKU</span><input required bind:value={sku} /></label>
+	<label class="field"><span>Supplier SKU</span><input bind:value={sku} placeholder="optional, unique per supplier" /></label>
 	<label class="field"><span>Description</span><input bind:value={description} /></label>
 	<label class="field req">
 		<span>Part</span>
