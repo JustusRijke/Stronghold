@@ -88,7 +88,7 @@ files are still written and replayed in dependency order, for determinism
 rather than necessity.
 
 **The `.sql` files are the source of truth, and the directory holding them is
-the only path the user names.** `settings.toml` configures `db.data_file` (the
+the only path the user names.** `settings.toml` configures `db.data_path` (the
 directory); SQLite is an internal detail. `db.init` builds a working `.db`
 from scratch under `tempfile.gettempdir()/stronghold/`, named
 `<stem>-<hash of the directory's absolute path>.db` so two datasets never
@@ -98,7 +98,7 @@ collide, and replays the files into it on every startup. Nothing but the
 step, and no second file that can disagree.
 
 Data written before the split is a single `inventory.sql`. Pointing
-`db.data_file` at that file still works: it is replayed once and re-exported
+`db.data_path` at that file still works: it is replayed once and re-exported
 as a directory of the same name beside it. The original is left untouched --
 the app never deletes data it did not write -- and can be removed by hand.
 

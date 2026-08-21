@@ -71,23 +71,23 @@ def _mount_frontend() -> None:
         return FileResponse(index)
 
 
-def _report_startup(settings: Settings, data_file: Path) -> None:
+def _report_startup(settings: Settings, data_path: Path) -> None:
     """Say which version, settings file, data directory and log file are in use."""
     log = logging.getLogger(__name__)
     log.info("Stronghold %s (data schema version %s)", APP_VERSION, SCHEMA_VERSION)
     log.info("settings: %s", settings.path)
-    log.info("data: %s", data_file.resolve())
+    log.info("data: %s", data_path.resolve())
     log.info("log file: %s", settings.path_of("logging", "file").resolve())
 
 
 def create_app(settings: Settings) -> FastAPI:
     api.settings = settings
-    data_file = settings.path_of("db", "data_file")
-    _report_startup(settings, data_file)
+    data_path = settings.path_of("db", "data_path")
+    _report_startup(settings, data_path)
     # before db.init: startup reads settings, and a credential read without a
     # key loaded would look unset rather than merely unreadable
     crypto.init(settings.path_of("secrets", "key_file"))
-    db.init(data_file, settings.get("db", "auto_commit"))
+    db.init(data_path, settings.get("db", "auto_commit"))
     # prices are kept current by the writes that change them; recomputing at
     # startup covers rows written outside the app (an import, a restored .sql)
     db.refresh_all_prices()
