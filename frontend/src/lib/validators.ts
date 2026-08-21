@@ -55,7 +55,7 @@ export const POLinePatch = v.object({
 	price: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
 	});
 export const PartIn = v.object({
-	sku: v.string(),
+	sku: v.optional(v.nullable(v.string())),
 	description: v.optional(v.string()),
 	virtual: v.optional(v.boolean()),
 	});
@@ -115,7 +115,7 @@ export const SupplierIn = v.object({
 	});
 export const SupplierPartIn = v.object({
 	supplier_id: v.pipe(v.number(), v.integer()),
-	sku: v.string(),
+	sku: v.optional(v.nullable(v.string())),
 	part_id: v.pipe(v.number(), v.integer()),
 	description: v.optional(v.string()),
 	ean: v.optional(v.string()),
@@ -123,6 +123,7 @@ export const SupplierPartIn = v.object({
 	pack_qty: v.optional(v.pipe(v.number(), v.integer(), v.gtValue(0, 'must be greater than 0'))),
 	});
 export const SupplierPartPatch = v.object({
+	sku: v.optional(v.nullable(v.string())),
 	part_id: v.optional(v.nullable(v.pipe(v.number(), v.integer()))),
 	description: v.optional(v.nullable(v.string())),
 	ean: v.optional(v.nullable(v.string())),

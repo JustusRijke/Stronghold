@@ -1356,7 +1356,7 @@ export interface components {
         /** PartIn */
         PartIn: {
             /** Sku */
-            sku: string;
+            sku?: string | null;
             /**
              * Description
              * @default
@@ -1373,7 +1373,7 @@ export interface components {
             /** Id */
             id: number;
             /** Sku */
-            sku: string;
+            sku: string | null;
             /** Description */
             description: string;
             /** Active */
@@ -1879,7 +1879,7 @@ export interface components {
             /** Supplier Id */
             supplier_id: number;
             /** Sku */
-            sku: string;
+            sku?: string | null;
             /** Part Id */
             part_id: number;
             /**
@@ -1910,7 +1910,7 @@ export interface components {
             /** Supplier Id */
             supplier_id: number;
             /** Sku */
-            sku: string;
+            sku: string | null;
             /** Part Id */
             part_id: number;
             /** Part Sku */
@@ -1934,6 +1934,8 @@ export interface components {
         };
         /** SupplierPartPatch */
         SupplierPartPatch: {
+            /** Sku */
+            sku?: string | null;
             /** Part Id */
             part_id?: number | null;
             /** Description */

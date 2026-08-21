@@ -76,7 +76,7 @@ def _guard(fn, *args, **kwargs):
 
 class PartOut(BaseModel):
     id: int
-    sku: str
+    sku: str | None  # optional, unique when set
     description: str
     active: bool
     assembly: bool
@@ -92,7 +92,7 @@ class PartOut(BaseModel):
 
 
 class PartIn(BaseModel):
-    sku: str
+    sku: str | None = None
     description: str = ""
     virtual: bool = False
 
@@ -241,7 +241,7 @@ class SupplierPatch(BaseModel):
 class SupplierPartOut(BaseModel):
     id: int
     supplier_id: int
-    sku: str
+    sku: str | None
     part_id: int
     part_sku: str
     part_description: str
@@ -256,7 +256,7 @@ class SupplierPartOut(BaseModel):
 
 class SupplierPartIn(BaseModel):
     supplier_id: int
-    sku: str
+    sku: str | None = None  # optional, unique per supplier
     part_id: int
     description: str = ""
     ean: str = ""
@@ -265,6 +265,9 @@ class SupplierPartIn(BaseModel):
 
 
 class SupplierPartPatch(BaseModel):
+    # explicit null clears the sku, so "absent" and "clear" must stay
+    # distinguishable -- hence the model_fields_set check in the route
+    sku: str | None = None
     part_id: int | None = None
     description: str | None = None
     ean: str | None = None
@@ -599,7 +602,7 @@ def create_part(body: PartIn) -> PartOut:
 
 @router.patch("/parts/{part_id}", response_model=PartOut)
 def patch_part(part_id: int, body: PartPatch) -> PartOut:
-    if body.sku is not None:
+    if "sku" in body.model_fields_set:  # explicit null clears it
         _guard(db.set_part_sku, part_id, body.sku)
     if body.description is not None:
         _guard(db.edit_part, part_id, body.description)
@@ -653,7 +656,7 @@ def list_part_used_in(part_id: int) -> list[BomUsageOut]:
             BomUsageOut(
                 line_id=line.id,
                 parent_part_id=parent.id,
-                parent_sku=parent.sku,
+                parent_sku=parent.sku or "",
                 parent_description=parent.description,
                 quantity=line.quantity,
             )
@@ -1060,7 +1063,7 @@ def _stock_out(row) -> StockItemOut:
     return StockItemOut(
         id=i.id,
         part_id=i.part_id,
-        sku=sku,
+        sku=sku or "",
         description=desc,
         count=i.count,
         po_id=i.po_id,
@@ -1287,6 +1290,8 @@ def create_supplier_part(body: SupplierPartIn) -> SupplierPartOut:
 def patch_supplier_part(sp_id: int, body: SupplierPartPatch) -> SupplierPartOut:
     if body.active is not None:
         _guard(db.set_supplier_part_active, sp_id, body.active)
+    if "sku" in body.model_fields_set:  # explicit null clears it
+        _guard(db.set_supplier_part_sku, sp_id, body.sku)
     if any(
         v is not None
         for v in (
@@ -1422,7 +1427,7 @@ def _po_lines(po_id: int) -> list[POLineOut]:
             id=line.id,
             po_id=line.po_id,
             supplier_part_id=line.supplier_part_id,
-            supplier_sku=sku,
+            supplier_sku=sku or "",
             pack_qty=pack_qty,
             quantity=line.quantity,
             received=line.received,
@@ -2046,7 +2051,7 @@ def stock_value_report() -> StockValueReport:
         StockValueRow(
             item_id=item.id,
             part_id=item.part_id,
-            sku=sku,
+            sku=sku or "",
             description=description,
             count=item.count,
             status=item.status,
@@ -2142,9 +2147,8 @@ def search(q: str = "", include_inactive: bool = False) -> list[SearchResult]:
         if not include_inactive:
             parts_q = parts_q.where(Part.active)
         for p in s.scalars(parts_q.limit(SEARCH_LIMIT)):
-            results.append(
-                SearchResult(type="part", id=p.id, label=f"{p.sku} - {p.description}")
-            )
+            label = f"{p.sku} - {p.description}" if p.sku else p.description
+            results.append(SearchResult(type="part", id=p.id, label=label))
 
         suppliers_q = select(Supplier).where(_matches_all_words(q, Supplier.name))
         if not include_inactive:
@@ -2158,11 +2162,8 @@ def search(q: str = "", include_inactive: bool = False) -> list[SearchResult]:
         if not include_inactive:
             sp_q = sp_q.where(SupplierPart.active)
         for x in s.scalars(sp_q.limit(SEARCH_LIMIT)):
-            results.append(
-                SearchResult(
-                    type="supplier_part", id=x.id, label=f"{x.sku} - {x.description}"
-                )
-            )
+            label = f"{x.sku} - {x.description}" if x.sku else x.description
+            results.append(SearchResult(type="supplier_part", id=x.id, label=label))
 
         # An order code is derived from the pk, so there is no column to match:
         # "PO-0042" (and a bare "42" once prefixed) resolves to an id instead.

@@ -163,6 +163,7 @@ def init(sql_path: Path, auto_commit: bool = False) -> None:
         _import_sql()
         was = _read_stamps()
         _migrate()
+        _rebuild_sku_indexes()
     _export_dir.mkdir(parents=True, exist_ok=True)
     _stamp_versions()
     # startup's export is not a domain write, so it says what it actually did
@@ -195,8 +196,16 @@ def _import_sql() -> None:
     file *does* have and we have since dropped is the hard case: its INSERTs
     would fail outright, killing startup before _migrate could fix anything. So
     every dropped column is temporarily put back before the replay and dropped
-    again by its migration step -- see _DROPPED_COLUMNS."""
+    again by its migration step -- see _DROPPED_COLUMNS.
+
+    A unique index has the same shape of problem from the other side: a file
+    written before parts.sku became unique may hold rows that violate it (272
+    parts sharing an empty sku, in the dataset this was built for), and the
+    replay would fail before _migrate could clear them. So the index comes down
+    here and migration 5 puts it back once the data is clean."""
     with sqlite3.connect(_db_path) as conn:
+        for index in _SKU_INDEXES:
+            conn.execute(f"DROP INDEX IF EXISTS {index}")
         for table, column, ddl_type in _dropped_columns():
             # unconditional: the stamp is only readable once the data is in.
             # Harmless for a current file -- the column stays empty and its
@@ -217,6 +226,15 @@ def _import_sql() -> None:
             if path.exists():
                 conn.executescript(path.read_text(encoding="utf-8"))
     _log.info("loaded %s (working copy: %s)", _export_dir, _db_path)
+
+
+# The unique sku indexes, dropped before a replay and rebuilt afterwards (see
+# _import_sql and _rebuild_sku_indexes). Named in the models' __table_args__.
+# parts.sku is unique globally; supplier_parts.sku only within one supplier.
+_SKU_INDEXES = {
+    "ix_parts_sku_unique": "parts (sku)",
+    "ix_supplier_parts_sku_unique": "supplier_parts (supplier_id, sku)",
+}
 
 
 def _dropped_columns() -> list[tuple[str, str, str]]:
@@ -324,6 +342,56 @@ def _to_v3(s: Session) -> None:
 # built the current tables before the replay, which is also why Alembic buys us
 # nothing here. The exception is a dropped column, which needs both halves:
 # an _import_sql scaffold and a step here to take it down again.
+def _rebuild_sku_indexes() -> None:
+    """Put back the unique indexes _import_sql dropped for the replay. Runs on
+    every startup, not just a migration: the drop is unconditional, so a
+    current file would otherwise come up without its constraints. By now the
+    data satisfies them -- an older file was cleaned by _clean_skus, and
+    anything written since was checked on the way in by _validate_sku /
+    _validate_supplier_sku."""
+    with Session(_engine) as s, s.begin():
+        for index, target in _SKU_INDEXES.items():
+            s.execute(text(f"CREATE UNIQUE INDEX IF NOT EXISTS {index} ON {target}"))
+
+
+def _to_v5(s: Session) -> None:
+    """The sku columns became optional and unique. parts.sku is unique
+    globally; supplier_parts.sku only within its supplier."""
+    _clean_skus(s, "parts", None)
+    _clean_skus(s, "supplier_parts", "supplier_id")
+
+
+def _clean_skus(s: Session, table: str, scope: str | None) -> None:
+    """Make table.sku fit a unique index: blanks become NULL (those never
+    clash), and a sku already taken within the same
+    scope is kept on the lowest id and cleared on the rest -- the index rebuilt
+    right after would otherwise reject the data outright and kill startup.
+    scope is the column uniqueness is per (supplier_id), or None for globally
+    unique. Clearing is reported: it drops values the user typed."""
+    columns = f"id, sku, {scope}" if scope else "id, sku"
+    seen: set[tuple] = set()
+    for row in s.execute(text(f"SELECT {columns} FROM {table} ORDER BY id")).all():  # noqa: S608
+        row_id, sku = row[0], row[1]
+        keep = _normalise_sku(sku)
+        key = (row[2] if scope else None, keep)
+        if keep is not None and key in seen:
+            _log.warning(
+                "%s %d: sku %r is already used%s; clearing it",
+                table,
+                row_id,
+                keep,
+                f" by an earlier row with the same {scope}" if scope else "",
+            )
+            keep = None
+        if keep is not None:
+            seen.add(key)
+        if keep != sku:
+            s.execute(
+                text(f"UPDATE {table} SET sku = :sku WHERE id = :id"),  # noqa: S608
+                {"sku": keep, "id": row_id},
+            )
+
+
 _MIGRATIONS = {
     2: lambda s: _drop_columns(s, 2),
     3: _to_v3,
@@ -332,6 +400,7 @@ _MIGRATIONS = {
     # exist -- _migrate walks every version up to SCHEMA_VERSION and would
     # KeyError on the gap.
     4: lambda s: None,
+    5: _to_v5,
 }
 
 
@@ -629,12 +698,15 @@ def _field_changes(row, **new) -> list[str]:
 
 def _activity(s: Session, action: str, message: str, refs: list[tuple]) -> None:
     """Append an activity-log row inside the caller's transaction (so it commits
-    atomically with the action). refs: list of (type, id, label) tuples."""
+    atomically with the action). refs: list of (type, id, label) tuples; a None
+    label (a part with no sku) is stored as "" so the log never renders "null"."""
     s.add(
         Activity(
             action=action,
             message=message,
-            refs=json.dumps([{"type": t, "id": i, "label": l} for t, i, l in refs]),
+            refs=json.dumps(
+                [{"type": t, "id": i, "label": l or ""} for t, i, l in refs]
+            ),
         )
     )
 
@@ -705,20 +777,45 @@ def next_part_id() -> int:
         return (s.scalar(select(func.max(Part.id))) or 0) + 1
 
 
-def _validate_sku(sku: str) -> None:
+def _normalise_sku(sku: str | None) -> str | None:
+    """The value to store: a blank sku means "no sku" and becomes NULL. The
+    unique indexes count every NULL as distinct, so any number of parts (or of
+    one supplier's parts) may go without one, while a real sku can only be used
+    once -- globally for a Part, per supplier for a SupplierPart. Only blanks
+    are special-cased: what counts as a placeholder ("N/A", "TBD", ...) is the
+    user's own convention, not ours, so such a value is stored as typed and the
+    duplicates among it are cleared by _clean_skus with a line in the log."""
+    if sku is None:
+        return None
+    return sku.strip() or None
+
+
+def _validate_sku(s: Session, sku: str | None, part_id: int | None = None) -> None:
+    """Reject a malformed sku, or one another part already uses. part_id is the
+    part being written, so re-saving a part's own sku is not a clash."""
+    if sku is None:
+        return
     if len(sku) > 64 or any(c.isspace() for c in sku):
         raise InventoryError(f"invalid sku {sku!r}: max 64 chars, no whitespace")
+    clash = s.scalar(select(Part).where(Part.sku == sku, Part.id != part_id))
+    if clash is not None:
+        raise InventoryError(
+            f"sku {sku!r} is already used by part {clash.id} ({clash.description})"
+        )
 
 
 @_write
 def create_part(
-    s: Session, part_id: int, sku: str, description: str, virtual: bool = False
+    s: Session, part_id: int, sku: str | None, description: str, virtual: bool = False
 ) -> None:
-    _validate_sku(sku)
+    sku = _normalise_sku(sku)
+    _validate_sku(s, sku)
     if s.get(Part, part_id) is not None:
         raise InventoryError(f"part id {part_id} already exists")
     s.add(Part(id=part_id, sku=sku, description=description, virtual=virtual))
-    _activity(s, "create_part", f"Created part {description}", [("part", part_id, sku)])
+    _activity(
+        s, "create_part", f"Created part {description}", [("part", part_id, sku or "")]
+    )
 
 
 @_write
@@ -727,8 +824,19 @@ def edit_part(s: Session, part_id: int, description: str) -> None:
 
 
 @_write
-def set_part_sku(s: Session, part_id: int, sku: str) -> None:
-    get_part(s, part_id).sku = sku
+def set_part_sku(s: Session, part_id: int, sku: str | None) -> None:
+    sku = _normalise_sku(sku)
+    _validate_sku(s, sku, part_id)
+    part = get_part(s, part_id)
+    changes = _field_changes(part, sku=sku)
+    part.sku = sku
+    if changes:
+        _activity(
+            s,
+            "set_part_sku",
+            f"Part {part.description}: {', '.join(changes)}",
+            [("part", part_id, sku or "")],
+        )
 
 
 @_write
@@ -740,7 +848,7 @@ def set_part_active(s: Session, part_id: int, active: bool) -> None:
         s,
         "set_part_active",
         f"{verb} part {part.description}",
-        [("part", part_id, part.sku)],
+        [("part", part_id, part.sku or "")],
     )
 
 
@@ -1705,6 +1813,30 @@ def _validate_code(code: str, what: str) -> None:
         raise InventoryError(f"invalid {what} {code!r}: 1-64 chars, no whitespace")
 
 
+def _validate_supplier_sku(
+    s: Session, supplier_id: int, sku: str | None, sp_id: int | None = None
+) -> None:
+    """Reject a malformed sku, or one this supplier already uses. sp_id is the
+    supplier part being written, so re-saving its own sku is not a clash."""
+    if sku is None:
+        return
+    if len(sku) > 64 or any(c.isspace() for c in sku):
+        raise InventoryError(
+            f"invalid supplier part sku {sku!r}: max 64 chars, no whitespace"
+        )
+    clash = s.scalar(
+        select(SupplierPart).where(
+            SupplierPart.supplier_id == supplier_id,
+            SupplierPart.sku == sku,
+            SupplierPart.id != sp_id,
+        )
+    )
+    if clash is not None:
+        raise InventoryError(
+            f"sku {sku!r} is already used by this supplier (supplier part {clash.id})"
+        )
+
+
 @_write
 def create_supplier(s: Session, supplier_id: int, name: str) -> None:
     if s.get(Supplier, supplier_id) is not None:
@@ -1745,17 +1877,18 @@ def create_supplier_part(
     s: Session,
     sp_id: int,
     supplier_id: int,
-    sku: str,
+    sku: str | None,
     part_id: int,
     description: str = "",
     ean: str = "",
     hyperlink: str = "",
     pack_qty: int = 1,
 ) -> None:
-    _validate_code(sku, "supplier part sku")
+    sku = _normalise_sku(sku)
     if s.get(SupplierPart, sp_id) is not None:
         raise InventoryError(f"supplier part {sp_id} already exists")
     get_supplier(s, supplier_id)
+    _validate_supplier_sku(s, supplier_id, sku)
     _check_purchasable(s, part_id)
     s.add(
         SupplierPart(
@@ -1773,8 +1906,8 @@ def create_supplier_part(
     _activity(
         s,
         "create_supplier_part",
-        f"Created supplier part {sku} for {part.description}",
-        [("supplier-part", sp_id, sku), ("part", part_id, part.sku)],
+        f"Created supplier part {sku or part.description} for {part.description}",
+        [("supplier-part", sp_id, sku or ""), ("part", part_id, part.sku)],
     )
 
 
@@ -1800,6 +1933,23 @@ def edit_supplier_part(
     refresh_part_price(s, part_id)
     if was_part_id != part_id:
         refresh_part_price(s, was_part_id)
+
+
+@_write
+def set_supplier_part_sku(s: Session, sp_id: int, sku: str | None) -> None:
+    sku = _normalise_sku(sku)
+    sp = get_supplier_part(s, sp_id)
+    _validate_supplier_sku(s, sp.supplier_id, sku, sp_id)
+    changes = _field_changes(sp, sku=sku)
+    sp.sku = sku
+    if changes:
+        part = get_part(s, sp.part_id)
+        _activity(
+            s,
+            "set_supplier_part_sku",
+            f"Supplier part for {part.description}: {', '.join(changes)}",
+            [("supplier-part", sp_id, sku or ""), ("part", sp.part_id, part.sku)],
+        )
 
 
 @_write
