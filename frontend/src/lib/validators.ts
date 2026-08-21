@@ -6,9 +6,11 @@ export const STATUS_OPTIONS = ["available","consumed"] as const;
 export const BomLineIn = v.object({
 	component_part_id: v.pipe(v.number(), v.integer()),
 	quantity: v.number(),
+	note: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(200)))),
 	});
 export const BomQtyPatch = v.object({
-	quantity: v.number(),
+	quantity: v.optional(v.nullable(v.number())),
+	note: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(200)))),
 	});
 export const BookIn = v.object({
 	quantity: v.pipe(v.number(), v.gtValue(0, 'must be greater than 0')),

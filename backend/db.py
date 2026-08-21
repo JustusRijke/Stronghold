@@ -401,6 +401,8 @@ _MIGRATIONS = {
     # KeyError on the gap.
     4: lambda s: None,
     5: _to_v5,
+    # 6 only added a nullable column -- see the note on step 4.
+    6: lambda s: None,
 }
 
 
@@ -1146,7 +1148,7 @@ def next_bomline_id() -> int:
 
 def bom_for(s: Session, parent_part_id: int) -> list:
     """(line_id, component_id, component_sku, component_description, quantity,
-    component_virtual, component_price, component_price_partial) for one
+    component_virtual, component_price, component_price_partial, note) for one
     assembly's BOM, joined to Part for display."""
     return list(
         s.execute(
@@ -1159,6 +1161,7 @@ def bom_for(s: Session, parent_part_id: int) -> list:
                 Part.virtual,
                 Part.estimated_price,
                 Part.price_partial,
+                BomLine.note,
             )
             .join(Part, BomLine.component_part_id == Part.id)
             .where(BomLine.parent_part_id == parent_part_id)
@@ -1174,7 +1177,7 @@ def _snapshot_build_lines(s: Session, build_id: int, part_id: int) -> None:
         s.delete(old)
     s.flush()
     next_id = (s.scalar(select(func.max(BuildLine.id))) or 0) + 1
-    for _lid, component_id, _sku, _desc, qty, virtual, price, _partial in bom_for(
+    for _lid, component_id, _sku, _desc, qty, virtual, price, *_r in bom_for(
         s, part_id
     ):
         s.add(
@@ -1316,6 +1319,7 @@ def add_bomline(
     parent_part_id: int,
     component_part_id: int,
     quantity: float,
+    note: str | None = None,
 ) -> None:
     if quantity <= 0:
         raise InventoryError("bom quantity must be positive")
@@ -1345,6 +1349,7 @@ def add_bomline(
             parent_part_id=parent_part_id,
             component_part_id=component_part_id,
             quantity=quantity,
+            note=note or None,
         )
     )
     s.flush()
@@ -1367,6 +1372,23 @@ def edit_bomline_quantity(s: Session, line_id: int, quantity: float) -> None:
             s,
             "edit_bomline",
             f"BOM {parent.description}: {component.description} {old} -> {quantity}",
+            [("part", parent.id, parent.sku), ("part", component.id, component.sku)],
+        )
+
+
+@_write
+def set_bomline_note(s: Session, line_id: int, note: str | None) -> None:
+    line = get_bomline(s, line_id)
+    old = line.note
+    line.note = note or None
+    if line.note != old:
+        parent = get_part(s, line.parent_part_id)
+        component = get_part(s, line.component_part_id)
+        _activity(
+            s,
+            "set_bomline_note",
+            f"BOM {parent.description}: {component.description} note "
+            f"{old or '-'} -> {line.note or '-'}",
             [("part", parent.id, parent.sku), ("part", component.id, component.sku)],
         )
 

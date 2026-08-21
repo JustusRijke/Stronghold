@@ -201,10 +201,12 @@ step when one is actually needed.
   `assembly` and `virtual` are mutually exclusive. `purchasable` (default true)
   marks a part that may be bought: only such a part can have supplier parts, and
   so appear on a purchase order.
-- `BomLine(id, parent_part_id, component_part_id, quantity)` -- one component
-  line of an assembly's bill of materials: the parent assembly needs `quantity`
-  (float) of the component part. Unique per (parent, component). Build detail
-  like `POLine` (no `active` flag), plainly removable.
+- `BomLine(id, parent_part_id, component_part_id, quantity, note)` -- one
+  component line of an assembly's bill of materials: the parent assembly needs
+  `quantity` (float) of the component part. `note` is optional free text
+  ("fit last"), never interpreted -- it only rides along to the BOM table.
+  Unique per (parent, component). Build detail like `POLine` (no `active`
+  flag), plainly removable.
 - `StockItem(id, count, part_id, po_id, build_id, status)` -- an inventory item;
   the part supplies SKU and description. `count` is float (parts may be
   measured, not just counted); `po_id`/`build_id` are nullable FKs to the PO it
@@ -370,10 +372,11 @@ Known ceilings, with their upgrade paths, deferred until they actually hurt
   setting appears.
 - In-memory substring filter on the parts page; add an index when parts grow
   large.
-- `_MIGRATIONS` now runs to schema 5: 2 dropped the stored order references, 3
+- `_MIGRATIONS` now runs to schema 6: 2 dropped the stored order references, 3
   moved the enum columns from text to int codes, 4 added the sales-order tables
   (additive, so its step is a no-op -- but it must exist, since `_migrate` walks
-  every version in turn), 5 made `parts.sku` optional and unique. See "Data
+  every version in turn), 5 made `parts.sku` optional and unique, 6 added the
+  optional `bom_lines.note` (additive, so a no-op step like 4). See "Data
   versioning".
 - Step 5 needed the mirror image of the `_DROPPED_COLUMNS` scaffold: an older
   file may hold rows that *violate* a constraint the current schema has (many

@@ -199,8 +199,8 @@ export interface paths {
         delete: operations["remove_bom_line_api_bom__line_id__delete"];
         options?: never;
         head?: never;
-        /** Set Bom Quantity */
-        patch: operations["set_bom_quantity_api_bom__line_id__patch"];
+        /** Patch Bom Line */
+        patch: operations["patch_bom_line_api_bom__line_id__patch"];
         trace?: never;
     };
     "/api/stock": {
@@ -1042,6 +1042,8 @@ export interface components {
             component_part_id: number;
             /** Quantity */
             quantity: number;
+            /** Note */
+            note?: string | null;
         };
         /** BomLineOut */
         BomLineOut: {
@@ -1063,11 +1065,15 @@ export interface components {
             line_price: number | null;
             /** Price Partial */
             price_partial: boolean;
+            /** Note */
+            note: string;
         };
         /** BomQtyPatch */
         BomQtyPatch: {
             /** Quantity */
-            quantity: number;
+            quantity?: number | null;
+            /** Note */
+            note?: string | null;
         };
         /**
          * BomUsageOut
@@ -2380,7 +2386,7 @@ export interface operations {
             };
         };
     };
-    set_bom_quantity_api_bom__line_id__patch: {
+    patch_bom_line_api_bom__line_id__patch: {
         parameters: {
             query?: never;
             header?: never;

@@ -120,11 +120,13 @@ class BomLineOut(BaseModel):
     unit_price: float | None  # the component's estimated price, None if unpriced
     line_price: float | None  # unit_price * quantity: this line's share of the build
     price_partial: bool  # the component is an assembly with an incomplete BOM
+    note: str
 
 
 class BomLineIn(BaseModel):
     component_part_id: int
     quantity: float
+    note: str | None = Field(default=None, max_length=200)
 
 
 class BomUsageOut(BaseModel):
@@ -992,8 +994,9 @@ def list_bom(part_id: int) -> list[BomLineOut]:
             unit_price=price,
             line_price=None if price is None else price * qty,
             price_partial=partial,
+            note=note or "",
         )
-        for line_id, comp_id, comp_sku, comp_desc, qty, comp_virtual, price, partial in rows
+        for line_id, comp_id, comp_sku, comp_desc, qty, comp_virtual, price, partial, note in rows
     ]
 
 
@@ -1005,12 +1008,14 @@ def add_bom_line(part_id: int, body: BomLineIn) -> list[BomLineOut]:
         part_id,
         body.component_part_id,
         body.quantity,
+        body.note,
     )
     return list_bom(part_id)
 
 
 class BomQtyPatch(BaseModel):
-    quantity: float
+    quantity: float | None = None
+    note: str | None = Field(default=None, max_length=200)
 
 
 class POLinePatch(BaseModel):
@@ -1019,8 +1024,13 @@ class POLinePatch(BaseModel):
 
 
 @router.patch("/bom/{line_id}", response_model=OkOut)
-def set_bom_quantity(line_id: int, body: BomQtyPatch) -> OkOut:
-    _guard(db.edit_bomline_quantity, line_id, body.quantity)
+def patch_bom_line(line_id: int, body: BomQtyPatch) -> OkOut:
+    # model_fields_set, so an explicit null clears the note (same split as
+    # patch_part) while an absent one leaves it alone
+    if body.quantity is not None:
+        _guard(db.edit_bomline_quantity, line_id, body.quantity)
+    if "note" in body.model_fields_set:
+        _guard(db.set_bomline_note, line_id, body.note)
     return OkOut()
 
 

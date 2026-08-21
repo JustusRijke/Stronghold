@@ -53,8 +53,8 @@ Open-source inventory/stock tracking for small and medium businesses.
   Receive a whole order in one click; an order flips to "Complete" automatically
   once every line is fully received
 - Mark parts as assemblies and give them a bill of materials (BOM): open a part
-  to edit the components and quantities it is built from; filter the parts list
-  by the Assembly column to see only assemblies
+  to edit the components, quantities and per-line notes it is built from; filter
+  the parts list by the Assembly column to see only assemblies
 - Mark a part virtual (e.g. labour) to give it unlimited stock: it never holds a
   stock item, is only used for BOM pricing, and builds never consume it. A part
   cannot be both an assembly and virtual
