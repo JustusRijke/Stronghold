@@ -22,6 +22,13 @@ DEFAULTS = {
     "gui": {
         "port": 8080,
     },
+    # Credentials (the WooCommerce key and secret) are edited on the settings
+    # page and stored encrypted in the data file. This names the key that
+    # decrypts them: it must NOT be committed, and losing it means re-entering
+    # those credentials -- nothing else. Created on first run if absent.
+    "secrets": {
+        "key_file": "secrets.key",
+    },
     "logging": {
         "level": "DEBUG",  # DEBUG, INFO, WARNING, ERROR
         "file": "log.txt",

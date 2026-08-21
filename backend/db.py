@@ -17,10 +17,12 @@ import tempfile
 from datetime import date, datetime
 from pathlib import Path
 
+import crypto
 from models import (
     BUILD_STATUS_CODES,
     PO_STATUS_CODES,
     PRICE_BASIS_CODES,
+    SO_DEAD_STATUSES,
     STOCK_AVAILABLE,
     STOCK_CONSUMED,
     STOCK_STATUS_CODES,
@@ -37,6 +39,9 @@ from models import (
     POStatus,
     PriceBasis,
     PurchaseOrder,
+    SalesOrder,
+    SalesOrderLine,
+    SalesOrderLinePart,
     Setting,
     StockItem,
     StockStatus,
@@ -44,8 +49,9 @@ from models import (
     SupplierPart,
     build_ref,
     po_ref,
+    so_ref,
 )
-from sqlalchemy import create_engine, event, func, select, text
+from sqlalchemy import create_engine, event, func, or_, select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateTable
 from version import RELEASE_VERSION, SCHEMA_VERSION
@@ -70,7 +76,21 @@ DOMAIN_DEFAULTS = {
     # "true" lifts the order status transition rules (so a cancelled order can
     # be un-cancelled) and lets stock counts be typed in directly.
     "expert.mode": "false",
+    # The WooCommerce store sales orders are imported from. The url is a plain
+    # setting; the key and secret are credentials -- see SECRET_SETTINGS.
+    "woocommerce.url": "",
+    "woocommerce.key": "",
+    "woocommerce.secret": "",
 }
+
+# Settings holding a credential. Their value is encrypted at rest (crypto.py)
+# because the settings table is exported to the git-tracked .sql, and it is
+# never logged or sent to the frontend.
+#
+# Declared here in code rather than as a column on the row: a flag stored in
+# the data file could be flipped off by hand, and the next export would write
+# the plaintext. Add a key here to make it a credential.
+SECRET_SETTINGS = frozenset({"woocommerce.key", "woocommerce.secret"})
 
 EXPERT_MODE_KEY = "expert.mode"
 
@@ -284,6 +304,11 @@ def _to_v3(s: Session) -> None:
 _MIGRATIONS = {
     2: lambda s: _drop_columns(s, 2),
     3: _to_v3,
+    # 4 only added tables and a nullable column: create_all already built them
+    # and an older file simply has no INSERTs for them. The step still has to
+    # exist -- _migrate walks every version up to SCHEMA_VERSION and would
+    # KeyError on the gap.
+    4: lambda s: None,
 }
 
 
@@ -579,7 +604,15 @@ def get_setting(key: str) -> str:
         raise InventoryError(f"unknown setting '{key}'")
     with session() as s:
         row = s.get(Setting, key)
-    return DOMAIN_DEFAULTS[key] if row is None else row.value
+    if row is None:
+        return DOMAIN_DEFAULTS[key]
+    if key not in SECRET_SETTINGS:
+        return row.value
+    # A credential we cannot decrypt (key file missing, replaced, or the row
+    # hand-edited) reads as unset, so the app reports "not configured" and the
+    # user re-enters it. Raising here would take down every page that reads a
+    # setting over a value that is only recoverable by retyping it.
+    return crypto.decrypt(row.value) or ""
 
 
 @_write
@@ -587,12 +620,29 @@ def set_setting(s: Session, key: str, value: str) -> None:
     if key not in DOMAIN_DEFAULTS:
         raise InventoryError(f"unknown setting '{key}'")
     row = s.get(Setting, key)
+    secret = key in SECRET_SETTINGS
     old = DOMAIN_DEFAULTS[key] if row is None else row.value
+    stored = value
+    if secret and value:
+        stored = crypto.encrypt(value)
+        if stored is None:
+            raise InventoryError(
+                f"cannot store '{key}': no usable secrets key file. See the "
+                f"secrets_key_file setting in settings.toml."
+            )
     if row is None:
-        s.add(Setting(key=key, value=value))
+        s.add(Setting(key=key, value=stored))
     else:
-        row.value = value
-    if value != old:
+        row.value = stored
+    if stored == old:
+        return  # a no-op patch should not manufacture an activity row
+    if secret:
+        # the change is worth recording; the credential is not. Note this
+        # compares ciphertexts, so re-saving the same secret still logs -- two
+        # encryptions of one value differ, and peeking to compare would defeat
+        # the point.
+        _activity(s, "set_setting", f"Setting {key}: value changed", [])
+    else:
         _activity(s, "set_setting", f"Setting {key}: '{old}' -> '{value}'", [])
 
 
@@ -1442,14 +1492,14 @@ def add_negative_stock(
 def settle_debt_from_stock(
     s: Session, debt_id: int, quantity: float, item_id: int | None = None
 ) -> None:
-    """Pay off a build shortfall out of stock already on the shelf.
+    """Pay off a build or sales-order shortfall out of stock already on the
+    shelf.
 
     The receipt path (_settle_stock_debt) does the same when parts arrive on a
     PO; this is the manual version for a part that ended up with both a debt row
     and available stock. The debt shrinks, the sources are drawn down FIFO (or
-    off one named item) and the build's placeholder consumption is repriced to
-    what that stock actually cost, so the assembly stops being costed at a
-    guess."""
+    off one named item) and the placeholder consumption is repriced to what that
+    stock actually cost, so the order stops being costed at a guess."""
     debt = get_item(s, debt_id)
     if debt.status != STOCK_AVAILABLE or debt.count >= 0:
         raise InventoryError(f"stock item {debt_id} is not an outstanding debt")
@@ -1458,15 +1508,17 @@ def settle_debt_from_stock(
     if quantity > -debt.count + 1e-9:
         raise InventoryError(f"stock item {debt_id} only owes {-debt.count:g}")
     build_id = debt.consumed_by_build_id
-    if build_id is None:
-        raise InventoryError(f"stock item {debt_id} is not linked to a build order")
-    # the debt's immediate predecessor, same pairing contract produce_build and
+    so_id = debt.consumed_by_so_id
+    if build_id is None and so_id is None:
+        raise InventoryError(f"stock item {debt_id} is not linked to an order")
+    # the debt's immediate predecessor, same pairing contract _consume_fifo and
     # add_negative_stock write and _settle_stock_debt relies on
     placeholder = s.get(StockItem, debt_id - 1)
     if (
         placeholder is None
         or placeholder.status != STOCK_CONSUMED
         or placeholder.consumed_by_build_id != build_id
+        or placeholder.consumed_by_so_id != so_id
         or placeholder.part_id != debt.part_id
     ):
         raise InventoryError(f"stock item {debt_id} has no consumption to settle")
@@ -1515,6 +1567,7 @@ def settle_debt_from_stock(
                 po_id=source.po_id,
                 build_id=source.build_id,
                 consumed_by_build_id=build_id,
+                consumed_by_so_id=so_id,
                 status=STOCK_CONSUMED,
                 unit_price=source.unit_price,
                 price_basis=source.price_basis,
@@ -1523,23 +1576,30 @@ def settle_debt_from_stock(
         )
         next_id += 1
     s.flush()
-    # the assembly was costed off the estimate; its inputs are real now
-    for produced in s.scalars(
-        select(StockItem).where(
-            StockItem.build_id == build_id, StockItem.status == STOCK_AVAILABLE
-        )
-    ):
-        refresh_stock_price(s, produced)
+    # the assembly was costed off the estimate; its inputs are real now. A sale
+    # produces nothing, so there is nothing to reprice for one.
+    if build_id is not None:
+        for produced in s.scalars(
+            select(StockItem).where(
+                StockItem.build_id == build_id, StockItem.status == STOCK_AVAILABLE
+            )
+        ):
+            refresh_stock_price(s, produced)
     part = get_part(s, debt.part_id)
-    get_build(s, build_id)  # exists check
-    label = build_ref(build_id)
+    if build_id is not None:
+        get_build(s, build_id)  # exists check
+        kind, order_id, label = "build", build_id, build_ref(build_id)
+    else:
+        # not-null: checked above, one of build_id/so_id is always set
+        get_so(s, so_id)  # ty: ignore[invalid-argument-type]  # exists check
+        kind, order_id, label = "sales-order", so_id, so_ref(so_id)  # ty: ignore[invalid-argument-type]
     _activity(
         s,
         "settle_debt_from_stock",
         f"{quantity:g}x {part.description} settled a shortfall on {label} from stock",
         [
             ("stock", debt_id, f"{debt.count:g}x {part.description}"),
-            ("build", build_id, label),
+            (kind, order_id, label),
             ("part", part.id, part.sku),
         ],
     )
@@ -1914,37 +1974,44 @@ def _check_po_line_editable(s: Session, line: POLine) -> None:
         )
 
 
-def _settle_stock_debt(s: Session, item: StockItem) -> dict[int, float]:
-    """Pay off outstanding build shortfalls for a part out of freshly received
-    stock. A shortfall left a negative Available row plus a placeholder consumed
-    row priced at the part's estimate; the parts have now arrived, so the debt
+def _settle_stock_debt(s: Session, item: StockItem) -> dict[tuple[str, int], float]:
+    """Pay off outstanding shortfalls for a part out of freshly received stock.
+    A shortfall left a negative Available row plus a placeholder consumed row
+    priced at the part's estimate; the parts have now arrived, so the debt
     shrinks toward zero and the consumed row is stamped with this PO and
-    repriced to what was actually paid -- the build stops being costed at a
+    repriced to what was actually paid -- the order stops being costed at a
     guess. Settled units never reach the shelf, so `item` is reduced by them.
-    Returns {build_id: quantity settled}."""
+
+    Both builds and sales can owe stock, so the result is keyed by which:
+    {("build"|"sales-order", id): quantity settled}. Only a build has output to
+    reprice afterwards -- a sale produces nothing."""
     debts = s.scalars(
         select(StockItem)
         .where(
             StockItem.part_id == item.part_id,
             StockItem.status == STOCK_AVAILABLE,
             StockItem.count < 0,
-            StockItem.consumed_by_build_id.is_not(None),
+            or_(
+                StockItem.consumed_by_build_id.is_not(None),
+                StockItem.consumed_by_so_id.is_not(None),
+            ),
         )
         .order_by(StockItem.id)
     ).all()
     next_id = (s.scalar(select(func.max(StockItem.id))) or 0) + 1
-    settled: dict[int, float] = {}
+    settled: dict[tuple[str, int], float] = {}
     for debt in debts:
         if item.count <= 1e-9:
             break
-        # produce_build writes the pair together, consumed row first, so the
-        # placeholder is the debt's immediate predecessor. Matching on
-        # build+part instead would pick up the rows consumed from real stock.
+        # the consuming write emits the pair together, consumed row first, so
+        # the placeholder is the debt's immediate predecessor. Matching on
+        # order+part instead would pick up the rows consumed from real stock.
         placeholder = s.get(StockItem, debt.id - 1)
         if (
             placeholder is None
             or placeholder.status != STOCK_CONSUMED
             or placeholder.consumed_by_build_id != debt.consumed_by_build_id
+            or placeholder.consumed_by_so_id != debt.consumed_by_so_id
             or placeholder.part_id != debt.part_id
         ):
             continue  # hand-edited data: no consumption to reprice, leave it
@@ -1960,6 +2027,7 @@ def _settle_stock_debt(s: Session, item: StockItem) -> dict[int, float]:
                 count=pay,
                 part_id=debt.part_id,
                 consumed_by_build_id=debt.consumed_by_build_id,
+                consumed_by_so_id=debt.consumed_by_so_id,
                 status=STOCK_CONSUMED,
             )
             s.add(placeholder)
@@ -1969,15 +2037,24 @@ def _settle_stock_debt(s: Session, item: StockItem) -> dict[int, float]:
         refresh_stock_price(s, placeholder)
         debt.count += pay
         item.count -= pay
-        # not-null: the debt query filters consumed_by_build_id is_not(None)
-        build_id: int = debt.consumed_by_build_id  # ty: ignore[invalid-assignment]
-        settled[build_id] = settled.get(build_id, 0.0) + pay
+        # exactly one of the two is set: the debt query requires at least one,
+        # and a row is consumed by a build or a sale, never both
+        # not-null: the debt query requires one of the two to be set
+        key: tuple[str, int] = (
+            ("build", debt.consumed_by_build_id)
+            if debt.consumed_by_build_id is not None
+            else ("sales-order", debt.consumed_by_so_id)
+        )  # ty: ignore[invalid-assignment]
+        settled[key] = settled.get(key, 0.0) + pay
     # the assemblies those builds produced were costed off the estimate; now
-    # that their inputs are real, reprice the output
-    for build_id in settled:
+    # that their inputs are real, reprice the output. A sale produces nothing,
+    # so there is nothing to reprice for it.
+    for kind, order_id in settled:
+        if kind != "build":
+            continue
         for produced in s.scalars(
             select(StockItem).where(
-                StockItem.build_id == build_id, StockItem.status == STOCK_AVAILABLE
+                StockItem.build_id == order_id, StockItem.status == STOCK_AVAILABLE
             )
         ):
             refresh_stock_price(s, produced)
@@ -1986,11 +2063,11 @@ def _settle_stock_debt(s: Session, item: StockItem) -> dict[int, float]:
 
 def _receive_line(
     s: Session, line: POLine, stock_item_id: int, quantity: float
-) -> tuple[StockItem, dict[int, float]]:
+) -> tuple[StockItem, dict[tuple[str, int], float]]:
     """Receive `quantity` packs of one PO line into a new stock item: create it,
-    book it to the line, price it, and pay off any build shortfalls for that part
-    out of it. Returns (the stock item, {build_id: quantity settled}). Shared by
-    book_po_line and book_po so the two receive paths cannot drift apart."""
+    book it to the line, price it, and pay off any shortfalls for that part out
+    of it. Returns (the stock item, {(kind, order_id): quantity settled}).
+    Shared by book_po_line and book_po so the receive paths cannot drift."""
     supplier_part = get_supplier_part(s, line.supplier_part_id)
     s.add(
         StockItem(
@@ -2010,20 +2087,28 @@ def _receive_line(
 
 
 def _settle_activity(
-    s: Session, settled: dict[int, float], part: Part, po_id: int, po_label: str
+    s: Session,
+    settled: dict[tuple[str, int], float],
+    part: Part,
+    po_id: int,
+    po_label: str,
 ) -> None:
-    """One activity row per build a receipt paid off, so receiving tells the user
+    """One activity row per order a receipt paid off, so receiving tells the user
     what it settled instead of silently zeroing rows."""
-    for build_id, qty in settled.items():
-        get_build(s, build_id)  # exists check
-        build_label = build_ref(build_id)
+    for (kind, order_id), qty in settled.items():
+        if kind == "build":
+            get_build(s, order_id)  # exists check
+            label = build_ref(order_id)
+        else:
+            get_so(s, order_id)  # exists check
+            label = so_ref(order_id)
         _activity(
             s,
             "settle_stock_debt",
-            f"{qty:g}x {part.description} settled a shortfall on {build_label}",
+            f"{qty:g}x {part.description} settled a shortfall on {label}",
             [
                 ("po", po_id, po_label),
-                ("build", build_id, build_label),
+                (kind, order_id, label),
                 ("part", part.id, part.description),
             ],
         )
@@ -2083,7 +2168,7 @@ def book_po(s: Session, po_id: int) -> None:
     next_id = (s.scalar(select(func.max(StockItem.id))) or 0) + 1
     po_label = po_ref(po_id)
     refs = [("po", po_id, po_label)]
-    all_settled: list[tuple[dict[int, float], Part]] = []
+    all_settled: list[tuple[dict[tuple[str, int], float], Part]] = []
     for line in s.scalars(select(POLine).where(POLine.po_id == po_id)):
         outstanding = line.quantity - line.received
         if outstanding <= 0:
@@ -2234,6 +2319,77 @@ def produced_qty(s: Session, build_id: int) -> float:
     return max(from_stock, float(get_build(s, build_id).imported_produced))
 
 
+def _consume_fifo(s: Session, part_id: int, need: float, next_id: int, **stamp) -> int:
+    """Take `need` units of `part_id` out of stock, oldest first, and return the
+    next free stock id. `stamp` is the column naming the consumer -- a build
+    (`consumed_by_build_id`) or a sale (`consumed_by_so_id`).
+
+    Consumption never destroys stock: each source Available row is drawn down
+    and a matching STOCK_CONSUMED row is split off inheriting its price, so what
+    was used and what it cost stay traceable. Running short does not block --
+    the shortfall becomes a consumed row at the part's estimate plus a NEGATIVE
+    Available debt row, which nets out of on-hand counts until a PO settles it.
+    """
+    items = s.scalars(
+        select(StockItem)
+        .where(
+            StockItem.part_id == part_id,
+            StockItem.status == STOCK_AVAILABLE,
+            StockItem.count > 0,  # never "consume" an outstanding debt row
+        )
+        .order_by(StockItem.id)
+    ).all()
+    for item in items:
+        if need <= 0:
+            break
+        take = min(item.count, need)
+        item.count -= take
+        need -= take
+        s.add(
+            StockItem(
+                id=next_id,
+                count=take,
+                part_id=part_id,
+                po_id=item.po_id,  # keep the source's price provenance
+                # the source's producing build carries over (this split is
+                # the same stock); the order eating it is the consumer
+                build_id=item.build_id,
+                status=STOCK_CONSUMED,
+                # inherit the source's resolved price: what this stock was
+                # actually worth when it was consumed
+                unit_price=item.unit_price,
+                price_basis=item.price_basis,
+                price_po_id=item.price_po_id,
+                **stamp,
+            )
+        )
+        next_id += 1
+    # FIFO left need > 0: stock ran short. The order used these parts anyway, so
+    # record them consumed at the part's estimate (so the consumer is costed in
+    # full, as an estimate rather than a floor) and carry the debt as a negative
+    # Available row. When the parts arrive, book_po_line settles the debt and
+    # reprices the consumed row to what was actually paid.
+    if need > 1e-9:
+        price = get_part(s, part_id).estimated_price
+        basis = PriceBasis.ESTIMATE if price is not None else PriceBasis.NONE
+        # consumed row first, debt row second, always adjacent ids:
+        # _settle_stock_debt pairs them by `debt.id - 1`
+        for count in (need, -need):
+            s.add(
+                StockItem(
+                    id=next_id,
+                    count=count,
+                    part_id=part_id,
+                    status=STOCK_CONSUMED if count > 0 else STOCK_AVAILABLE,
+                    unit_price=price,
+                    price_basis=basis,
+                    **stamp,
+                )
+            )
+            next_id += 1
+    return next_id
+
+
 @_write
 def produce_build(s: Session, build_id: int, quantity: int) -> None:
     """Produce `quantity` assembly units from a build order, consuming the BOM
@@ -2290,65 +2446,9 @@ def produce_build(s: Session, build_id: int, quantity: int) -> None:
             )
             next_id += 1
             continue
-        need = qty * quantity
-        items = s.scalars(
-            select(StockItem)
-            .where(
-                StockItem.part_id == component_id,
-                StockItem.status == STOCK_AVAILABLE,
-                StockItem.count > 0,  # never "consume" an outstanding debt row
-            )
-            .order_by(StockItem.id)
-        ).all()
-        for item in items:
-            if need <= 0:
-                break
-            take = min(item.count, need)
-            item.count -= take
-            need -= take
-            s.add(
-                StockItem(
-                    id=next_id,
-                    count=take,
-                    part_id=component_id,
-                    po_id=item.po_id,  # keep the source's price provenance
-                    # the source's producing build carries over (this split is
-                    # the same stock); the build eating it is the consumer
-                    build_id=item.build_id,
-                    consumed_by_build_id=build_id,
-                    status=STOCK_CONSUMED,
-                    # inherit the source's resolved price: what this stock was
-                    # actually worth when it went into the build
-                    unit_price=item.unit_price,
-                    price_basis=item.price_basis,
-                    price_po_id=item.price_po_id,
-                )
-            )
-            next_id += 1
-        # FIFO left need > 0: stock ran short. The build used these parts
-        # anyway, so record them consumed at the part's estimate (so
-        # build_unit_cost costs the assembly in full, as an estimate rather
-        # than a floor) and carry the debt as a negative Available row. When
-        # the parts arrive, book_po_line settles the debt and reprices the
-        # consumed row to what was actually paid.
-        if need > 1e-9:
-            price = get_part(s, component_id).estimated_price
-            basis = PriceBasis.ESTIMATE if price is not None else PriceBasis.NONE
-            # consumed row first, debt row second, always adjacent ids:
-            # _settle_stock_debt pairs them by `debt.id - 1`
-            for count in (need, -need):
-                s.add(
-                    StockItem(
-                        id=next_id,
-                        count=count,
-                        part_id=component_id,
-                        consumed_by_build_id=build_id,
-                        status=STOCK_CONSUMED if count > 0 else STOCK_AVAILABLE,
-                        unit_price=price,
-                        price_basis=basis,
-                    )
-                )
-                next_id += 1
+        next_id = _consume_fifo(
+            s, component_id, qty * quantity, next_id, consumed_by_build_id=build_id
+        )
 
     s.add(
         StockItem(
@@ -2385,18 +2485,376 @@ def produce_build(s: Session, build_id: int, quantity: int) -> None:
         build.status = BuildStatus.COMPLETE
 
 
+# -- selling ----------------------------------------------------------------
+
+
+def get_so(s: Session, so_id: int) -> SalesOrder:
+    so = s.get(SalesOrder, so_id)
+    if so is None:
+        raise InventoryError(f"no sales order {so_id}")
+    return so
+
+
+def next_so_id() -> int:
+    # ponytail: max+1 id generation; fine while one process owns the db
+    with session() as s:
+        return (s.scalar(select(func.max(SalesOrder.id))) or 0) + 1
+
+
+def next_line_part_id() -> int:
+    # ponytail: max+1 id generation; fine while one process owns the db
+    with session() as s:
+        return (s.scalar(select(func.max(SalesOrderLinePart.id))) or 0) + 1
+
+
+def get_so_by_wc_id(s: Session, wc_order_id: int) -> SalesOrder | None:
+    """The order a WooCommerce id maps to, if we have imported it. The key
+    re-import matches on -- our own pk is local and says nothing about them."""
+    return s.scalar(select(SalesOrder).where(SalesOrder.wc_order_id == wc_order_id))
+
+
+def so_lines_for(s: Session, so_id: int) -> list[SalesOrderLine]:
+    return list(
+        s.scalars(
+            select(SalesOrderLine)
+            .where(SalesOrderLine.so_id == so_id)
+            .order_by(SalesOrderLine.id)
+        )
+    )
+
+
+def line_parts_for(s: Session, line_id: int) -> list:
+    """(link_id, part_id, sku, description, quantity, estimated_price, in_stock)
+    for one line item's manual part mapping."""
+    in_stock = (
+        select(
+            StockItem.part_id.label("part_id"),
+            func.coalesce(func.sum(StockItem.count), 0.0).label("qty"),
+        )
+        .where(StockItem.status == STOCK_AVAILABLE)
+        .group_by(StockItem.part_id)
+        .subquery()
+    )
+    return list(
+        s.execute(
+            select(
+                SalesOrderLinePart.id,
+                Part.id,
+                Part.sku,
+                Part.description,
+                SalesOrderLinePart.quantity,
+                Part.estimated_price,
+                func.coalesce(in_stock.c.qty, 0.0),
+            )
+            .join(Part, SalesOrderLinePart.part_id == Part.id)
+            .join(in_stock, in_stock.c.part_id == Part.id, isouter=True)
+            .where(SalesOrderLinePart.line_id == line_id)
+            .order_by(SalesOrderLinePart.id)
+        )
+    )
+
+
+def get_line_part(s: Session, link_id: int) -> SalesOrderLinePart:
+    link = s.get(SalesOrderLinePart, link_id)
+    if link is None:
+        raise InventoryError(f"no sales order line part {link_id}")
+    return link
+
+
+def _get_so_line(s: Session, line_id: int) -> SalesOrderLine:
+    line = s.get(SalesOrderLine, line_id)
+    if line is None:
+        raise InventoryError(f"no sales order line {line_id}")
+    return line
+
+
+def _check_unbooked(s: Session, so: SalesOrder) -> None:
+    """Reject changing a link a booking has already acted on.
+
+    Adding a link to a booked order is fine -- booking again consumes the delta
+    (see so_outstanding). Changing or removing one is not: those units are
+    already out of stock, so honouring it would mean un-consuming them, putting
+    stock back on the shelf and unwinding any paired debt row."""
+    if so.booked:
+        raise InventoryError(
+            f"sales order {so.id} is booked; its existing parts can no longer "
+            f"be changed (you can still add parts and book again)"
+        )
+
+
+@_write
+def add_line_part(
+    s: Session, link_id: int, line_id: int, part_id: int, quantity: float
+) -> None:
+    """Link a part to a sold line item: what this product consumes, per sold
+    unit. Manual by design -- WooCommerce knows the SKU it sold, not the parts
+    behind it.
+
+    Adding a part the line already lists **adds to** that link rather than
+    being rejected: one line uses one quantity of a given part, and "two more
+    of those nuts" is the natural way to correct it. There is one row per
+    (line, part), which the unique constraint enforces anyway.
+
+    Allowed on a booked order too. Both cases only ever *raise* what the order
+    needs, and booking consumes the difference, so nothing already taken out of
+    stock is disturbed -- unlike edit_line_part, which can lower a quantity and
+    is therefore frozen once booked."""
+    if quantity <= 0:
+        raise InventoryError("quantity must be positive")
+    line = _get_so_line(s, line_id)
+    so = get_so(s, line.so_id)
+    part = get_part(s, part_id)
+    label = so_ref(so.id)
+    existing = s.scalar(
+        select(SalesOrderLinePart).where(
+            SalesOrderLinePart.line_id == line_id,
+            SalesOrderLinePart.part_id == part_id,
+        )
+    )
+    if existing is not None:
+        was = existing.quantity
+        existing.quantity = was + quantity
+        _activity(
+            s,
+            "add_line_part",
+            f"{label}: {line.description or line.sku} now uses "
+            f"{existing.quantity:g}x {part.description} (was {was:g})",
+            [("sales-order", so.id, label), ("part", part_id, part.sku)],
+        )
+        return
+    s.add(
+        SalesOrderLinePart(
+            id=link_id, line_id=line_id, part_id=part_id, quantity=quantity
+        )
+    )
+    _activity(
+        s,
+        "add_line_part",
+        f"{label}: {line.description or line.sku} uses {quantity:g}x {part.description}",
+        [("sales-order", so.id, label), ("part", part_id, part.sku)],
+    )
+
+
+@_write
+def edit_line_part(s: Session, link_id: int, quantity: float) -> None:
+    if quantity <= 0:
+        raise InventoryError("quantity must be positive")
+    link = get_line_part(s, link_id)
+    so = get_so(s, _get_so_line(s, link.line_id).so_id)
+    _check_unbooked(s, so)
+    if quantity == link.quantity:
+        return  # a no-op patch should not manufacture an activity row
+    part = get_part(s, link.part_id)
+    label = so_ref(so.id)
+    _activity(
+        s,
+        "edit_line_part",
+        f"{label}: {part.description} quantity {link.quantity:g} -> {quantity:g}",
+        [("sales-order", so.id, label), ("part", part.id, part.sku)],
+    )
+    link.quantity = quantity
+
+
+@_write
+def remove_line_part(s: Session, link_id: int) -> None:
+    # ponytail: the mapping is order detail, plain delete (not master data)
+    link = get_line_part(s, link_id)
+    so = get_so(s, _get_so_line(s, link.line_id).so_id)
+    _check_unbooked(s, so)
+    part = get_part(s, link.part_id)
+    s.delete(link)
+    label = so_ref(so.id)
+    _activity(
+        s,
+        "remove_line_part",
+        f"{label}: no longer uses {part.description}",
+        [("sales-order", so.id, label), ("part", part.id, part.sku)],
+    )
+
+
+def so_needs(s: Session, so_id: int) -> dict[int, float]:
+    """{part_id: units} one sales order consumes, summed over its line items --
+    each line's sold quantity times the per-unit quantity of each linked part."""
+    needs: dict[int, float] = {}
+    for part_id, units in s.execute(
+        select(
+            SalesOrderLinePart.part_id,
+            func.sum(SalesOrderLinePart.quantity * SalesOrderLine.quantity),
+        )
+        .join(SalesOrderLine, SalesOrderLinePart.line_id == SalesOrderLine.id)
+        .where(SalesOrderLine.so_id == so_id)
+        .group_by(SalesOrderLinePart.part_id)
+    ):
+        needs[part_id] = units
+    return needs
+
+
+def so_consumed(s: Session, so_id: int) -> dict[int, float]:
+    """{part_id: units} this order has already taken out of stock.
+
+    Consumed rows only: the paired debt row is negative Available, and counting
+    it would cancel out the very shortfall it records."""
+    return {
+        part_id: units
+        for part_id, units in s.execute(
+            select(StockItem.part_id, func.sum(StockItem.count))
+            .where(
+                StockItem.consumed_by_so_id == so_id,
+                StockItem.status == STOCK_CONSUMED,
+            )
+            .group_by(StockItem.part_id)
+        )
+    }
+
+
+def so_outstanding(s: Session, so_id: int) -> dict[int, float]:
+    """{part_id: units} mapped but not yet consumed -- what booking would take.
+
+    Booking is the delta, not the whole mapping, so a part linked after the
+    order was booked is picked up by booking again without re-consuming what
+    already went out."""
+    consumed = so_consumed(s, so_id)
+    out = {}
+    for part_id, need in so_needs(s, so_id).items():
+        remaining = need - consumed.get(part_id, 0.0)
+        if remaining > 1e-9:
+            out[part_id] = remaining
+    return out
+
+
+def so_shortages(s: Session, so_id: int) -> list[tuple[int, str, float, float]]:
+    """(part_id, description, needed, in_stock) for every part this order would
+    run short of. Read-only: booking goes ahead anyway (the shortfall becomes a
+    debt), so this is what the produce-style confirm dialog warns with."""
+    out = []
+    for part_id, need in sorted(so_outstanding(s, so_id).items()):
+        if get_part(s, part_id).virtual:
+            continue  # unlimited: labour is never short
+        have = (
+            s.scalar(
+                select(func.coalesce(func.sum(StockItem.count), 0.0)).where(
+                    StockItem.part_id == part_id,
+                    StockItem.status == STOCK_AVAILABLE,
+                )
+            )
+            or 0.0
+        )
+        if need > have + 1e-9:
+            out.append((part_id, get_part(s, part_id).description, need, have))
+    return out
+
+
+@_write
+def book_sales_order(s: Session, so_id: int) -> None:
+    """Consume the parts a sale used, FIFO, in one transaction.
+
+    The build analogue is produce_build, and consumption is literally the same
+    code (_consume_fifo) -- with two differences: the rows are stamped
+    consumed_by_so_id, and nothing is produced. A sale ships stock out; there is
+    no output to cost. Shortages do not block: the missing quantity becomes a
+    debt that a later PO receipt settles."""
+    so = get_so(s, so_id)
+    # what is mapped but not yet taken. Booking an already-booked order is how
+    # parts linked afterwards get consumed, so this is the delta, not the whole
+    # mapping -- and an order with nothing outstanding is not an error.
+    needs = so_outstanding(s, so_id)
+    if so.booked and not needs:
+        raise InventoryError(f"sales order {so_id} has nothing left to book")
+    next_id = (s.scalar(select(func.max(StockItem.id))) or 0) + 1
+    for part_id, need in sorted(needs.items()):
+        part = get_part(s, part_id)
+        if part.virtual:
+            # unlimited stock, so nothing is drawn down -- but the sale did use
+            # it (labour), and that cost is real. Same shape produce_build uses:
+            # a consumed row at the part's rate, which keeps it out of the stock
+            # value report (Available rows only) while counting in so_cost.
+            price = part.estimated_price
+            s.add(
+                StockItem(
+                    id=next_id,
+                    count=need,
+                    part_id=part_id,
+                    consumed_by_so_id=so_id,
+                    status=STOCK_CONSUMED,
+                    unit_price=price,
+                    price_basis=PriceBasis.VIRTUAL
+                    if price is not None
+                    else PriceBasis.NONE,
+                )
+            )
+            next_id += 1
+            continue
+        next_id = _consume_fifo(s, part_id, need, next_id, consumed_by_so_id=so_id)
+    was_booked = so.booked
+    so.booked = True
+    label = so_ref(so_id)
+    if not needs:
+        # a sale that consumes nothing is still a sale: booking records that it
+        # has been dealt with (services, digital goods, stock handled elsewhere)
+        message = f"Booked {label}: no parts to consume"
+    elif was_booked:
+        message = f"Booked {label}: consumed {len(needs)} further part(s) from stock"
+    else:
+        message = f"Booked {label}: consumed {len(needs)} part(s) from stock"
+    _activity(s, "book_sales_order", message, [("sales-order", so_id, label)])
+
+
+def so_revenue(s: Session, so_id: int) -> float:
+    """What the sale brought in, ex VAT and excluding shipping -- shipping is a
+    pass-through cost, not margin on the goods."""
+    return (
+        s.scalar(
+            select(
+                func.coalesce(
+                    func.sum(SalesOrderLine.unit_price * SalesOrderLine.quantity), 0.0
+                )
+            ).where(SalesOrderLine.so_id == so_id)
+        )
+        or 0.0
+    )
+
+
+def so_cost(s: Session, so_id: int) -> tuple[float | None, float | None]:
+    """(estimated, realised) cost of the parts a sale consumes.
+
+    Estimated comes from the linked parts' current estimates and is available
+    before booking -- it is what the margin column shows on an open order.
+    Realised is what the consumed rows actually cost and exists only once
+    booked. None on either side means nothing priced it."""
+    estimated: float | None = None
+    for part_id, need in so_needs(s, so_id).items():
+        price = get_part(s, part_id).estimated_price
+        if price is not None:
+            estimated = (estimated or 0.0) + price * need
+
+    realised: float | None = None
+    if get_so(s, so_id).booked:
+        for price, count in s.execute(
+            select(StockItem.unit_price, StockItem.count).where(
+                StockItem.consumed_by_so_id == so_id,
+                StockItem.status == STOCK_CONSUMED,
+            )
+        ):
+            if price is not None:
+                realised = (realised or 0.0) + price * count
+    return estimated, realised
+
+
 # -- demand -----------------------------------------------------------------
 
 
 def part_demand(s: Session) -> dict[int, tuple[float, float]]:
-    """Per part: (units still needed by planned builds, units still to be
-    received on open POs). Two grouped queries, not one per part.
+    """Per part: (units still needed by planned builds and unbooked sales,
+    units still to be received on open POs). Three grouped queries, not one per
+    part.
 
     A build counts once it is Pending -- planned is what you buy against; Draft
     is the scratchpad status and asks for nothing. Its need is its snapshot's
     per-unit quantity times the units it has left to produce; a PO line's is the
-    packs still outstanding times pack_qty. Virtual components hold no stock, so
-    they are never needed."""
+    packs still outstanding times pack_qty. A sale counts while it is unbooked
+    and not cancelled/refunded/failed: booking is what consumes the stock, so a
+    booked order has already taken its parts and asks for nothing more. Virtual
+    components hold no stock, so they are never needed."""
     needed: dict[int, float] = {}
     for build_id, part_id, per_unit, qty in s.execute(
         select(
@@ -2417,6 +2875,23 @@ def part_demand(s: Session) -> dict[int, tuple[float, float]]:
         remaining = qty - produced_qty(s, build_id)
         if remaining > 0:
             needed[part_id] = needed.get(part_id, 0.0) + per_unit * remaining
+
+    for part_id, units in s.execute(
+        select(
+            SalesOrderLinePart.part_id,
+            func.sum(SalesOrderLinePart.quantity * SalesOrderLine.quantity),
+        )
+        .join(SalesOrderLine, SalesOrderLinePart.line_id == SalesOrderLine.id)
+        .join(SalesOrder, SalesOrderLine.so_id == SalesOrder.id)
+        .join(Part, SalesOrderLinePart.part_id == Part.id)
+        .where(
+            SalesOrder.booked.is_(False),
+            SalesOrder.status.not_in(SO_DEAD_STATUSES),
+            Part.virtual.is_(False),
+        )
+        .group_by(SalesOrderLinePart.part_id)
+    ):
+        needed[part_id] = needed.get(part_id, 0.0) + units
 
     incoming: dict[int, float] = {}
     for part_id, units in s.execute(

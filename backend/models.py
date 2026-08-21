@@ -2,9 +2,9 @@
 
 Nothing is hard-deleted. Parts, suppliers and supplier-parts carry an
 `active` flag (deactivated, never removed). Stock items, purchase orders and
-build orders instead carry a `status` string that subsumes active/inactive:
-stock is "Available" or "Consumed by build order"; POs/builds use their
-lifecycle status. PO lines are order detail, plainly removable.
+build orders instead carry a `status` that subsumes active/inactive: stock is
+available or consumed; POs/builds use their lifecycle status. PO lines, BOM
+lines and sales-order lines are order detail, plainly removable.
 """
 
 from collections.abc import Mapping
@@ -73,6 +73,7 @@ class EnumCode(TypeDecorator):
 # storing it only allowed it to be edited into something that lied.
 PO_PREFIX = "PO-"
 BUILD_PREFIX = "BO-"
+SO_PREFIX = "SO-"
 
 
 def po_ref(po_id: int) -> str:
@@ -81,6 +82,10 @@ def po_ref(po_id: int) -> str:
 
 def build_ref(build_id: int) -> str:
     return f"{BUILD_PREFIX}{build_id:04d}"
+
+
+def so_ref(so_id: int) -> str:
+    return f"{SO_PREFIX}{so_id:04d}"
 
 
 class PriceBasis(StrEnum):
@@ -154,6 +159,38 @@ PO_STATUS_CODES = {
     6: POStatus.LOST,
     7: POStatus.RETURNED,
 }
+
+
+class SalesOrderStatus(StrEnum):
+    """WooCommerce's own order statuses. Imported, never set in Stronghold --
+    WooCommerce owns the commercial lifecycle of a sale."""
+
+    PENDING = "pending"
+    PROCESSING = "processing"
+    ON_HOLD = "on-hold"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    REFUNDED = "refunded"
+    FAILED = "failed"
+
+
+SALES_ORDER_STATUS_CODES = {
+    1: SalesOrderStatus.PENDING,
+    2: SalesOrderStatus.PROCESSING,
+    3: SalesOrderStatus.ON_HOLD,
+    4: SalesOrderStatus.COMPLETED,
+    5: SalesOrderStatus.CANCELLED,
+    6: SalesOrderStatus.REFUNDED,
+    7: SalesOrderStatus.FAILED,
+}
+
+# statuses that ask for nothing: a cancelled or failed sale needs no stock, so
+# it raises no demand (see db.part_demand)
+SO_DEAD_STATUSES = (
+    SalesOrderStatus.CANCELLED,
+    SalesOrderStatus.REFUNDED,
+    SalesOrderStatus.FAILED,
+)
 
 
 class Base(DeclarativeBase):
@@ -259,6 +296,12 @@ class StockItem(Base):
     build_id: Mapped[int | None] = mapped_column(ForeignKey("build_orders.id"))
     consumed_by_build_id: Mapped[int | None] = mapped_column(
         ForeignKey("build_orders.id"), default=None
+    )
+    # the sale that consumed this stock. Separate from consumed_by_build_id:
+    # stock is eaten by a build or sold, never both, but collapsing them would
+    # lose which kind of order it went to (and a sale produces nothing).
+    consumed_by_so_id: Mapped[int | None] = mapped_column(
+        ForeignKey("sales_orders.id"), default=None
     )
     status: Mapped[str] = mapped_column(
         EnumCode(StockStatus, STOCK_STATUS_CODES), default=STOCK_AVAILABLE
@@ -383,6 +426,66 @@ class BuildLine(Base):
     # from the stock actually consumed. None on legacy/imported rows, which
     # fall back to the part's current price.
     unit_price: Mapped[float | None] = mapped_column(default=None)
+
+
+class SalesOrder(Base):
+    """A WooCommerce order, imported read-only: WooCommerce owns the commercial
+    facts (customer, status, prices) and Stronghold owns only what it cannot
+    know -- which parts a sold product consumes (SalesOrderLinePart).
+
+    The id is a local max+1, NOT the WooCommerce id: unlike the one-shot
+    InvenTree migration this import runs repeatedly into a non-empty database,
+    so WooCommerce ids would collide with ours. wc_order_id keeps the link and
+    is the key re-import matches on. The human code (SO-0042) is derived from
+    the id by models.so_ref, not stored."""
+
+    __tablename__ = "sales_orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    wc_order_id: Mapped[int] = mapped_column(unique=True)
+    wc_number: Mapped[str] = mapped_column(default="")  # WooCommerce's own code
+    customer_name: Mapped[str] = mapped_column(default="")
+    shipping_country: Mapped[str] = mapped_column(default="")
+    shipping_cost: Mapped[float] = mapped_column(default=0.0)
+    status: Mapped[str] = mapped_column(
+        EnumCode(SalesOrderStatus, SALES_ORDER_STATUS_CODES), default=""
+    )
+    date_created: Mapped[date | None] = mapped_column(default=None)
+    # whether this order has consumed its parts from stock. One-way: booking is
+    # a stock movement, so it is never silently undone by a re-import.
+    booked: Mapped[bool] = mapped_column(default=False)
+
+
+class SalesOrderLine(Base):
+    """One WooCommerce line item. Owned by WooCommerce, so there is no edit
+    path: a re-import replaces these. sku is the product's code as plain text
+    and may be empty -- it is never matched against Part.sku (the part link is
+    manual, see SalesOrderLinePart)."""
+
+    __tablename__ = "sales_order_lines"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    so_id: Mapped[int] = mapped_column(ForeignKey(SalesOrder.id))
+    wc_line_id: Mapped[int]  # what re-import preserves part links by
+    sku: Mapped[str] = mapped_column(default="")
+    description: Mapped[str] = mapped_column(default="")
+    unit_price: Mapped[float] = mapped_column(default=0.0)  # ex VAT, as imported
+    quantity: Mapped[float] = mapped_column(default=0.0)
+
+
+class SalesOrderLinePart(Base):
+    """Which part, and how many of it, one sold line item consumes. The only
+    sales table the user writes to: WooCommerce cannot know what a product is
+    made of, so the mapping is entered by hand. Quantity is per sold unit, like
+    BomLine."""
+
+    __tablename__ = "sales_order_line_parts"
+    __table_args__ = (UniqueConstraint("line_id", "part_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    line_id: Mapped[int] = mapped_column(ForeignKey(SalesOrderLine.id))
+    part_id: Mapped[int] = mapped_column(ForeignKey(Part.id))
+    quantity: Mapped[float]
 
 
 class Booking(Base):

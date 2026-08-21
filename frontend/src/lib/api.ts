@@ -18,7 +18,12 @@ import type {
 	DeploymentSettings,
 	Activity,
 	SearchResult,
-	StockValueReport
+	StockValueReport,
+	SalesOrder,
+	PartSalesOrder,
+	SalesOrderLine,
+	SalesShortage,
+	ImportResult
 } from './types';
 
 export class ApiError extends Error {
@@ -27,6 +32,25 @@ export class ApiError extends Error {
 		super(message);
 		this.status = status;
 	}
+}
+
+// A domain rejection (400) has a plain string detail. A schema rejection (422)
+// has a LIST of {loc, msg, ...} objects instead, which stringifies to
+// "[object Object]" -- so pull the messages out and name the field they came
+// from, since the user cannot see the request body.
+function errorText(detail: unknown): string | undefined {
+	if (typeof detail === 'string') return detail;
+	if (!Array.isArray(detail)) return undefined;
+	const parts = detail
+		.map((e) => {
+			const msg = typeof e?.msg === 'string' ? e.msg : null;
+			if (!msg) return null;
+			// loc is like ["body", "quantity"]; the last entry is the field
+			const field = Array.isArray(e.loc) ? e.loc[e.loc.length - 1] : null;
+			return field && field !== 'body' ? `${field}: ${msg}` : msg;
+		})
+		.filter(Boolean);
+	return parts.length ? parts.join('; ') : undefined;
 }
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -38,7 +62,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 	if (!res.ok) {
 		let detail = res.statusText;
 		try {
-			detail = (await res.json()).detail ?? detail;
+			detail = errorText((await res.json()).detail) ?? detail;
 		} catch {
 			/* non-JSON error body */
 		}
@@ -177,10 +201,27 @@ export const api = {
 	resyncBuildLines: (id: number) =>
 		post<BuildOrder>(`/build-orders/${id}/resync-lines`, {}),
 
+	// sales orders
+	salesOrders: () => get<SalesOrder[]>('/sales-orders'),
+	salesOrder: (id: number) => get<SalesOrder>(`/sales-orders/${id}`),
+	salesOrderLines: (id: number) => get<SalesOrderLine[]>(`/sales-orders/${id}/lines`),
+	addLinePart: (id: number, lineId: number, b: { part_id: number; quantity: number }) =>
+		post<SalesOrderLine[]>(`/sales-orders/${id}/lines/${lineId}/parts`, b),
+	editLinePart: (linkId: number, quantity: number) =>
+		patch<{ ok: boolean }>(`/sales-orders/lines/parts/${linkId}`, { quantity }),
+	removeLinePart: (linkId: number) => del<{ ok: boolean }>(`/sales-orders/lines/parts/${linkId}`),
+	salesOrderShortages: (id: number) => get<SalesShortage[]>(`/sales-orders/${id}/shortages`),
+	bookSalesOrder: (id: number) => post<SalesOrder>(`/sales-orders/${id}/book`, {}),
+	salesOrderStock: (id: number) => get<StockItem[]>(`/sales-orders/${id}/stock`),
+	partSalesOrders: (id: number) => get<PartSalesOrder[]>(`/parts/${id}/sales-orders`),
+	importSalesOrders: (b: { after: string; before?: string | null }) =>
+		post<ImportResult>('/sales-orders/import', b),
+
 	// settings
 	settings: () => get<Setting[]>('/settings'),
 	deploymentSettings: () => get<DeploymentSettings>('/settings/deployment'),
 	setSetting: (key: string, value: string) => put<Setting>(`/settings/${enc(key)}`, { value }),
+	testWooCommerce: () => post<{ ok: boolean }>('/settings/woocommerce/test', {}),
 
 	// reports
 	stockValue: () => get<StockValueReport>('/reports/stock-value'),

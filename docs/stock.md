@@ -19,7 +19,7 @@ That is why a stock item has one of two statuses:
 | Status | Meaning |
 | --- | --- |
 | **Available** | On the shelf. Counts towards your stock on hand and your stock value. |
-| **Consumed** | Gone into an assembly (or written off). Kept for history and costing, never counted as on-hand stock. |
+| **Consumed** | Gone into an assembly, sold, or written off. Kept for history and costing, never counted as on-hand stock. |
 
 A consequence: stock tables are full of rows sitting at zero -- a receipt whose
 units went straight into a build, or a settled shortfall. They are history, not
@@ -75,13 +75,14 @@ mostly a repair for imported history. This creates a shortfall, described next.
 
 ## Negative stock, and why it exists
 
-Shortages do not block production. If you tell Stronghold to produce a build and
-a component is short, it produces anyway: the component is drained to zero and
-the missing quantity goes **on credit**.
+Shortages do not block production, and they do not block a sale either. If you
+produce a build and a component is short -- or book a sales order for parts you
+do not have -- it goes ahead anyway: the part is drained to zero and the missing
+quantity goes **on credit**.
 
 That credit is a stock item with a **negative count** -- the one place Available
-stock is allowed to go below zero. It means "this build has already eaten
-parts we don't have yet."
+stock is allowed to go below zero. It means "an order has already eaten parts we
+don't have yet."
 
 The rationale: the alternative is worse. Blocking production would mean the
 assembly you physically built doesn't exist in the system, and its cost would be
@@ -103,13 +104,14 @@ A debt is settled, never deleted -- it shrinks to zero and stays as a record.
 Two ways:
 
 - **Receiving the missing parts on a purchase order.** This happens
-  automatically: the debt shrinks, the build's consumption is repriced from what
-  you actually paid, and the assembly's value is recalculated. The settled units
-  go straight into the assembly -- they never land on the shelf.
+  automatically: the debt shrinks and the consumption is repriced from what you
+  actually paid (for a build, the assembly's value is recalculated too). The
+  settled units go straight to the order that owed them -- they never land on
+  the shelf.
 - **Settling from stock you already have.** If a part somehow ended up with both
   a debt and stock on the shelf, the stock item page offers **Settle from
   stock**. It draws the stock down oldest-first (or off one item you name) and
-  reprices the build off what that stock really cost.
+  reprices the consumption off what that stock really cost.
 
 Either way the point is the same: replace the estimated cost with the real one.
 
@@ -120,7 +122,8 @@ Each stock item carries up to three links, and they are separate on purpose:
 - **Purchase order** -- the order it was received against. Where its price comes
   from.
 - **Built by** -- the build order that produced it (assemblies).
-- **Consumed by** -- the build order that used it up.
+- **Consumed by** -- the order that used it up: a build order that ate it, or a
+  sales order that shipped it.
 
 An assembly produced by one build and eaten by a later one carries both a
 "built by" and a "consumed by" link; collapsing them would lose the trail back

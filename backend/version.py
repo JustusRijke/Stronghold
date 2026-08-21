@@ -18,7 +18,11 @@ from importlib.metadata import PackageNotFoundError, version
 # pk since; see models.po_ref).
 # 3 stores the enum columns (stock status and price basis, PO and build status)
 # as small ints instead of text -- see models.EnumCode.
-SCHEMA_VERSION = 3
+# 4 added sales orders (sales_orders, sales_order_lines, sales_order_line_parts
+# and stock_items.consumed_by_so_id). Purely additive, so there is nothing to
+# migrate -- but the stamp still moves, so an older Stronghold refuses the file
+# instead of dropping every sale on its next export.
+SCHEMA_VERSION = 4
 
 try:
     APP_VERSION = version("stronghold")

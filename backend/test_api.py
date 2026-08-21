@@ -1,9 +1,17 @@
 """API-level integration tests: drive the JSON routes the frontend uses, on a
 tmp database. Complements test_domain.py (which exercises db directly)."""
 
+from datetime import date
+
 import db
 import pytest
-from models import StockItem, StockStatus
+from models import (
+    SalesOrder,
+    SalesOrderLine,
+    SalesOrderStatus,
+    StockItem,
+    StockStatus,
+)
 
 
 def test_parts_crud_and_bom(client):
@@ -519,14 +527,14 @@ def test_build_flow(client):
     assert r.json()["status"] == "Complete"
 
 
+def _setting(client, key):
+    return next(s for s in client.get("/api/settings").json() if s["key"] == key)
+
+
 def test_settings(client):
-    assert {"key": "gui.title", "value": "Stronghold"} in client.get(
-        "/api/settings"
-    ).json()
+    assert _setting(client, "gui.title")["value"] == "Stronghold"
     client.put("/api/settings/gui.title", json={"value": "My Stock"})
-    assert {"key": "gui.title", "value": "My Stock"} in client.get(
-        "/api/settings"
-    ).json()
+    assert _setting(client, "gui.title")["value"] == "My Stock"
     assert client.put("/api/settings/nope", json={"value": "x"}).status_code == 400
 
 
@@ -1211,3 +1219,291 @@ def test_stock_log_reconstructs_deleted_production(client):
     # a surviving row reports itself, so only the remainder is reconstructed
     client.post("/api/stock", json={"part_id": asm, "count": 4, "build_id": bid})
     assert sum(e["quantity"] for e in produced()) == 10.0
+
+
+def _seed_sale(client, so_id=1, wc_order_id=101, qty=1.0):
+    """A sales order as the WooCommerce import leaves it. There is no create
+    route -- WooCommerce owns the order; the app only maps parts onto it."""
+    with db.session() as s:
+        s.add(
+            SalesOrder(
+                id=so_id,
+                wc_order_id=wc_order_id,
+                wc_number=str(wc_order_id),
+                customer_name="A Buyer",
+                shipping_country="NL",
+                shipping_cost=5.0,
+                status=SalesOrderStatus.PROCESSING,
+                date_created=date(2026, 8, 1),
+            )
+        )
+        s.add(
+            SalesOrderLine(
+                id=so_id,
+                so_id=so_id,
+                wc_line_id=so_id * 10,
+                sku="",
+                description="A Product",
+                unit_price=50.0,
+                quantity=qty,
+            )
+        )
+        s.commit()
+    return so_id
+
+
+def test_sales_order_flow(client):
+    part = client.post("/api/parts", json={"sku": "W1", "description": "Widget"}).json()
+    item = client.post("/api/stock", json={"part_id": part["id"]}).json()
+    client.patch(f"/api/stock/{item['id']}", json={"count": 10})
+    so_id = _seed_sale(client, qty=2.0)
+
+    so = client.get(f"/api/sales-orders/{so_id}").json()
+    assert so["reference"] == "SO-0001"
+    assert so["revenue"] == 100.0 and not so["booked"]
+    assert client.get("/api/sales-orders/999").status_code == 404
+
+    line_id = client.get(f"/api/sales-orders/{so_id}/lines").json()[0]["id"]
+    # a non-positive quantity is a domain rejection with a readable message,
+    # not a schema 422 (whose detail is a list the frontend cannot show)
+    bad = client.post(
+        f"/api/sales-orders/{so_id}/lines/{line_id}/parts",
+        json={"part_id": part["id"], "quantity": 0},
+    )
+    assert bad.status_code == 400 and "positive" in bad.json()["detail"]
+
+    lines = client.post(
+        f"/api/sales-orders/{so_id}/lines/{line_id}/parts",
+        json={"part_id": part["id"], "quantity": 3},
+    ).json()
+    # 2 sold x 3 per unit
+    assert [(p["required"], p["in_stock"]) for p in lines[0]["parts"]] == [(6.0, 10.0)]
+    assert client.get(f"/api/sales-orders/{so_id}/shortages").json() == []
+    # the sale shows up under the part it consumes
+    assert [
+        s["reference"]
+        for s in client.get(f"/api/parts/{part['id']}/sales-orders").json()
+    ] == ["SO-0001"]
+
+    booked = client.post(f"/api/sales-orders/{so_id}/book").json()
+    # nothing has priced this part (stock was added by hand, no PO), so there is
+    # no realised cost to report -- but the sale is booked and the stock is gone
+    assert booked["booked"] and booked["realised_cost"] is None
+    # consuming it a second time would take the stock twice
+    assert client.post(f"/api/sales-orders/{so_id}/book").status_code == 400
+    stock = client.get(f"/api/sales-orders/{so_id}/stock").json()
+    assert [(r["count"], r["status"]) for r in stock] == [(6.0, "consumed")]
+    assert stock[0]["consumed_by_reference"] == "SO-0001"
+    # search finds it by its derived code and by who bought it
+    assert client.get("/api/search?q=SO-0001").json()[0]["type"] == "sales_order"
+    assert client.get("/api/search?q=Buyer").json()[0]["id"] == so_id
+
+
+def test_sales_order_margin_from_purchased_stock(client):
+    """The margin the page shows: revenue from WooCommerce, cost from what the
+    consumed stock was actually bought for."""
+    part = client.post("/api/parts", json={"sku": "W1", "description": "Widget"}).json()
+    supplier = client.post("/api/suppliers", json={"name": "Acme"}).json()
+    sp = client.post(
+        "/api/supplier-parts",
+        json={
+            "supplier_id": supplier["id"],
+            "part_id": part["id"],
+            "sku": "A-1",
+            "pack_qty": 1,
+        },
+    ).json()
+    po = client.post(
+        "/api/purchase-orders", json={"supplier_id": supplier["id"], "description": "d"}
+    ).json()
+    client.post(
+        f"/api/purchase-orders/{po['id']}/lines",
+        json={"supplier_part_id": sp["id"], "quantity": 10, "price": 4.0},
+    )
+    line = client.get(f"/api/purchase-orders/{po['id']}/lines").json()[0]
+    client.post(f"/api/po-lines/{line['id']}/book", json={"quantity": 10})
+
+    so_id = _seed_sale(client)
+    so_line = client.get(f"/api/sales-orders/{so_id}/lines").json()[0]["id"]
+    client.post(
+        f"/api/sales-orders/{so_id}/lines/{so_line}/parts",
+        json={"part_id": part["id"], "quantity": 3},
+    )
+    # estimated before booking: 3 @ the part's price from the PO
+    before = client.get(f"/api/sales-orders/{so_id}").json()
+    assert before["estimated_cost"] == 12.0
+    assert before["estimated_margin"] == 38.0  # 50.00 revenue - 12.00
+    assert before["realised_cost"] is None
+
+    after = client.post(f"/api/sales-orders/{so_id}/book").json()
+    # the stock really did cost 4.00, so realised matches the estimate
+    assert (after["realised_cost"], after["realised_margin"]) == (12.0, 38.0)
+
+
+def test_sales_order_can_be_booked_short(client):
+    part = client.post("/api/parts", json={"sku": "W1", "description": "Widget"}).json()
+    so_id = _seed_sale(client)
+    line_id = client.get(f"/api/sales-orders/{so_id}/lines").json()[0]["id"]
+    client.post(
+        f"/api/sales-orders/{so_id}/lines/{line_id}/parts",
+        json={"part_id": part["id"], "quantity": 4},
+    )
+    # nothing in stock: the shortage is reported but does not block
+    assert client.get(f"/api/sales-orders/{so_id}/shortages").json() == [
+        {
+            "part_id": part["id"],
+            "description": "Widget",
+            "required": 4.0,
+            "in_stock": 0.0,
+        }
+    ]
+    assert client.post(f"/api/sales-orders/{so_id}/book").json()["booked"]
+    # the shortfall is carried as a negative Available row owed by the sale
+    counts = [
+        (r["count"], r["status"])
+        for r in client.get(f"/api/sales-orders/{so_id}/stock").json()
+    ]
+    assert counts == [(4.0, "consumed"), (-4.0, "available")]
+
+
+def test_sale_consumed_stock_reads_as_a_sale_in_the_stock_log(client):
+    """A sale's consumed slice inherits the source's po_id for pricing, so the
+    log has to test the sale stamp before the PO one -- otherwise the units that
+    left read as a second arrival on the order that first brought them in."""
+    part = client.post("/api/parts", json={"sku": "W1", "description": "Widget"}).json()
+    supplier = client.post("/api/suppliers", json={"name": "Acme"}).json()
+    sp = client.post(
+        "/api/supplier-parts",
+        json={
+            "supplier_id": supplier["id"],
+            "part_id": part["id"],
+            "sku": "A-1",
+            "pack_qty": 1,
+        },
+    ).json()
+    # the stock is bought before the sale that ships it, so the log is ordered
+    # receipt-then-sale (_seed_sale dates its order 2026-08-01)
+    po = client.post(
+        "/api/purchase-orders",
+        json={
+            "supplier_id": supplier["id"],
+            "description": "d",
+            "start_date": "2026-07-01",
+        },
+    ).json()
+    client.post(
+        f"/api/purchase-orders/{po['id']}/lines",
+        json={"supplier_part_id": sp["id"], "quantity": 10, "price": 4.0},
+    )
+    line = client.get(f"/api/purchase-orders/{po['id']}/lines").json()[0]
+    client.post(f"/api/po-lines/{line['id']}/book", json={"quantity": 10})
+
+    so_id = _seed_sale(client)
+    so_line = client.get(f"/api/sales-orders/{so_id}/lines").json()[0]["id"]
+    client.post(
+        f"/api/sales-orders/{so_id}/lines/{so_line}/parts",
+        json={"part_id": part["id"], "quantity": 3},
+    )
+    client.post(f"/api/sales-orders/{so_id}/book")
+
+    log = client.get(f"/api/parts/{part['id']}/stock-log").json()
+    # the receipt (7 left of 10) and the sale that took 3 -- not two receipts
+    assert [(e["kind"], e["quantity"]) for e in log] == [
+        ("received", 7),
+        ("consumed", -3),
+    ]
+    sale = log[1]
+    assert sale["order_label"] == "SO-0001"
+    assert sale["order_url"] == f"/sales-orders/{so_id}"
+
+
+def test_credentials_never_leave_the_backend(client):
+    """The settings API reports whether a credential is set, never what it is:
+    a value it sent out could be round-tripped back by an unchanged form."""
+    assert _setting(client, "woocommerce.key") == {
+        "key": "woocommerce.key",
+        "value": "",
+        "secret": True,
+        "configured": False,
+    }
+    client.put("/api/settings/woocommerce.key", json={"value": "ck_supersecret"})
+    after = _setting(client, "woocommerce.key")
+    assert after["configured"] is True
+    assert after["value"] == ""  # still not disclosed
+    # and no route leaks it wholesale
+    assert "ck_supersecret" not in client.get("/api/settings").text
+
+    # the url is an ordinary setting: shown, and not flagged secret
+    client.put("/api/settings/woocommerce.url", json={"value": "https://shop.test"})
+    url = _setting(client, "woocommerce.url")
+    assert url["secret"] is False and url["value"] == "https://shop.test"
+
+    # clearing is explicit
+    client.put("/api/settings/woocommerce.key", json={"value": ""})
+    assert _setting(client, "woocommerce.key")["configured"] is False
+
+
+def test_woocommerce_test_route_needs_configuration(client):
+    """Unconfigured is a 400 with a message, not a crash on an empty URL."""
+    r = client.post("/api/settings/woocommerce/test")
+    assert r.status_code == 400 and "not configured" in r.json()["detail"]
+
+
+def test_margin_is_reported_as_a_percentage(client):
+    """Margin over revenue, so a 100.00 sale costing 12.00 reads 88%."""
+    part = client.post("/api/parts", json={"sku": "W1", "description": "Widget"}).json()
+    supplier = client.post("/api/suppliers", json={"name": "Acme"}).json()
+    sp = client.post(
+        "/api/supplier-parts",
+        json={
+            "supplier_id": supplier["id"],
+            "part_id": part["id"],
+            "sku": "A-1",
+            "pack_qty": 1,
+        },
+    ).json()
+    po = client.post(
+        "/api/purchase-orders", json={"supplier_id": supplier["id"], "description": "d"}
+    ).json()
+    client.post(
+        f"/api/purchase-orders/{po['id']}/lines",
+        json={"supplier_part_id": sp["id"], "quantity": 10, "price": 4.0},
+    )
+    line = client.get(f"/api/purchase-orders/{po['id']}/lines").json()[0]
+    client.post(f"/api/po-lines/{line['id']}/book", json={"quantity": 10})
+
+    so_id = _seed_sale(client)  # one line, 50.00 x 1
+    so_line = client.get(f"/api/sales-orders/{so_id}/lines").json()[0]["id"]
+    client.post(
+        f"/api/sales-orders/{so_id}/lines/{so_line}/parts",
+        json={"part_id": part["id"], "quantity": 3},
+    )
+    before = client.get(f"/api/sales-orders/{so_id}").json()
+    # revenue 50, cost 12 -> 76%
+    assert before["estimated_margin_pct"] == 76.0
+    assert before["realised_margin_pct"] is None  # not booked yet
+
+    after = client.post(f"/api/sales-orders/{so_id}/book").json()
+    assert after["realised_margin_pct"] == 76.0
+
+
+def test_booking_stays_available_while_parts_are_outstanding(client):
+    """unbooked_parts is what the page uses to offer 'Book added parts'."""
+    part = client.post("/api/parts", json={"sku": "W1", "description": "Widget"}).json()
+    item = client.post("/api/stock", json={"part_id": part["id"]}).json()
+    client.patch(f"/api/stock/{item['id']}", json={"count": 100})
+    so_id = _seed_sale(client)
+    so_line = client.get(f"/api/sales-orders/{so_id}/lines").json()[0]["id"]
+
+    # an order with nothing linked books anyway, and asks for nothing more
+    assert client.get(f"/api/sales-orders/{so_id}").json()["unbooked_parts"] == 0
+    assert client.post(f"/api/sales-orders/{so_id}/book").json()["booked"] is True
+
+    # linking after booking is allowed and re-opens booking
+    client.post(
+        f"/api/sales-orders/{so_id}/lines/{so_line}/parts",
+        json={"part_id": part["id"], "quantity": 2},
+    )
+    assert client.get(f"/api/sales-orders/{so_id}").json()["unbooked_parts"] == 1
+    client.post(f"/api/sales-orders/{so_id}/book")
+    assert client.get(f"/api/sales-orders/{so_id}").json()["unbooked_parts"] == 0

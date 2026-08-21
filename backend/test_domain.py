@@ -8,7 +8,9 @@ import subprocess
 from datetime import date
 from pathlib import Path
 
+import crypto
 import db
+import import_woocommerce
 import pytest
 from models import (
     BUILD_STATUS_CODES,
@@ -28,11 +30,16 @@ from models import (
     POStatus,
     PriceBasis,
     PurchaseOrder,
+    SalesOrder,
+    SalesOrderLine,
+    SalesOrderLinePart,
+    SalesOrderStatus,
+    Setting,
     StockItem,
     StockStatus,
     po_ref,
 )
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy import text as select_text
 from version import RELEASE_VERSION, SCHEMA_VERSION
 
@@ -1201,3 +1208,363 @@ def test_set_count_cannot_cross_zero(database):
     # settled to zero it is still the build's row, not shelf stock
     with pytest.raises(db.InventoryError):
         db.set_count(debt.id, 5)
+
+
+def _seed_sale(so_id=1, wc_order_id=101, status=SalesOrderStatus.PROCESSING, qty=1.0):
+    """A sales order with one line, as the WooCommerce import would have left it.
+    There is no create route: WooCommerce owns the order, we only map parts to it."""
+    with db.session() as s:
+        s.add(
+            SalesOrder(
+                id=so_id,
+                wc_order_id=wc_order_id,
+                wc_number=str(wc_order_id),
+                customer_name="A Buyer",
+                shipping_country="NL",
+                shipping_cost=5.0,
+                status=status,
+                date_created=date(2026, 8, 1),
+            )
+        )
+        s.add(
+            SalesOrderLine(
+                id=so_id,
+                so_id=so_id,
+                wc_line_id=so_id * 10,
+                sku="",  # WooCommerce often has none; it is never matched on
+                description="A Product",
+                unit_price=50.0,
+                quantity=qty,
+            )
+        )
+        s.commit()
+    return so_id, so_id  # (so_id, line_id)
+
+
+def test_sales_order_flow(database):
+    part_id = db.next_part_id()
+    db.create_part(part_id, "W1", "Widget")
+    # two lots at different prices: FIFO must drain the older one first and each
+    # consumed row must inherit the price of the lot it came from
+    with db.session() as s:
+        s.add(StockItem(id=1, count=6.0, part_id=part_id, unit_price=2.0))
+        s.add(StockItem(id=2, count=10.0, part_id=part_id, unit_price=5.0))
+        s.commit()
+    so_id, line_id = _seed_sale(qty=2.0)
+
+    db.add_line_part(db.next_line_part_id(), line_id, part_id, 4.0)
+    with db.session() as s:
+        # 2 sold x 4 per unit
+        assert db.so_needs(s, so_id) == {part_id: 8.0}
+        assert db.so_shortages(s, so_id) == []
+        # an unbooked sale is demand: the parts have not left the shelf yet
+        assert db.part_demand(s)[part_id][0] == 8.0
+
+    db.book_sales_order(so_id)
+    with db.session() as s:
+        rows = s.scalars(select(StockItem).order_by(StockItem.id)).all()
+        # lot 1 drained, lot 2 partly taken; a consumed row split off each
+        assert [(r.id, r.count, r.status) for r in rows] == [
+            (1, 0.0, StockStatus.AVAILABLE),
+            (2, 8.0, StockStatus.AVAILABLE),
+            (3, 6.0, StockStatus.CONSUMED),
+            (4, 2.0, StockStatus.CONSUMED),
+        ]
+        # each consumed row kept the price of the lot it came from
+        assert [(r.unit_price, r.consumed_by_so_id) for r in rows[2:]] == [
+            (2.0, so_id),
+            (5.0, so_id),
+        ]
+        assert db.so_revenue(s, so_id) == 100.0
+        # realised: 6 @ 2.00 + 2 @ 5.00
+        assert db.so_cost(s, so_id)[1] == 22.0
+        # booked, so it asks for nothing more
+        assert part_id not in db.part_demand(s)
+        act = s.scalars(
+            select(Activity).where(Activity.action == "book_sales_order")
+        ).one()
+        assert json.loads(act.refs)[0]["label"] == "SO-0001"
+
+    # re-booking with nothing new mapped would consume the stock twice
+    with pytest.raises(db.InventoryError):
+        db.book_sales_order(so_id)
+    # an existing link is frozen: those units are already out of stock
+    link_id = db.next_line_part_id() - 1
+    with pytest.raises(db.InventoryError):
+        db.edit_line_part(link_id, 1.0)
+    with pytest.raises(db.InventoryError):
+        db.remove_line_part(link_id)
+
+    assert "INSERT INTO sales_orders" in database.read_text(encoding="utf-8")
+
+
+def test_sales_order_short_debt_settled_by_purchase(database):
+    part_id = db.next_part_id()
+    db.create_part(part_id, "W1", "Widget")
+    supplier_id = db.next_supplier_id()
+    db.create_supplier(supplier_id, "Acme")
+    sp_id = db.next_supplier_part_id()
+    db.create_supplier_part(sp_id, supplier_id, "A-1", part_id, pack_qty=1)
+    with db.session() as s:
+        s.add(StockItem(id=1, count=3.0, part_id=part_id, unit_price=2.0))
+        s.commit()
+    so_id, line_id = _seed_sale()
+
+    db.add_line_part(db.next_line_part_id(), line_id, part_id, 10.0)
+    with db.session() as s:
+        assert db.so_shortages(s, so_id) == [(part_id, "Widget", 10.0, 3.0)]
+
+    # short by 7, but the sale still happened: book it anyway
+    db.book_sales_order(so_id)
+    with db.session() as s:
+        rows = s.scalars(select(StockItem).order_by(StockItem.id)).all()
+        # the shortfall is an adjacent pair, consumed first -- the ordering
+        # _settle_stock_debt depends on to find the row to reprice
+        assert [(r.id, r.count, r.status) for r in rows[-2:]] == [
+            (3, 7.0, STOCK_CONSUMED),
+            (4, -7.0, STOCK_AVAILABLE),
+        ]
+        assert rows[-1].consumed_by_so_id == so_id
+
+    # the parts arrive: the debt settles and the consumption reprices to what
+    # was actually paid, rather than staying at the estimate
+    po_id = db.next_po_id()
+    db.create_po(po_id, supplier_id)
+    line = db.next_line_id()
+    db.add_po_line(line, po_id, sp_id, 7, 4.0)
+    db.book_po_line(line, db.next_item_id(), 7)
+    with db.session() as s:
+        debt = s.get(StockItem, 4)
+        placeholder = s.get(StockItem, 3)
+        assert debt.count == 0.0  # settled, not deleted
+        assert placeholder.unit_price == 4.0
+        assert placeholder.price_basis == PriceBasis.PO
+        # 10 @ 4.00. The 3 units taken off the shelf were seeded with a bare
+        # unit_price and no order behind them (basis "none"), so the receipt is
+        # the first real price this part has had and refresh_part_price restates
+        # them at it -- the sale is costed at what the parts are known to cost.
+        assert db.so_cost(s, so_id)[1] == 40.0
+        # the settlement is reported against the sale, not a build
+        act = s.scalars(
+            select(Activity).where(Activity.action == "settle_stock_debt")
+        ).one()
+        assert "SO-0001" in act.message
+
+
+def test_cancelled_sales_orders_raise_no_demand(database):
+    part_id = db.next_part_id()
+    db.create_part(part_id, "W1", "Widget")
+    _, live_line = _seed_sale(so_id=1, wc_order_id=101)
+    _, dead_line = _seed_sale(
+        so_id=2, wc_order_id=102, status=SalesOrderStatus.CANCELLED
+    )
+    db.add_line_part(db.next_line_part_id(), live_line, part_id, 3.0)
+    db.add_line_part(db.next_line_part_id(), dead_line, part_id, 99.0)
+    with db.session() as s:
+        # only the live order counts; a cancelled sale needs nothing bought
+        assert db.part_demand(s)[part_id][0] == 3.0
+
+
+def test_a_sale_can_consume_labour(database):
+    """A virtual part (labour) holds no stock, but a sale that used it really
+    did cost that -- so it is recorded like a build records it: a consumed row
+    at the part's rate, with nothing drawn down."""
+    part_id = db.next_part_id()
+    db.create_part(part_id, "LAB", "Labour")
+    db.set_part_virtual(part_id, True)
+    db.set_part_price(part_id, 40.0)
+    so_id, line_id = _seed_sale(qty=2.0)
+
+    db.add_line_part(db.next_line_part_id(), line_id, part_id, 1.5)
+    with db.session() as s:
+        # unlimited, so it can never be short
+        assert db.so_shortages(s, so_id) == []
+        # and it asks nothing of purchasing
+        assert part_id not in db.part_demand(s)
+
+    db.book_sales_order(so_id)
+    with db.session() as s:
+        rows = s.scalars(select(StockItem)).all()
+        assert len(rows) == 1  # the record, not a drawdown
+        assert rows[0].count == 3.0  # 2 sold x 1.5 hours
+        assert rows[0].status == STOCK_CONSUMED
+        assert rows[0].price_basis == PriceBasis.VIRTUAL
+        # 3 hours x 40.00 counts against the sale
+        assert db.so_cost(s, so_id)[1] == 120.0
+
+
+def test_import_survives_orders_it_cannot_fully_understand(database):
+    """The import is one transaction, so a row it chokes on would roll back
+    every order alongside it. Stores add their own statuses freely (Blocks
+    checkout writes 'checkout-draft'), and an order may carry no date."""
+    rows = [
+        {
+            "wc_order_id": 1,
+            "wc_number": "1",
+            "status": "processing",
+            "date_created": "2026-08-01",
+            "customer_name": "A",
+            "shipping_country": "NL",
+            "shipping_cost": 0.0,
+            "lines": [],
+        },
+        {
+            "wc_order_id": 2,
+            "wc_number": "2",
+            "status": "checkout-draft",  # not one of ours
+            "date_created": "2026-08-02",
+            "customer_name": "B",
+            "shipping_country": "NL",
+            "shipping_cost": 0.0,
+            "lines": [],
+        },
+        {
+            "wc_order_id": 3,
+            "wc_number": "3",
+            "status": "processing",
+            "date_created": "",  # _map_order's fallback for a missing date
+            "customer_name": "C",
+            "shipping_country": "NL",
+            "shipping_cost": 0.0,
+            "lines": [],
+        },
+    ]
+    result = {"imported": 0, "updated": 0, "skipped": 0, "notes": []}
+    import_woocommerce._import(rows, result)
+
+    assert result["imported"] == 3  # the good ones are NOT lost with the odd ones
+    with db.session() as s:
+        orders = s.scalars(select(SalesOrder).order_by(SalesOrder.id)).all()
+        assert [o.wc_order_id for o in orders] == [1, 2, 3]
+        assert orders[1].status == ""  # unknown status stored as unset
+        assert orders[2].date_created is None
+    # and the user is told why, rather than it happening silently
+    assert any("checkout-draft" in n for n in result["notes"])
+
+
+def test_credential_settings_are_encrypted_at_rest(database, tmp_path):
+    """A credential must survive the round trip without its plaintext ever
+    reaching the data file -- which is exported to git -- or the activity log."""
+    db.set_setting("woocommerce.url", "https://shop.example.com")
+    db.set_setting("woocommerce.key", "ck_supersecret")
+    db.set_setting("woocommerce.secret", "cs_topsecret")
+
+    assert db.get_setting("woocommerce.key") == "ck_supersecret"
+    assert db.get_setting("woocommerce.secret") == "cs_topsecret"
+    # a plain setting is untouched by any of this
+    assert db.get_setting("woocommerce.url") == "https://shop.example.com"
+
+    with db.session() as s:
+        stored = s.get(Setting, "woocommerce.key").value
+        assert stored != "ck_supersecret"
+        assert stored.startswith("gAAAAA")  # a Fernet token
+        # the change is recorded, the value is not
+        messages = [
+            a.message
+            for a in s.scalars(select(Activity).where(Activity.action == "set_setting"))
+        ]
+    assert "Setting woocommerce.key: value changed" in messages
+    assert not any("ck_supersecret" in m or "cs_topsecret" in m for m in messages)
+    # the url is not a credential, so it is logged in full
+    assert any("https://shop.example.com" in m for m in messages)
+
+    sql = database.read_text(encoding="utf-8")
+    assert "ck_supersecret" not in sql
+    assert "cs_topsecret" not in sql
+    assert "https://shop.example.com" in sql  # the plain one is readable
+
+
+def test_losing_the_key_file_costs_only_the_credentials(database, tmp_path):
+    """The documented failure mode: the key is gone, so the encrypted values
+    are unreadable -- and that is all. The app must not fall over."""
+    db.set_setting("woocommerce.url", "https://shop.example.com")
+    db.set_setting("woocommerce.key", "ck_supersecret")
+
+    crypto.init(tmp_path / "different.key")  # as if the file were lost/replaced
+
+    assert db.get_setting("woocommerce.key") == ""  # unreadable reads as unset
+    assert db.get_setting("woocommerce.url") == "https://shop.example.com"
+    assert db.get_setting("gui.title") == "Stronghold"
+    # and the user can simply enter it again
+    db.set_setting("woocommerce.key", "ck_reentered")
+    assert db.get_setting("woocommerce.key") == "ck_reentered"
+
+
+def test_parts_added_after_booking_are_booked_by_the_delta(database):
+    """Booking a booked order consumes what was linked since -- not the whole
+    mapping again, which would take the first parts out of stock twice."""
+    a = db.next_part_id()
+    db.create_part(a, "A", "Part A")
+    b = db.next_part_id()
+    db.create_part(b, "B", "Part B")
+    with db.session() as s:
+        s.add(StockItem(id=1, count=100.0, part_id=a, unit_price=2.0))
+        s.add(StockItem(id=2, count=100.0, part_id=b, unit_price=3.0))
+        s.commit()
+    so_id, line_id = _seed_sale(qty=2.0)
+
+    db.add_line_part(db.next_line_part_id(), line_id, a, 3.0)  # 2 x 3 = 6 of A
+    db.book_sales_order(so_id)
+    with db.session() as s:
+        assert db.so_consumed(s, so_id) == {a: 6.0}
+        assert db.so_outstanding(s, so_id) == {}
+
+    # linking a part to a booked order is allowed; booking again takes only it
+    db.add_line_part(db.next_line_part_id(), line_id, b, 5.0)  # 2 x 5 = 10 of B
+    with db.session() as s:
+        assert db.so_outstanding(s, so_id) == {b: 10.0}
+    db.book_sales_order(so_id)
+    with db.session() as s:
+        assert db.so_consumed(s, so_id) == {a: 6.0, b: 10.0}
+        # A was not consumed a second time
+        assert s.get(StockItem, 1).count == 94.0
+        assert s.get(StockItem, 2).count == 90.0
+
+    # nothing new mapped: booking again would be a double consumption
+    with pytest.raises(db.InventoryError):
+        db.book_sales_order(so_id)
+
+
+def test_an_order_that_consumes_nothing_can_still_be_booked(database):
+    """Some sales draw no stock (a service, a digital product). Booking one is
+    how the user records that it has been dealt with."""
+    so_id, _ = _seed_sale()
+    db.book_sales_order(so_id)  # no parts linked at all
+    with db.session() as s:
+        assert db.get_so(s, so_id).booked is True
+        assert s.scalar(select(func.count(StockItem.id))) == 0
+        act = s.scalars(
+            select(Activity).where(Activity.action == "book_sales_order")
+        ).one()
+        assert "no parts to consume" in act.message
+    with pytest.raises(db.InventoryError):
+        db.book_sales_order(so_id)
+
+
+def test_linking_a_part_twice_adds_to_the_existing_link(database):
+    """One line uses one quantity of a given part, so "two more of those" is an
+    increase, not a second row -- and not an error."""
+    part_id = db.next_part_id()
+    db.create_part(part_id, "N", "Nut")
+    with db.session() as s:
+        s.add(StockItem(id=1, count=100.0, part_id=part_id, unit_price=2.0))
+        s.commit()
+    so_id, line_id = _seed_sale(qty=2.0)
+
+    db.add_line_part(db.next_line_part_id(), line_id, part_id, 3.0)
+    db.add_line_part(db.next_line_part_id(), line_id, part_id, 2.0)
+    with db.session() as s:
+        links = s.scalars(select(SalesOrderLinePart)).all()
+        assert len(links) == 1 and links[0].quantity == 5.0
+        assert db.so_needs(s, so_id) == {part_id: 10.0}  # 2 sold x 5
+
+    # the same on a booked order: it raises what is needed, and booking again
+    # takes only the difference
+    db.book_sales_order(so_id)
+    db.add_line_part(db.next_line_part_id(), line_id, part_id, 1.0)
+    with db.session() as s:
+        assert db.so_outstanding(s, so_id) == {part_id: 2.0}
+    db.book_sales_order(so_id)
+    with db.session() as s:
+        assert db.so_consumed(s, so_id) == {part_id: 12.0}
+        assert s.get(StockItem, 1).count == 88.0  # never consumed twice

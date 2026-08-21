@@ -7,19 +7,22 @@
 	import { expert } from '$lib/expert.svelte';
 	import { toast } from '$lib/toast.svelte';
 	import type { StockItem } from '$lib/types';
-	import { STOCK_AVAILABLE, stockStatusLabel } from '$lib/status';
+	import { STOCK_AVAILABLE, stockConsumerUrl, stockStatusLabel } from '$lib/status';
 
 	const id = $derived(Number($page.params.id));
 	let item = $state<StockItem | null>(null);
 	let notFound = $state(false);
 	let settling = $state(false);
-	// a row belonging to a build's shortfall rather than to the shelf. Still
-	// true once it settles to zero, so an expert edit cannot turn it into stock
-	const owedToBuild = $derived(
-		!!item && item.status === STOCK_AVAILABLE && !!item.consumed_by_build_id
+	// a row belonging to an order's shortfall (a build's or a sale's) rather
+	// than to the shelf. Still true once it settles to zero, so an expert edit
+	// cannot turn it into stock
+	const owedToOrder = $derived(
+		!!item &&
+			item.status === STOCK_AVAILABLE &&
+			(!!item.consumed_by_build_id || !!item.consumed_by_so_id)
 	);
 	// an outstanding shortfall: one still owing stock, so still settleable
-	const isDebt = $derived(owedToBuild && !!item && item.count < 0);
+	const isDebt = $derived(owedToOrder && !!item && item.count < 0);
 
 	const sections = [{ id: 'details', label: 'Details' }];
 
@@ -101,12 +104,10 @@
 						>
 					</p>
 				{/if}
-				{#if item.consumed_by_build_id}
+				{#if item.consumed_by_build_id || item.consumed_by_so_id}
 					<p>
 						Consumed by:
-						<a class="mono" href={`/build-orders/${item.consumed_by_build_id}`}
-							>{item.consumed_by_reference}</a
-						>
+						<a class="mono" href={stockConsumerUrl(item)}>{item.consumed_by_reference}</a>
 					</p>
 				{/if}
 				{#if item.stocktake_reason}
@@ -141,8 +142,8 @@
 								type="number"
 								step="any"
 								aria-labelledby="count-label"
-								min={owedToBuild ? undefined : 0}
-								max={owedToBuild ? 0 : undefined}
+								min={owedToOrder ? undefined : 0}
+								max={owedToOrder ? 0 : undefined}
 								bind:value={draftCount}
 								onkeydown={(e) => e.key === 'Enter' && saveCount()}
 							/>
@@ -150,8 +151,8 @@
 								OK
 							</button>
 						</div>
-						{#if owedToBuild}
-							<span class="hint">stock owed to a build; settle it to 0, never above</span>
+						{#if owedToOrder}
+							<span class="hint">stock owed to an order; settle it to 0, never above</span>
 						{/if}
 					</div>
 				{:else}

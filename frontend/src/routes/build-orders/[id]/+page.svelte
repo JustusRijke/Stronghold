@@ -376,7 +376,8 @@
 					You can produce anyway -- the full quantity is still produced and the missing
 					parts are recorded as negative stock, valued at the part's estimated price
 					and deducted from stock value. Receiving them on a purchase order clears the
-					shortfall and reprices this build at what you actually paid.
+					shortfall automatically; stock already on the shelf is settled by hand from
+					the stock item. Either way this build is repriced at what it actually cost.
 				</p>
 			</div>
 		{/if}

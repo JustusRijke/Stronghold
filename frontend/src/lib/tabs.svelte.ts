@@ -55,3 +55,4 @@ export const supplierTabs = makeTabs('suppliers');
 export const supplierPartTabs = makeTabs('supplier-parts');
 export const poTabs = makeTabs('purchase-orders');
 export const buildTabs = makeTabs('build-orders');
+export const salesOrderTabs = makeTabs('sales-orders');

@@ -9,6 +9,10 @@
 		id: string;
 		required?: boolean;
 		placeholder?: string;
+		/** Enter in the box confirms the pick (submit the row it sits in). */
+		onenter?: () => void;
+		/** Widen the box: entity labels (a part description) are often long. */
+		wide?: boolean;
 	}
 	let {
 		value = $bindable(),
@@ -16,7 +20,9 @@
 		label,
 		id,
 		required = false,
-		placeholder = 'Type to search…'
+		placeholder = 'Type to search…',
+		onenter,
+		wide = false
 	}: Props = $props();
 
 	// labels must be unique for the reverse lookup to work; SKUs are not unique
@@ -44,7 +50,31 @@
 	}
 </script>
 
-<input {id} list={`${id}-list`} {required} {placeholder} bind:value={text} oninput={sync} />
+<input
+	class:wide
+	{id}
+	list={`${id}-list`}
+	{required}
+	{placeholder}
+	bind:value={text}
+	oninput={sync}
+	onkeydown={(e) => {
+		if (e.key !== 'Enter' || !onenter) return;
+		// the datalist popup also answers Enter (to accept a suggestion); sync
+		// first so the pick is resolved before the caller reads `value`
+		e.preventDefault();
+		sync();
+		onenter();
+	}}
+/>
 <datalist id={`${id}-list`}>
 	{#each labels as l (l.id)}<option value={l.text}></option>{/each}
 </datalist>
+
+<style>
+	/* a caller's scoped CSS cannot reach this input, so the width lives here */
+	.wide {
+		width: 100%;
+		min-width: 320px;
+	}
+</style>

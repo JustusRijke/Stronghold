@@ -147,6 +147,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/parts/{part_id}/sales-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Part Sales Orders
+         * @description Sales orders that consume this part, with what each requires of it.
+         */
+        get: operations["list_part_sales_orders_api_parts__part_id__sales_orders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/parts/{part_id}/bom": {
         parameters: {
             query?: never;
@@ -637,6 +657,181 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sales-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Sales Orders */
+        get: operations["list_sales_orders_api_sales_orders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sales-orders/{so_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Sales Order */
+        get: operations["get_sales_order_api_sales_orders__so_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sales-orders/{so_id}/lines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Sales Order Lines
+         * @description The order's line items, each with the parts it has been mapped to.
+         */
+        get: operations["list_sales_order_lines_api_sales_orders__so_id__lines_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sales-orders/{so_id}/lines/{line_id}/parts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Line Part
+         * @description Link a part to a sold line item. Manual by design: WooCommerce knows the
+         *     SKU it sold, not the parts behind it.
+         */
+        post: operations["add_line_part_api_sales_orders__so_id__lines__line_id__parts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sales-orders/lines/parts/{link_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Line Part */
+        delete: operations["delete_line_part_api_sales_orders_lines_parts__link_id__delete"];
+        options?: never;
+        head?: never;
+        /** Patch Line Part */
+        patch: operations["patch_line_part_api_sales_orders_lines_parts__link_id__patch"];
+        trace?: never;
+    };
+    "/api/sales-orders/{so_id}/shortages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sales Order Shortages
+         * @description What booking would run short of -- what the confirm dialog warns with.
+         */
+        get: operations["sales_order_shortages_api_sales_orders__so_id__shortages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sales-orders/{so_id}/book": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Book Sales Order
+         * @description Consume the parts this sale used, FIFO. Shortages do not block: the
+         *     missing quantity becomes a debt a later PO receipt settles.
+         */
+        post: operations["book_sales_order_api_sales_orders__so_id__book_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sales-orders/{so_id}/stock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Sales Order Stock
+         * @description The stock rows this sale consumed, including any outstanding debt.
+         */
+        get: operations["list_sales_order_stock_api_sales_orders__so_id__stock_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sales-orders/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Sales Orders
+         * @description Fetch orders from WooCommerce and store them. Idempotent: new orders are
+         *     created, unbooked ones updated, booked ones left alone.
+         */
+        post: operations["import_sales_orders_api_sales_orders_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings": {
         parameters: {
             query?: never;
@@ -682,6 +877,27 @@ export interface paths {
         get: operations["deployment_settings_api_settings_deployment_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/woocommerce/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Woocommerce
+         * @description Fetch a single order to prove the stored credentials work, so the user
+         *     can check them without running a real import.
+         */
+        post: operations["test_woocommerce_api_settings_woocommerce_test_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -986,6 +1202,61 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** ImportIn */
+        ImportIn: {
+            /**
+             * After
+             * Format: date
+             */
+            after: string;
+            /** Before */
+            before?: string | null;
+        };
+        /** ImportResultOut */
+        ImportResultOut: {
+            /** Imported */
+            imported: number;
+            /** Updated */
+            updated: number;
+            /** Skipped */
+            skipped: number;
+            /** Notes */
+            notes: string[];
+        };
+        /** LinePartIn */
+        LinePartIn: {
+            /** Part Id */
+            part_id: number;
+            /** Quantity */
+            quantity: number;
+        };
+        /**
+         * LinePartOut
+         * @description One part a sold line item consumes, with what stock is behind it.
+         */
+        LinePartOut: {
+            /** Id */
+            id: number;
+            /** Part Id */
+            part_id: number;
+            /** Sku */
+            sku: string;
+            /** Description */
+            description: string;
+            /** Quantity */
+            quantity: number;
+            /** Required */
+            required: number;
+            /** In Stock */
+            in_stock: number;
+            /** Estimated Price */
+            estimated_price: number | null;
+        };
+        /** LinePartPatch */
+        LinePartPatch: {
+            /** Quantity */
+            quantity: number;
+        };
         /** NegativeStockIn */
         NegativeStockIn: {
             /** Part Id */
@@ -1173,6 +1444,50 @@ export interface components {
             /** Unit Price */
             unit_price?: number | null;
         };
+        /**
+         * PartSalesOrderOut
+         * @description A sale that consumes this part, with how much of it the order needs.
+         */
+        PartSalesOrderOut: {
+            /** Id */
+            id: number;
+            /** Reference */
+            reference: string;
+            /** Wc Order Id */
+            wc_order_id: number;
+            /** Wc Number */
+            wc_number: string;
+            /** Customer Name */
+            customer_name: string;
+            /** Shipping Country */
+            shipping_country: string;
+            /** Shipping Cost */
+            shipping_cost: number;
+            /** Status */
+            status: string;
+            /** Date Created */
+            date_created: string | null;
+            /** Booked */
+            booked: boolean;
+            /** Unbooked Parts */
+            unbooked_parts: number;
+            /** Revenue */
+            revenue: number;
+            /** Estimated Cost */
+            estimated_cost: number | null;
+            /** Realised Cost */
+            realised_cost: number | null;
+            /** Estimated Margin */
+            estimated_margin: number | null;
+            /** Realised Margin */
+            realised_margin: number | null;
+            /** Estimated Margin Pct */
+            estimated_margin_pct: number | null;
+            /** Realised Margin Pct */
+            realised_margin_pct: number | null;
+            /** Required */
+            required: number;
+        };
         /** ProduceIn */
         ProduceIn: {
             /** Quantity */
@@ -1242,13 +1557,92 @@ export interface components {
             /** Description */
             description?: string | null;
         };
+        /** SalesOrderLineOut */
+        SalesOrderLineOut: {
+            /** Id */
+            id: number;
+            /** Wc Line Id */
+            wc_line_id: number;
+            /** Sku */
+            sku: string;
+            /** Description */
+            description: string;
+            /** Unit Price */
+            unit_price: number;
+            /** Quantity */
+            quantity: number;
+            /** Line Total */
+            line_total: number;
+            /** Parts */
+            parts: components["schemas"]["LinePartOut"][];
+        };
+        /**
+         * SalesOrderOut
+         * @description A sale, with both ways of costing it. `estimated_*` come from the linked
+         *     parts' current estimates and exist before booking; `realised_*` come from
+         *     what the consumed stock actually cost and are null until booked. Shipping is
+         *     reported but excluded from margin -- it is a pass-through, not goods.
+         */
+        SalesOrderOut: {
+            /** Id */
+            id: number;
+            /** Reference */
+            reference: string;
+            /** Wc Order Id */
+            wc_order_id: number;
+            /** Wc Number */
+            wc_number: string;
+            /** Customer Name */
+            customer_name: string;
+            /** Shipping Country */
+            shipping_country: string;
+            /** Shipping Cost */
+            shipping_cost: number;
+            /** Status */
+            status: string;
+            /** Date Created */
+            date_created: string | null;
+            /** Booked */
+            booked: boolean;
+            /** Unbooked Parts */
+            unbooked_parts: number;
+            /** Revenue */
+            revenue: number;
+            /** Estimated Cost */
+            estimated_cost: number | null;
+            /** Realised Cost */
+            realised_cost: number | null;
+            /** Estimated Margin */
+            estimated_margin: number | null;
+            /** Realised Margin */
+            realised_margin: number | null;
+            /** Estimated Margin Pct */
+            estimated_margin_pct: number | null;
+            /** Realised Margin Pct */
+            realised_margin_pct: number | null;
+        };
+        /**
+         * SalesShortageOut
+         * @description What booking would go short of. Booking is allowed anyway (the shortfall
+         *     becomes a debt), so this is a warning, not a blocker.
+         */
+        SalesShortageOut: {
+            /** Part Id */
+            part_id: number;
+            /** Description */
+            description: string;
+            /** Required */
+            required: number;
+            /** In Stock */
+            in_stock: number;
+        };
         /** SearchResult */
         SearchResult: {
             /**
              * Type
              * @enum {string}
              */
-            type: "part" | "supplier" | "supplier_part" | "purchase_order" | "build_order";
+            type: "part" | "supplier" | "supplier_part" | "purchase_order" | "build_order" | "sales_order";
             /** Id */
             id: number;
             /** Label */
@@ -1259,12 +1653,27 @@ export interface components {
             /** Value */
             value: string;
         };
-        /** SettingOut */
+        /**
+         * SettingOut
+         * @description A domain setting. A credential's `value` is always "" -- the plaintext
+         *     never leaves the backend, so an unchanged form field cannot round-trip it
+         *     back out. `configured` says whether one is stored.
+         */
         SettingOut: {
             /** Key */
             key: string;
             /** Value */
             value: string;
+            /**
+             * Secret
+             * @default false
+             */
+            secret: boolean;
+            /**
+             * Configured
+             * @default false
+             */
+            configured: boolean;
         };
         /** SettleDebtIn */
         SettleDebtIn: {
@@ -1298,6 +1707,8 @@ export interface components {
             build_id: number | null;
             /** Consumed By Build Id */
             consumed_by_build_id: number | null;
+            /** Consumed By So Id */
+            consumed_by_so_id: number | null;
             /** Build Reference */
             build_reference: string;
             /** Consumed By Reference */
@@ -1826,6 +2237,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PartBuildOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_part_sales_orders_api_parts__part_id__sales_orders_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                part_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartSalesOrderOut"][];
                 };
             };
             /** @description Validation Error */
@@ -3086,6 +3528,316 @@ export interface operations {
             };
         };
     };
+    list_sales_orders_api_sales_orders_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesOrderOut"][];
+                };
+            };
+        };
+    };
+    get_sales_order_api_sales_orders__so_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                so_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesOrderOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sales_order_lines_api_sales_orders__so_id__lines_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                so_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesOrderLineOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_line_part_api_sales_orders__so_id__lines__line_id__parts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                so_id: number;
+                line_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinePartIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesOrderLineOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_line_part_api_sales_orders_lines_parts__link_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                link_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_line_part_api_sales_orders_lines_parts__link_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                link_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinePartPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sales_order_shortages_api_sales_orders__so_id__shortages_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                so_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesShortageOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    book_sales_order_api_sales_orders__so_id__book_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                so_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesOrderOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sales_order_stock_api_sales_orders__so_id__stock_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                so_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockItemOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_sales_orders_api_sales_orders_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportResultOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_settings_api_settings_get: {
         parameters: {
             query?: never;
@@ -3157,6 +3909,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeploymentSettingsOut"];
+                };
+            };
+        };
+    };
+    test_woocommerce_api_settings_woocommerce_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkOut"];
                 };
             };
         };

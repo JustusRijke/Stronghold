@@ -215,6 +215,27 @@ step when one is actually needed.
   price of the day -- InvenTree keeps no historical rate per build, so that
   baseline is the best figure available. A null (a row written before the
   column existed) still falls back to the part's current estimate.
+- `SalesOrder(id, wc_order_id, wc_number, customer_name, shipping_country,
+  shipping_cost, status, date_created, booked)` -- a WooCommerce order, imported
+  read-only. WooCommerce owns the commercial facts; Stronghold owns only what it
+  cannot know, the parts behind a sold product. Unlike every other master record
+  the `id` is **local** (max+1), not the source system's: this import runs
+  repeatedly into a non-empty database, so WooCommerce ids would collide.
+  `wc_order_id` (unique) carries the link and is what re-import matches on. The
+  code (`SO-0042`) is derived from the pk like `po_ref`/`build_ref`.
+  `SalesOrderLine(id, so_id, wc_line_id, sku, description, unit_price,
+  quantity)` is one WooCommerce line item, replaced wholesale by a re-import
+  (its `sku` is plain text, often empty, and never matched against `Part.sku`).
+  `SalesOrderLinePart(id, line_id, part_id, quantity)` is the manual mapping --
+  the only sales table the user writes to -- quantity being per sold unit, like
+  `BomLine`. `db.book_sales_order` consumes those parts through the same
+  `_consume_fifo` helper `produce_build` uses, stamping `consumed_by_so_id` and
+  producing nothing: a sale ships stock out rather than turning it into
+  something. Shortfalls become the same negative-count debt a short build
+  leaves, settled by a later receipt (`_settle_stock_debt` handles both, keyed
+  by `("build"|"sales-order", id)`, and skips the assembly-reprice step for a
+  sale, which has no output). Unbooked, non-cancelled orders count in
+  `db.part_demand`.
 - `Supplier(id, name)`, `SupplierPart(id, supplier_id, sku, part_id, ...)`
   (int PK; sku is a plain code, not unique), `PurchaseOrder(id, supplier_id,
   ...)`, `POLine(id, po_id, supplier_part_id, quantity, received, price)`,
@@ -265,12 +286,40 @@ being reachable?
   read once at startup from the `settings.toml` named on the command line
   (stdlib `tomllib`), each key falling back to a default. Relative paths in it
   resolve against its own directory (`Settings.path_of`), so the settings file
-  can live next to the data. See `settings.toml.example`. The whole
-  InvenTree connection (url, username, password) lives here: `inventory.sql`
-  is tracked in git, so credentials must stay out of the database.
+  can live next to the data. See `settings.toml.example`. The InvenTree
+  connection (url, username, password) lives here, but that is a one-shot
+  migration script rather than the app -- see below for how the app's own
+  credentials are handled.
 - **Domain** (`db.DOMAIN_DEFAULTS`): data, e.g. the GUI title. Stored in the
   `settings` table (one row per changed key, unchanged keys read as their
   default), edited on the `/settings` page.
+
+### Credentials
+
+`inventory.sql` is tracked in git, so a credential in the `settings` table
+would be committed. They are therefore **encrypted at rest**:
+`db.SECRET_SETTINGS` names the domain settings that are credentials, and
+`get_setting`/`set_setting` transparently decrypt and encrypt those through
+`backend/crypto.py` (`cryptography.fernet`, so a hand-edited value fails to
+decrypt rather than yielding garbage).
+
+Three consequences worth stating, because each is a deliberate trade:
+
+- **The flag is code, not data.** A `secret` column on the row could be edited
+  to `false` in the data file, and the next export would write the plaintext.
+- **The value never leaves the backend.** `SettingOut` carries `value=""` plus
+  `configured: bool`, so an unchanged form field cannot round-trip a secret
+  back out, and `set_setting` logs that a secret changed without logging either
+  value (the activity log is exported too).
+- **The key is a separate, gitignored file** (`[secrets] key_file`), created at
+  first run with `0600`. Every failure path in `crypto.py` returns `None`
+  rather than raising, so a missing or unusable key degrades to "not
+  configured" and the user re-enters the credential -- it never stops the app
+  starting. That is the whole recovery story: losing the key costs the stored
+  credentials and nothing else.
+
+This is encryption, not hashing, and necessarily so: the WooCommerce client
+sends the real key and secret on every request, so the value has to come back.
 
 ## Logging
 
@@ -294,5 +343,7 @@ Known ceilings, with their upgrade paths, deferred until they actually hurt
   setting appears.
 - In-memory substring filter on the parts page; add an index when parts grow
   large.
-- `_MIGRATIONS` is empty at 1.0: the mechanism ships, the first step arrives
-  with the first change that makes an older file wrong. See "Data versioning".
+- `_MIGRATIONS` now runs to schema 4: 2 dropped the stored order references, 3
+  moved the enum columns from text to int codes, 4 added the sales-order tables
+  (additive, so its step is a no-op -- but it must exist, since `_migrate` walks
+  every version in turn). See "Data versioning".
