@@ -67,8 +67,8 @@ def fetch_parts(base_url: str, username: str, password: str) -> list[dict]:
 
 
 def fetch_bom(base_url: str, username: str, password: str) -> list[dict]:
-    """Fetch all BOM lines as {parent, component, quantity}. parent/component are
-    InvenTree part pks, resolved to local ids by migrate_inventree.py."""
+    """Fetch all BOM lines as {parent, component, quantity, note}. parent/component
+    are InvenTree part pks, resolved to local ids by migrate_inventree.py."""
     return _fetch_all(
         base_url,
         username,
@@ -78,6 +78,7 @@ def fetch_bom(base_url: str, username: str, password: str) -> list[dict]:
             "parent": b["part"],
             "component": b["sub_part"],
             "quantity": b["quantity"],
+            "note": b["note"] or None,
         },
     )
 
