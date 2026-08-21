@@ -59,7 +59,8 @@ from version import RELEASE_VERSION, SCHEMA_VERSION
 _log = logging.getLogger(__name__)
 
 _engine = None
-_export_path = None
+_export_dir = None
+_legacy_file = None  # a pre-split single inventory.sql, replayed once
 _export_enabled = True
 _auto_commit = False
 _committed_activity_id = None
@@ -129,13 +130,18 @@ def suspend_export() -> None:
 
 
 def init(sql_path: Path, auto_commit: bool = False) -> None:
-    """Open the data in `sql_path`. That file is the truth (tracked in git,
-    restorable by checking out an older commit); SQLite is only how we query
-    it, so the .db is rebuilt from scratch in a temp directory on every
-    startup and never has to be looked after."""
-    global _engine, _export_path, _db_path, _export_enabled, _auto_commit
-    global _committed_activity_id, _startup_message
-    _export_path = sql_path
+    """Open the data in `sql_path`: a directory of per-table .sql files (or a
+    single pre-split .sql, migrated to that layout on the way in). Those files
+    are the truth (tracked in git, restorable by checking out an older commit);
+    SQLite is only how we query them, so the .db is rebuilt from scratch in a
+    temp directory on every startup and never has to be looked after."""
+    global _engine, _export_dir, _legacy_file, _db_path, _export_enabled
+    global _auto_commit, _committed_activity_id, _startup_message
+    # one path setting, two shapes: a directory of per-table .sql files, or --
+    # for data written before the split -- a single .sql, replayed once and
+    # re-exported into a directory beside it.
+    _legacy_file = sql_path if sql_path.is_file() else None
+    _export_dir = sql_path.parent / sql_path.stem if _legacy_file else sql_path
     _export_enabled = True  # a previous suspend_export must not leak in here
     _auto_commit = auto_commit
     _committed_activity_id = None
@@ -150,14 +156,14 @@ def init(sql_path: Path, auto_commit: bool = False) -> None:
     _engine = create_engine(f"sqlite:///{_db_path}")
     event.listen(_engine, "connect", _enable_foreign_keys)
     Base.metadata.create_all(_engine)
-    # before the replay: startup ends in an export that overwrites this file
+    # before the replay: startup ends in an export that overwrites these files
     _commit_pending_changes()
     was = None
-    if _export_path.exists():
+    if _legacy_file or any(_export_dir.glob("*.sql")):
         _import_sql()
         was = _read_stamps()
         _migrate()
-    _export_path.parent.mkdir(parents=True, exist_ok=True)
+    _export_dir.mkdir(parents=True, exist_ok=True)
     _stamp_versions()
     # startup's export is not a domain write, so it says what it actually did
     _startup_message = _startup_commit_message(was)
@@ -177,7 +183,12 @@ def _working_db_path(sql_path: Path) -> Path:
 
 
 def _import_sql() -> None:
-    """Replay the .sql into the freshly created (empty) database.
+    """Replay the exported .sql into the freshly created (empty) database.
+
+    One file per table, replayed in dependency order -- though order does not
+    actually matter: this raw sqlite3 connection has foreign_keys OFF (the ON
+    pragma is attached to the SQLAlchemy engine only), so nothing is checked
+    until the app queries through that engine.
 
     The tables already exist in their *current* shape (create_all ran first), so
     a column an older file does not have simply takes its default. A column the
@@ -185,15 +196,27 @@ def _import_sql() -> None:
     would fail outright, killing startup before _migrate could fix anything. So
     every dropped column is temporarily put back before the replay and dropped
     again by its migration step -- see _DROPPED_COLUMNS."""
-    script = _export_path.read_text(encoding="utf-8")
     with sqlite3.connect(_db_path) as conn:
         for table, column, ddl_type in _dropped_columns():
             # unconditional: the stamp is only readable once the data is in.
             # Harmless for a current file -- the column stays empty and its
             # migration step (a no-op for that file) drops it again.
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
-        conn.executescript(script)
-    _log.info("loaded %s (working copy: %s)", _export_path, _db_path)
+        if _legacy_file:
+            conn.executescript(_legacy_file.read_text(encoding="utf-8"))
+            _log.info(
+                "loaded the single-file %s; re-exporting it as one .sql per "
+                "table under %s. The old file is left untouched and can be "
+                "deleted once you are happy with the new layout.",
+                _legacy_file,
+                _export_dir,
+            )
+            return
+        for table in Base.metadata.sorted_tables:
+            path = _table_path(table.name)
+            if path.exists():
+                conn.executescript(path.read_text(encoding="utf-8"))
+    _log.info("loaded %s (working copy: %s)", _export_dir, _db_path)
 
 
 def _dropped_columns() -> list[tuple[str, str, str]]:
@@ -384,14 +407,14 @@ def _migrate() -> None:
         with session() as s:
             wrote = s.get(Setting, APP_VERSION_KEY)
         raise DataVersionError(
-            f"{_export_path} holds schema version {found}, but this Stronghold "
+            f"{_legacy_file or _export_dir} holds schema version {found}, but this Stronghold "
             f"({RELEASE_VERSION}) only understands version {SCHEMA_VERSION}. It "
             f"was written by Stronghold {wrote.value if wrote else 'unknown'}; "
             f"install that version or newer. Refusing to start: opening it here "
             f"would drop the data this version does not know about."
         )
     for step in range(found + 1, SCHEMA_VERSION + 1):
-        _log.info("migrating %s: schema %d -> %d", _export_path, step - 1, step)
+        _log.info("migrating %s: schema %d -> %d", _export_dir, step - 1, step)
         with Session(_engine) as s, s.begin():
             _MIGRATIONS[step](s)
 
@@ -427,46 +450,66 @@ for _table, _skipped in _DERIVED_COLUMNS.items():
 
 
 def export(force: bool = False) -> None:
-    """Write the whole database as one INSERT statement per row; readable,
-    diffable, git-friendly. This file is the truth -- the .db is rebuilt from
-    it at startup -- so it is written atomically. NULL and derived columns are
-    left out of each INSERT; the schema defaults cover them on restore.
+    """Write the database as one .sql file per table under the data directory;
+    one INSERT statement per row, readable, diffable, git-friendly. These files
+    are the truth -- the .db is rebuilt from them at startup -- so each is
+    written atomically. NULL and derived columns are left out of each INSERT;
+    the schema defaults cover them on restore.
+
+    Only files whose content actually changed are rewritten, so a stock edit
+    leaves parts.sql alone and git shows a one-file diff.
 
     `force` writes even while a bulk load has export suspended -- that is how
     the loader persists its result at the end."""
     if not _export_enabled and not force:
         return
-    lines = [
-        "-- Stronghold data. Restore into a fresh (empty) database: sqlite3 inventory.db < inventory.sql",
-        # For the human opening this file. The authority is the settings row
-        # below (a comment cannot survive a restore); they are written together.
-        f"-- Written by Stronghold {RELEASE_VERSION}, data schema version {SCHEMA_VERSION}.",
-    ]
+    _export_dir.mkdir(parents=True, exist_ok=True)
     with Session(_engine) as s:
         conn = s.connection()
         for table in Base.metadata.sorted_tables:
-            ddl = str(CreateTable(table, if_not_exists=True).compile(_engine)).strip()
-            lines.append(f"{ddl};")
-            skip = _DERIVED_COLUMNS.get(table.name, frozenset())
-            names = [c.name for c in table.columns]
-            # S608: table/column names come from our own model metadata, never
-            # from user input -- there is no injection vector here.
-            for row in conn.exec_driver_sql(
-                f'SELECT * FROM "{table.name}" ORDER BY rowid'  # noqa: S608
-            ):
-                pairs = [
-                    (name, value)
-                    for name, value in zip(names, row)
-                    if value is not None and name not in skip
-                ]
-                columns = ", ".join(name for name, _ in pairs)
-                values = ", ".join(_literal(value) for _, value in pairs)
-                lines.append(f"INSERT INTO {table.name} ({columns}) VALUES ({values});")  # noqa: S608
-    # atomic: a crash mid-write must not truncate the only copy of the data
-    tmp = _export_path.with_name(_export_path.name + ".tmp")
-    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    tmp.replace(_export_path)
+            _write_table(conn, table)
     _commit_export()
+
+
+def _write_table(conn, table) -> None:
+    """One table's CREATE + INSERTs, written atomically to <dir>/<table>.sql."""
+    lines = [
+        (
+            f"-- Stronghold data: the {table.name} table. Restore the whole "
+            f"dataset into a fresh (empty) database: cat *.sql | sqlite3 inventory.db"
+        ),
+        # For the human opening this file. The authority is the row in
+        # settings.sql (a comment cannot survive a restore).
+        f"-- Written by Stronghold {RELEASE_VERSION}, data schema version {SCHEMA_VERSION}.",
+        str(CreateTable(table, if_not_exists=True).compile(_engine)).strip() + ";",
+    ]
+    skip = _DERIVED_COLUMNS.get(table.name, frozenset())
+    names = [c.name for c in table.columns]
+    # S608: table/column names come from our own model metadata, never from
+    # user input -- there is no injection vector here.
+    for row in conn.exec_driver_sql(
+        f'SELECT * FROM "{table.name}" ORDER BY rowid'  # noqa: S608
+    ):
+        pairs = [
+            (name, value)
+            for name, value in zip(names, row)
+            if value is not None and name not in skip
+        ]
+        columns = ", ".join(name for name, _ in pairs)
+        values = ", ".join(_literal(value) for _, value in pairs)
+        lines.append(f"INSERT INTO {table.name} ({columns}) VALUES ({values});")  # noqa: S608
+    content = "\n".join(lines) + "\n"
+    path = _table_path(table.name)
+    if path.exists() and path.read_text(encoding="utf-8") == content:
+        return  # unchanged: leave it alone so git sees only what moved
+    # atomic: a crash mid-write must not truncate the only copy of the data
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    tmp.replace(path)
+
+
+def _table_path(name: str) -> Path:
+    return _export_dir / f"{name}.sql"
 
 
 _UNCOMMITTED_MESSAGE = (
@@ -489,11 +532,11 @@ _NO_ACTIVITY_MESSAGE = (
 
 
 def _git(*args: str) -> subprocess.CompletedProcess:
-    """Run git in the data file's own directory. Failures are the caller's to
+    """Run git in the data directory itself. Failures are the caller's to
     interpret: no repo, nothing staged and no identity are all ordinary here."""
     return subprocess.run(  # noqa: S603
         ["git", *args],  # noqa: S607
-        cwd=_export_path.parent,
+        cwd=_export_dir,
         capture_output=True,
         text=True,
         check=False,
@@ -502,8 +545,8 @@ def _git(*args: str) -> subprocess.CompletedProcess:
 
 def _commit(message: str) -> None:
     for args in (
-        ("add", "--", _export_path.name),
-        ("commit", "--only", "--message", message, "--", _export_path.name),
+        ("add", "--", "."),
+        ("commit", "--only", "--message", message, "--", "."),
     ):
         result = _git(*args)
         if result.returncode:
@@ -547,11 +590,11 @@ def _commit_pending_changes() -> None:
     before its own commit -- would be destroyed with no way back. Committing
     first costs nothing when there is nothing to commit, and leaves the
     previous state recoverable when there is."""
-    if not _auto_commit or not _export_path.exists():
+    if not _auto_commit or not _export_dir.exists():
         return
-    if not _git("status", "--porcelain", "--", _export_path.name).stdout.strip():
+    if not _git("status", "--porcelain", "--", ".").stdout.strip():
         return  # unchanged, or not a git repo at all
-    _log.info("committing uncommitted changes in %s before reload", _export_path.name)
+    _log.info("committing uncommitted changes in %s before reload", _export_dir)
     _commit(_UNCOMMITTED_MESSAGE)
 
 

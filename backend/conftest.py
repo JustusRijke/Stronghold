@@ -10,8 +10,9 @@ from main import app
 
 @pytest.fixture
 def database(tmp_path):
-    """The data file (.sql); the working .db lives in a temp dir of db's own."""
-    path = tmp_path / "inventory.sql"
+    """The data directory (one .sql per table); the working .db lives in a temp
+    dir of db's own."""
+    path = tmp_path / "inventory"
     crypto.init(tmp_path / "secrets.key")  # real encryption, throwaway key
     db.init(path)
     return path
