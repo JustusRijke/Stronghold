@@ -212,11 +212,13 @@ Open-source inventory/stock tracking for small and medium businesses.
   un-cancelled -- and makes a stock item's count directly editable behind an OK
   button (greyed out until the value changes, so the edit is deliberate). Both
   skip the trail a stocktake would leave; use it to repair, not day to day
-- Your data is one readable SQL file: `inventory.sql` is the whole inventory
-  as plain text, and the only file you name or back up. SQLite is used
+- Your data is readable SQL: the `inventory/` directory holds the whole
+  inventory as plain text, one file per table (`parts.sql`, `stock_items.sql`,
+  ...), and is the only thing you name or back up. Each write rewrites just the
+  tables it changed, so a diff shows what actually happened. SQLite is used
   internally, but that database is a scratch copy rebuilt in a temp directory
-  on every startup. Keep the `.sql` in version control (git) and rolling back
-  to any earlier state is `git checkout` plus a restart. Set `db.auto_commit`
+  on every startup. Keep the directory in version control (git) and rolling
+  back to any earlier state is `git checkout` plus a restart. Set `db.auto_commit`
   in `settings.toml` and every change commits itself, using its activity-log
   entry as the message (off by default; refused if the data file sits inside
   this repo).

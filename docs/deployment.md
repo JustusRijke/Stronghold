@@ -34,17 +34,23 @@ uv run backend/main.py ../Stronghold_DB/settings.toml
 
 ```toml
 [db]
-data_file = "inventory.sql"
+data_file = "inventory"
 ```
 
 Point `data_file` at wherever your data should live -- keeping it (and the
 settings file) in its own folder outside the repository, as above, means
-updating Stronghold never touches your data. The file is created if it does
-not exist. An absolute path works too:
+updating Stronghold never touches your data. It names a **directory**, created
+if it does not exist. An absolute path works too:
 
 ```toml
-data_file = "/srv/stronghold/inventory.sql"
+data_file = "/srv/stronghold/inventory"
 ```
+
+Upgrading from a version that kept everything in a single `inventory.sql`?
+Leave the setting pointing at that file. Stronghold reads it once and writes
+the new per-table layout into a directory of the same name beside it, then
+uses that from then on. Your old file is left exactly where it was; delete it
+once you are happy, and point `data_file` at the directory.
 
 Every key in `settings.toml` is optional and falls back to a default, so the
 file only needs the values you actually want to change.
@@ -57,8 +63,8 @@ key pair in WooCommerce under **Settings -> Advanced -> REST API**, then enter
 the site URL, consumer key and consumer secret under "WooCommerce" on
 `/settings`. A **Test connection** button confirms them.
 
-The key and secret are stored **encrypted** in the data file, so the `.sql` you
-keep in git never contains a readable credential. What decrypts them is a
+The key and secret are stored **encrypted** in the data, so the `settings.sql`
+you keep in git never contains a readable credential. What decrypts them is a
 separate key file, named here:
 
 ```toml
@@ -80,14 +86,20 @@ Three things follow from that:
   working; the WooCommerce credentials simply read as unset and you enter them
   again on the settings page.
 
-## Your data is one readable file
+## Your data is a folder of readable files
 
-`inventory.sql` is your entire inventory as plain, readable text: one line per
-row, no binary format to decode. It is the only file you need to back up, copy
-to another machine, or keep in version control.
+The `inventory/` directory is your entire inventory as plain, readable text:
+one `.sql` file per table (`parts.sql`, `stock_items.sql`, `purchase_orders.sql`
+and so on), one line per row, no binary format to decode. It is the only thing
+you need to back up, copy to another machine, or keep in version control.
+
+Each write rewrites only the tables it actually changed, so editing a supplier
+touches `suppliers.sql` and `activity.sql` and leaves the rest untouched. A
+`git diff` shows what happened, and `git log -p inventory/stock_items.sql`
+gives you the history of one table on its own.
 
 Stronghold uses SQLite internally to query that data, but the database is not
-your data -- it is a scratch copy, rebuilt from the `.sql` in your system's
+your data -- it is a scratch copy, rebuilt from those files in your system's
 temp directory every time the app starts. You never have to name it, back it
 up, or clean it up. Deleting it costs nothing.
 
@@ -98,7 +110,7 @@ format you can read, diff and restore anywhere.
 ```
 cd ../Stronghold_DB
 git init
-git add inventory.sql && git commit -m "stock as of today"
+git add inventory && git commit -m "stock as of today"
 ```
 
 ### Committing automatically
@@ -138,13 +150,13 @@ Default is `false`.
 
 ### Rolling back
 
-Because the `.sql` is the truth, undoing a mistake is a checkout and a
+Because the `.sql` files are the truth, undoing a mistake is a checkout and a
 restart:
 
 ```
 cd ../Stronghold_DB
 git log --oneline           # find the commit you want
-git checkout <commit> -- inventory.sql
+git checkout <commit> -- inventory
 ```
 
 Restart the server and it comes up on exactly that state. There is no import

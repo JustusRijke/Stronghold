@@ -67,22 +67,40 @@ nothing stages nothing and commits nothing.
 
 ## SQL export
 
-After every change `db.export()` rewrites `inventory.sql` next to the
-database: for each table (in foreign-key dependency order) a
-`CREATE TABLE IF NOT EXISTS` followed by one `INSERT` per row. The file is
-readable and diff-friendly, so the data can live in git -- this is the backup
-and recovery story. It is self-contained (schema included), so restoring is
-just `sqlite3 inventory.db < inventory.sql` into an empty database, no prior
-app run needed.
+After every change `db.export()` rewrites the data directory: **one `.sql`
+file per table**, each holding a `CREATE TABLE IF NOT EXISTS` followed by one
+`INSERT` per row. The files are readable and diff-friendly, so the data can
+live in git -- this is the backup and recovery story. Each is self-contained
+(schema included), so restoring is just `cat *.sql | sqlite3 inventory.db`
+into an empty database, no prior app run needed.
 
-**The `.sql` is the source of truth, and the only file the user names.**
-`settings.toml` configures `db.data_file` (the `.sql`); SQLite is an internal
-detail. `db.init` builds a working `.db` from scratch under
-`tempfile.gettempdir()/stronghold/`, named `<stem>-<hash of the .sql's
-absolute path>.db` so two datasets never collide, and replays the `.sql` into
-it on every startup. Nothing but the `.sql` ever appears in the data folder.
-Rolling back is therefore `git checkout <commit>` on that folder plus a
-restart -- no export/import step, and no second file that can disagree.
+One file per table, rather than one big one, for two reasons: a table is small
+enough to open and read, and **only the files a write actually changes are
+rewritten** (`_write_table` compares against what is on disk first). Editing a
+supplier moves `suppliers.sql` and `activity.sql`; the other thirteen files
+are left alone, so `git log -p inventory/stock_items.sql` is a usable history
+of one table.
+
+Replay order does not matter, and neither do inter-table constraints: the
+replay runs over a raw `sqlite3` connection, where `PRAGMA foreign_keys` is
+off by default (the ON pragma is attached to the SQLAlchemy engine only). The
+files are still written and replayed in dependency order, for determinism
+rather than necessity.
+
+**The `.sql` files are the source of truth, and the directory holding them is
+the only path the user names.** `settings.toml` configures `db.data_file` (the
+directory); SQLite is an internal detail. `db.init` builds a working `.db`
+from scratch under `tempfile.gettempdir()/stronghold/`, named
+`<stem>-<hash of the directory's absolute path>.db` so two datasets never
+collide, and replays the files into it on every startup. Nothing but the
+`.sql` files ever appears in the data folder. Rolling back is therefore
+`git checkout <commit>` on that folder plus a restart -- no export/import
+step, and no second file that can disagree.
+
+Data written before the split is a single `inventory.sql`. Pointing
+`db.data_file` at that file still works: it is replayed once and re-exported
+as a directory of the same name beside it. The original is left untouched --
+the app never deletes data it did not write -- and can be removed by hand.
 
 Three consequences worth knowing:
 
@@ -98,15 +116,16 @@ Three consequences worth knowing:
   has nothing to fall back on -- and a module-level check enforces that.
   `Part.estimated_price` and `BuildLine.unit_price` are deliberately kept:
   both are hand-set for virtual parts and cannot be recomputed.
-- The file opens with two `--` comment lines: the restore hint, and
+- Every file opens with two `--` comment lines: the restore hint, and
   `-- Written by Stronghold <version>, data schema version <n>` (see below).
 
 ## Data versioning
 
-The `.sql` records what wrote it, in two places written together by
-`db.export`: a header comment for whoever opens the file, and two rows in the
-`settings` table (`schema.version`, `app.version`) that the app reads back. The
-rows are the authority -- a comment cannot survive a `sqlite3 < file` restore.
+The export records what wrote it, in two places written together by
+`db.export`: a header comment in every file, for whoever opens one, and two
+rows in the `settings` table (`schema.version`, `app.version`) -- in
+`settings.sql` -- that the app reads back. The rows are the authority -- a
+comment cannot survive a restore.
 Both keys are app metadata, deliberately *not* in `db.DOMAIN_DEFAULTS`, so
 `get_setting`/`set_setting` reject them and they never appear on the settings
 page. `db._stamp_versions` writes them straight to the table rather than via
@@ -127,7 +146,7 @@ Two numbers, because they move at different rates:
 ### Why migration is about the file, not the database
 
 `db.init` deletes the working `.db`, runs `create_all` (so the schema is always
-the *current* code's), and only then replays the `.sql`. The schema therefore
+the *current* code's), and only then replays the `.sql` files. The schema therefore
 never needs altering -- which is also why Alembic buys nothing here. What can
 be wrong is the replayed **data**:
 
@@ -139,7 +158,7 @@ be wrong is the replayed **data**:
 
 The added-column case is the dangerous one precisely because it is silent, and
 it is reached by a documented, routine operation: rolling back with
-`git checkout` on an older `.sql` (see docs/deployment.md).
+`git checkout` on an older export (see docs/deployment.md).
 
 A **removed** column is the case that a plain replay cannot survive: the old
 file's `INSERT`s name a column the current tables no longer have, so
@@ -267,8 +286,8 @@ build quantity aborts the import (assemblies are whole).
 
 ## No hard deletes (soft-delete convention)
 
-Records are never physically deleted, so no reference can dangle and
-`inventory.sql` keeps the full picture. Parts, suppliers and supplier parts
+Records are never physically deleted, so no reference can dangle and the
+export keeps the full picture. Parts, suppliers and supplier parts
 carry an `active` flag and are deactivated; UIs hide inactive records by
 default and pickers offer only active ones. Purchase orders, build orders and
 stock items have no `active` flag -- their `status` field carries the state
@@ -296,8 +315,8 @@ being reachable?
 
 ### Credentials
 
-`inventory.sql` is tracked in git, so a credential in the `settings` table
-would be committed. They are therefore **encrypted at rest**:
+The export is tracked in git, so a credential in the `settings` table
+would be committed (in `settings.sql`). They are therefore **encrypted at rest**:
 `db.SECRET_SETTINGS` names the domain settings that are credentials, and
 `get_setting`/`set_setting` transparently decrypt and encrypt those through
 `backend/crypto.py` (`cryptography.fernet`, so a hand-edited value fails to
@@ -334,8 +353,8 @@ uncaught fatal error before exiting.
 Known ceilings, with their upgrade paths, deferred until they actually hurt
 (marked `ponytail:` in the code):
 
-- No undo. Recovery = git + `inventory.sql`. Bring the command log back when
-  a real mistake needs stepping back.
+- No undo. Recovery = git + the exported `.sql` files. Bring the command log
+  back when a real mistake needs stepping back.
 - max+1 id generation; fine while one process owns the database.
 - Single process, no locking or multi-user support.
 - Money is float; switch to int cents if rounding bites.
