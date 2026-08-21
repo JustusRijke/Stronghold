@@ -7,14 +7,21 @@
 # edited on the app's Settings page instead.
 
 [db]
-# Your data: readable SQL, the file to keep in git. SQLite is an internal
-# detail -- a working copy is rebuilt from this file in a temp directory
-# every time the app starts, so there is no database path to configure.
-data_file = "inventory.sql"
+# Your data: a folder of readable SQL, one file per table (parts.sql,
+# stock_items.sql, ...). This is the thing to keep in git -- each change
+# rewrites only the tables it touched, so a diff shows what actually happened.
+# SQLite is an internal detail: a working copy is rebuilt from these files in a
+# temp directory every time the app starts, so there is no database path to
+# configure. The folder is created if it does not exist.
+#
+# Upgrading from a single inventory.sql? Leave this pointing at that file. It
+# is read once and rewritten as a folder of the same name beside it; your
+# original file is left untouched and can be deleted afterwards.
+data_path = "data"
 
-# Commit the data file after every change, using the activity-log entry as the
+# Commit the data after every change, using the activity-log entry as the
 # commit message. Does nothing if the data folder is not a git repository;
-# refused at startup if the data file lives inside the Stronghold app folder.
+# refused at startup if the data lives inside the Stronghold app folder.
 auto_commit = false
 
 [gui]
@@ -22,8 +29,8 @@ port = 8080
 
 [secrets]
 # Credentials (the WooCommerce key and secret) are entered on the app's
-# Settings page and stored encrypted in the data file. This is the key that
-# decrypts them, created automatically on first run.
+# Settings page and stored encrypted in the data (settings.sql). This is the
+# key that decrypts them, created automatically on first run.
 #
 # Do NOT commit it -- it is the one file that makes those encrypted values
 # readable. Back it up separately from your data. If you lose it, the app still

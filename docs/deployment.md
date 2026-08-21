@@ -34,23 +34,23 @@ uv run backend/main.py ../Stronghold_DB/settings.toml
 
 ```toml
 [db]
-data_file = "inventory"
+data_path = "data"
 ```
 
-Point `data_file` at wherever your data should live -- keeping it (and the
+Point `data_path` at wherever your data should live -- keeping it (and the
 settings file) in its own folder outside the repository, as above, means
 updating Stronghold never touches your data. It names a **directory**, created
 if it does not exist. An absolute path works too:
 
 ```toml
-data_file = "/srv/stronghold/inventory"
+data_path = "/srv/stronghold/data"
 ```
 
 Upgrading from a version that kept everything in a single `inventory.sql`?
 Leave the setting pointing at that file. Stronghold reads it once and writes
 the new per-table layout into a directory of the same name beside it, then
 uses that from then on. Your old file is left exactly where it was; delete it
-once you are happy, and point `data_file` at the directory.
+once you are happy, and point `data_path` at the directory.
 
 Every key in `settings.toml` is optional and falls back to a default, so the
 file only needs the values you actually want to change.

@@ -1918,7 +1918,7 @@ class DeploymentSettingsOut(BaseModel):
 
     path: str
     text: str
-    data_file: str
+    data_path: str
     app_version: str
     schema_version: int
     data_schema_version: int
@@ -1932,8 +1932,8 @@ def deployment_settings() -> DeploymentSettingsOut:
         path=str(settings.path),
         text=settings.text,
         # the directory actually in use: naming a pre-split .sql resolves to
-        # the directory beside it. Field name kept -- it is the wire contract.
-        data_file=str(db._export_dir.resolve()),
+        # the directory beside it
+        data_path=str(db._export_dir.resolve()),
         app_version=APP_VERSION,
         schema_version=SCHEMA_VERSION,
         data_schema_version=db.data_schema_version(),

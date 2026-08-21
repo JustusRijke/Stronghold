@@ -1188,8 +1188,8 @@ export interface components {
             path: string;
             /** Text */
             text: string;
-            /** Data File */
-            data_file: string;
+            /** Data Path */
+            data_path: string;
             /** App Version */
             app_version: string;
             /** Schema Version */
