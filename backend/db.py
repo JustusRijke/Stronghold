@@ -2604,8 +2604,6 @@ def add_line_part(
     line = _get_so_line(s, line_id)
     so = get_so(s, line.so_id)
     part = get_part(s, part_id)
-    if part.virtual:
-        raise InventoryError(f"part {part_id} is virtual and holds no stock")
     label = so_ref(so.id)
     existing = s.scalar(
         select(SalesOrderLinePart).where(
@@ -2730,6 +2728,8 @@ def so_shortages(s: Session, so_id: int) -> list[tuple[int, str, float, float]]:
     debt), so this is what the produce-style confirm dialog warns with."""
     out = []
     for part_id, need in sorted(so_outstanding(s, so_id).items()):
+        if get_part(s, part_id).virtual:
+            continue  # unlimited: labour is never short
         have = (
             s.scalar(
                 select(func.coalesce(func.sum(StockItem.count), 0.0)).where(
@@ -2762,6 +2762,28 @@ def book_sales_order(s: Session, so_id: int) -> None:
         raise InventoryError(f"sales order {so_id} has nothing left to book")
     next_id = (s.scalar(select(func.max(StockItem.id))) or 0) + 1
     for part_id, need in sorted(needs.items()):
+        part = get_part(s, part_id)
+        if part.virtual:
+            # unlimited stock, so nothing is drawn down -- but the sale did use
+            # it (labour), and that cost is real. Same shape produce_build uses:
+            # a consumed row at the part's rate, which keeps it out of the stock
+            # value report (Available rows only) while counting in so_cost.
+            price = part.estimated_price
+            s.add(
+                StockItem(
+                    id=next_id,
+                    count=need,
+                    part_id=part_id,
+                    consumed_by_so_id=so_id,
+                    status=STOCK_CONSUMED,
+                    unit_price=price,
+                    price_basis=PriceBasis.VIRTUAL
+                    if price is not None
+                    else PriceBasis.NONE,
+                )
+            )
+            next_id += 1
+            continue
         next_id = _consume_fifo(s, part_id, need, next_id, consumed_by_so_id=so_id)
     was_booked = so.booked
     so.booked = True

@@ -1365,14 +1365,32 @@ def test_cancelled_sales_orders_raise_no_demand(database):
         assert db.part_demand(s)[part_id][0] == 3.0
 
 
-def test_virtual_parts_are_not_sellable_from_stock(database):
+def test_a_sale_can_consume_labour(database):
+    """A virtual part (labour) holds no stock, but a sale that used it really
+    did cost that -- so it is recorded like a build records it: a consumed row
+    at the part's rate, with nothing drawn down."""
     part_id = db.next_part_id()
     db.create_part(part_id, "LAB", "Labour")
     db.set_part_virtual(part_id, True)
-    _, line_id = _seed_sale()
-    # a virtual part holds no stock, so there is nothing for a sale to consume
-    with pytest.raises(db.InventoryError):
-        db.add_line_part(db.next_line_part_id(), line_id, part_id, 1.0)
+    db.set_part_price(part_id, 40.0)
+    so_id, line_id = _seed_sale(qty=2.0)
+
+    db.add_line_part(db.next_line_part_id(), line_id, part_id, 1.5)
+    with db.session() as s:
+        # unlimited, so it can never be short
+        assert db.so_shortages(s, so_id) == []
+        # and it asks nothing of purchasing
+        assert part_id not in db.part_demand(s)
+
+    db.book_sales_order(so_id)
+    with db.session() as s:
+        rows = s.scalars(select(StockItem)).all()
+        assert len(rows) == 1  # the record, not a drawdown
+        assert rows[0].count == 3.0  # 2 sold x 1.5 hours
+        assert rows[0].status == STOCK_CONSUMED
+        assert rows[0].price_basis == PriceBasis.VIRTUAL
+        # 3 hours x 40.00 counts against the sale
+        assert db.so_cost(s, so_id)[1] == 120.0
 
 
 def test_import_survives_orders_it_cannot_fully_understand(database):

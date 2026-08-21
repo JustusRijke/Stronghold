@@ -1264,18 +1264,13 @@ def test_sales_order_flow(client):
     assert client.get("/api/sales-orders/999").status_code == 404
 
     line_id = client.get(f"/api/sales-orders/{so_id}/lines").json()[0]["id"]
-    # a virtual part holds no stock, so it cannot be what a sale consumes
-    virt = client.post(
-        "/api/parts", json={"sku": "LAB", "description": "Labour"}
-    ).json()
-    client.patch(f"/api/parts/{virt['id']}", json={"virtual": True})
-    assert (
-        client.post(
-            f"/api/sales-orders/{so_id}/lines/{line_id}/parts",
-            json={"part_id": virt["id"], "quantity": 1},
-        ).status_code
-        == 400
+    # a non-positive quantity is a domain rejection with a readable message,
+    # not a schema 422 (whose detail is a list the frontend cannot show)
+    bad = client.post(
+        f"/api/sales-orders/{so_id}/lines/{line_id}/parts",
+        json={"part_id": part["id"], "quantity": 0},
     )
+    assert bad.status_code == 400 and "positive" in bad.json()["detail"]
 
     lines = client.post(
         f"/api/sales-orders/{so_id}/lines/{line_id}/parts",
