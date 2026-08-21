@@ -2590,8 +2590,15 @@ def add_line_part(
     unit. Manual by design -- WooCommerce knows the SKU it sold, not the parts
     behind it.
 
-    Allowed on a booked order too: booking again consumes what the new link
-    adds, without touching what already went out."""
+    Adding a part the line already lists **adds to** that link rather than
+    being rejected: one line uses one quantity of a given part, and "two more
+    of those nuts" is the natural way to correct it. There is one row per
+    (line, part), which the unique constraint enforces anyway.
+
+    Allowed on a booked order too. Both cases only ever *raise* what the order
+    needs, and booking consumes the difference, so nothing already taken out of
+    stock is disturbed -- unlike edit_line_part, which can lower a quantity and
+    is therefore frozen once booked."""
     if quantity <= 0:
         raise InventoryError("quantity must be positive")
     line = _get_so_line(s, line_id)
@@ -2599,19 +2606,29 @@ def add_line_part(
     part = get_part(s, part_id)
     if part.virtual:
         raise InventoryError(f"part {part_id} is virtual and holds no stock")
-    if s.scalar(
+    label = so_ref(so.id)
+    existing = s.scalar(
         select(SalesOrderLinePart).where(
             SalesOrderLinePart.line_id == line_id,
             SalesOrderLinePart.part_id == part_id,
         )
-    ):
-        raise InventoryError(f"part {part_id} is already linked to line {line_id}")
+    )
+    if existing is not None:
+        was = existing.quantity
+        existing.quantity = was + quantity
+        _activity(
+            s,
+            "add_line_part",
+            f"{label}: {line.description or line.sku} now uses "
+            f"{existing.quantity:g}x {part.description} (was {was:g})",
+            [("sales-order", so.id, label), ("part", part_id, part.sku)],
+        )
+        return
     s.add(
         SalesOrderLinePart(
             id=link_id, line_id=line_id, part_id=part_id, quantity=quantity
         )
     )
-    label = so_ref(so.id)
     _activity(
         s,
         "add_line_part",

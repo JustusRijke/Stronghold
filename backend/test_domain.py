@@ -32,6 +32,7 @@ from models import (
     PurchaseOrder,
     SalesOrder,
     SalesOrderLine,
+    SalesOrderLinePart,
     SalesOrderStatus,
     Setting,
     StockItem,
@@ -1520,3 +1521,32 @@ def test_an_order_that_consumes_nothing_can_still_be_booked(database):
         assert "no parts to consume" in act.message
     with pytest.raises(db.InventoryError):
         db.book_sales_order(so_id)
+
+
+def test_linking_a_part_twice_adds_to_the_existing_link(database):
+    """One line uses one quantity of a given part, so "two more of those" is an
+    increase, not a second row -- and not an error."""
+    part_id = db.next_part_id()
+    db.create_part(part_id, "N", "Nut")
+    with db.session() as s:
+        s.add(StockItem(id=1, count=100.0, part_id=part_id, unit_price=2.0))
+        s.commit()
+    so_id, line_id = _seed_sale(qty=2.0)
+
+    db.add_line_part(db.next_line_part_id(), line_id, part_id, 3.0)
+    db.add_line_part(db.next_line_part_id(), line_id, part_id, 2.0)
+    with db.session() as s:
+        links = s.scalars(select(SalesOrderLinePart)).all()
+        assert len(links) == 1 and links[0].quantity == 5.0
+        assert db.so_needs(s, so_id) == {part_id: 10.0}  # 2 sold x 5
+
+    # the same on a booked order: it raises what is needed, and booking again
+    # takes only the difference
+    db.book_sales_order(so_id)
+    db.add_line_part(db.next_line_part_id(), line_id, part_id, 1.0)
+    with db.session() as s:
+        assert db.so_outstanding(s, so_id) == {part_id: 2.0}
+    db.book_sales_order(so_id)
+    with db.session() as s:
+        assert db.so_consumed(s, so_id) == {part_id: 12.0}
+        assert s.get(StockItem, 1).count == 88.0  # never consumed twice

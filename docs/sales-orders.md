@@ -62,6 +62,10 @@ mapping you got wrong: link what was missing and book again. Booking only ever
 takes what has not been taken yet, so the parts already consumed are left
 alone.
 
+Linking a part the line already lists **adds to** it rather than complaining:
+link two more of the same nut and the quantity goes from 2 to 4. A line holds
+one quantity per part, so there is never a second row for the same one.
+
 Until an order is booked, its parts count as **demand**: they show up in the
 "Needed" column on the part page and feed the suggested order quantity, the same
 way a planned build does. Cancelled, refunded and failed orders ask for nothing.
