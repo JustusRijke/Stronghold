@@ -121,8 +121,8 @@
 				<dd>version {deployment.data_schema_version}</dd>
 				<dt>settings.toml</dt>
 				<dd>{deployment.path}</dd>
-				<dt>data file</dt>
-				<dd>{deployment.data_file}</dd>
+				<dt>data</dt>
+				<dd>{deployment.data_path}</dd>
 			</dl>
 			<pre class="toml">{deployment.text}</pre>
 		{/if}

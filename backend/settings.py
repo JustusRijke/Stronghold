@@ -14,12 +14,12 @@ DEFAULTS = {
         # The data itself: a directory of readable SQL, one file per table,
         # the thing to keep in git. SQLite is an implementation detail (a
         # working .db is rebuilt from this in a temp directory at startup), so
-        # no database path is configurable. Naming a single pre-split
-        # inventory.sql still works: it is replayed and re-exported as a
-        # directory of the same name beside it.
-        "data_file": "inventory",
-        # If the data file sits in a git repo of its own, commit it after every
-        # write. Off unless asked for; the data file may not be in the app repo.
+        # no database path is configurable. Naming a single pre-split .sql
+        # still works: it is replayed and re-exported as a directory of the
+        # same name beside it.
+        "data_path": "data",
+        # If the data sits in a git repo of its own, commit it after every
+        # write. Off unless asked for; the data may not be in the app repo.
         "auto_commit": False,
     },
     "gui": {
@@ -44,8 +44,11 @@ DEFAULTS = {
 # Settings that no longer exist, mapped to what to do instead. Silently
 # ignoring one would leave the user pointing at data the app never reads.
 RENAMED = {
-    ("db", "db_path"): "db.data_file, which now names the .sql file itself "
+    ("db", "db_path"): "db.data_path, which now names the data directory "
     "(the .db is rebuilt in a temp directory at startup)",
+    ("db", "data_file"): "db.data_path, which now names a directory of "
+    "per-table .sql files. Point it at your existing .sql and it is replayed "
+    "once and re-exported as a directory of the same name beside it",
 }
 
 

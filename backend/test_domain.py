@@ -40,6 +40,7 @@ from models import (
     StockStatus,
     po_ref,
 )
+from settings import Settings
 from sqlalchemy import func, select
 from sqlalchemy import text as select_text
 from version import RELEASE_VERSION, SCHEMA_VERSION
@@ -1074,6 +1075,16 @@ def test_unstamped_data_file_opens_as_version_one(database):
     assert db.data_schema_version() == SCHEMA_VERSION
     with db.session() as s:
         assert s.get(Part, 1).sku == "BOLT-M3"
+
+
+def test_a_renamed_setting_fails_loudly(tmp_path):
+    """db.data_file became db.data_path. Ignoring the old key would silently
+    open an empty default directory while the user's data sat untouched."""
+    path = tmp_path / "settings.toml"
+    path.write_text('[db]\ndata_file = "inventory.sql"\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="data_path"):
+        Settings(path)
 
 
 def test_release_version_has_no_dev_suffix():
