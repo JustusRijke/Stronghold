@@ -89,7 +89,7 @@ export const api = {
 	partBuilds: (id: number) => get<BuildOrder[]>(`/parts/${id}/builds`),
 	partConsumedBy: (id: number) => get<PartBuild[]>(`/parts/${id}/consumed-by`),
 	partStockLog: (id: number) => get<StockLogEntry[]>(`/parts/${id}/stock-log`),
-	createPart: (b: { sku: string; description: string; virtual?: boolean }) =>
+	createPart: (b: { sku?: string | null; description: string; virtual?: boolean }) =>
 		post<Part>('/parts', b),
 	patchPart: (
 		id: number,
@@ -148,7 +148,7 @@ export const api = {
 		get<PartPurchaseOrder[]>(`/supplier-parts/${id}/purchase-orders`),
 	createSupplierPart: (b: {
 		supplier_id: number;
-		sku: string;
+		sku?: string | null;
 		part_id: number;
 		description: string;
 		ean: string;
@@ -158,7 +158,10 @@ export const api = {
 	patchSupplierPart: (
 		id: number,
 		b: Partial<
-			Pick<SupplierPart, 'part_id' | 'description' | 'ean' | 'hyperlink' | 'pack_qty' | 'active'>
+			Pick<
+				SupplierPart,
+				'sku' | 'part_id' | 'description' | 'ean' | 'hyperlink' | 'pack_qty' | 'active'
+			>
 		>
 	) => patch<SupplierPart>(`/supplier-parts/${id}`, b),
 

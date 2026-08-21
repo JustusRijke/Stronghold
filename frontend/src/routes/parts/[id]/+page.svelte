@@ -108,7 +108,7 @@
 				Number(((sp.last_price ?? est) * (sp.pack_qty || 1)).toFixed(4))
 			])
 		);
-		poDescription = part ? part.description || part.sku : '';
+		poDescription = part ? part.description || part.sku || '' : '';
 		poDialog?.showModal();
 	}
 
@@ -430,7 +430,7 @@
 	];
 
 	async function saveSku(v: string) {
-		if (await toast.run(() => api.patchPart(id, { sku: v }))) load();
+		if (await toast.run(() => api.patchPart(id, { sku: v.trim() || null }))) load();
 	}
 	async function saveDescription(v: string) {
 		if (await toast.run(() => api.patchPart(id, { description: v }))) load();
@@ -485,7 +485,10 @@
 			<section id="details">
 				<label class="field">
 					<span>SKU</span>
-					<input value={part.sku} onchange={(e) => saveSku(e.currentTarget.value)} />
+					<input
+						value={part.sku ?? ''}
+						placeholder="optional, unique"
+						onchange={(e) => saveSku(e.currentTarget.value)} />
 				</label>
 				<label class="field">
 					<span>Description</span>

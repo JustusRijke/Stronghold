@@ -44,7 +44,7 @@
 			notFound = true;
 			return;
 		}
-		supplierPartTabs.open(id, sp.description ? `${sp.sku} - ${sp.description}` : sp.sku || `#${id}`);
+		supplierPartTabs.open(id, sp.sku && sp.description ? `${sp.sku} - ${sp.description}` : sp.sku || sp.description || `#${id}`);
 		const [supplier, spPos, allStock, allParts] = await Promise.all([
 			api.supplier(sp.supplier_id),
 			api.supplierPartPos(id),
@@ -103,7 +103,7 @@
 		// a line is priced per pack; the part estimate is per unit
 		const est = parts.find((p) => p.id === sp!.part_id)?.estimated_price ?? 0;
 		poPrice = Number((est * (sp!.pack_qty || 1)).toFixed(4));
-		poDescription = sp!.part_description || sp!.part_sku || sp!.sku;
+		poDescription = sp!.part_description || sp!.part_sku || sp!.sku || '';
 		poDialog?.showModal();
 	}
 	async function addToExistingLine(line: POLine, qty: number) {
@@ -184,7 +184,7 @@
 		<DetailSidebar {sections} />
 		<div class="content">
 			<div class="head">
-				<h1 class="h1">{sp.description ? `${sp.sku} - ${sp.description}` : sp.sku}</h1>
+				<h1 class="h1">{sp.sku && sp.description ? `${sp.sku} - ${sp.description}` : sp.sku || sp.description || `#${sp.id}`}</h1>
 				{#if !sp.active}<span class="badge">inactive</span>{/if}
 			</div>
 			<p>
@@ -194,6 +194,13 @@
 
 			<section id="details">
 				<p class="muted">In stock: <strong>{inStock}</strong></p>
+				<label class="field">
+					<span>Supplier SKU</span>
+					<input
+						value={sp.sku ?? ''}
+						placeholder="optional, unique per supplier"
+						onchange={(e) => save({ sku: e.currentTarget.value.trim() || null })} />
+				</label>
 				<label class="field">
 					<span>Description</span>
 					<input value={sp.description} onchange={(e) => save({ description: e.currentTarget.value })} />

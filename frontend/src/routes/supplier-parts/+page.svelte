@@ -21,7 +21,7 @@
 		rows = (await api.supplierParts()).map((p) => ({
 			id: p.id,
 			supplier: suppliers.get(p.supplier_id) ?? String(p.supplier_id),
-			sku: p.sku,
+			sku: p.sku ?? '',
 			part_sku: p.part_sku,
 			description: p.description,
 			ean: p.ean,
