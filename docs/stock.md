@@ -28,7 +28,10 @@ to a positive count; that would count the same parts twice.
 
 ## How stock items are created
 
-There are four ways stock comes into existence.
+There are four ways stock comes into existence. Whichever way, the item
+records the moment it was created, shown as **Created** in every stock table and
+on the item's own page. Items that predate this column show the date of the
+order they came from instead.
 
 ### 1. Receiving a purchase order
 
