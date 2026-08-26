@@ -160,6 +160,8 @@ class StockItemOut(BaseModel):
     status: StockStatus
     unit_price: float | None  # what THIS stock is worth per item
     price_basis: PriceBasisOut
+    # when the row was written; null where nothing could date it (see db._to_v7)
+    created_at: datetime | None
     stocktake_at: datetime | None  # set when a stocktake wrote this row
     stocktake_reason: str  # "" unless a stocktake wrote this row
 
@@ -1086,6 +1088,7 @@ def _stock_out(row) -> StockItemOut:
         status=i.status,
         unit_price=i.unit_price,
         price_basis=i.price_basis,
+        created_at=i.created_at,
         stocktake_at=i.stocktake_at,
         stocktake_reason=i.stocktake_reason or "",
     )

@@ -328,6 +328,12 @@ class StockItem(Base):
         EnumCode(PriceBasis, PRICE_BASIS_CODES), default=PriceBasis.NONE
     )
     price_po_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_orders.id"))
+    # when this row was written. Naive local time, like Activity.at. Set on
+    # every row the app writes; NULL only where nothing knows the answer -- a
+    # pre-v7 row with no order to date it from (db._to_v7). Nullable precisely
+    # so that gap stays visible: stamping such a row with the migration's own
+    # "now" would invent a creation date and the data would carry it forever.
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now)
     # set when a stocktake created this row (a correction, not a PO or build).
     # Naive local time, like Activity.at.
     stocktake_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)

@@ -392,6 +392,32 @@ def _clean_skus(s: Session, table: str, scope: str | None) -> None:
             )
 
 
+def _to_v7(s: Session) -> None:
+    """Date pre-v7 stock from the order it came from. There is no exact
+    timestamp to recover, so this is the approximate date the stock log already
+    showed (api._stock_log_entries), promoted onto the column, and in that
+    function's precedence: what happened *to* the stock wins over where it came
+    from, so a consumed row is dated by the order that ate it, not the PO it was
+    bought on.
+
+    A row none of those can date stays NULL, and the UI shows it blank. That is
+    deliberate: "unknown" is the truth about such a row, and stamping it with
+    the migration's own "now" would invent a creation date that the data would
+    then carry forever as if it were real (26 rows of 4009 in the dataset this
+    was written for)."""
+    s.execute(
+        text("""
+        UPDATE stock_items SET created_at = COALESCE(
+            (SELECT b.start_date FROM build_orders b WHERE b.id = consumed_by_build_id),
+            (SELECT o.date_created FROM sales_orders o WHERE o.id = consumed_by_so_id),
+            stocktake_at,
+            (SELECT b.start_date FROM build_orders b WHERE b.id = build_id),
+            (SELECT p.start_date FROM purchase_orders p WHERE p.id = po_id)
+        )
+        """)
+    )
+
+
 _MIGRATIONS = {
     2: lambda s: _drop_columns(s, 2),
     3: _to_v3,
@@ -403,6 +429,7 @@ _MIGRATIONS = {
     5: _to_v5,
     # 6 only added a nullable column -- see the note on step 4.
     6: lambda s: None,
+    7: _to_v7,
 }
 
 

@@ -9,7 +9,7 @@
 	import { validate } from '$lib/validate';
 	import { BookIn } from '$lib/validators';
 	import type { POLine, PurchaseOrder, StockItem, SupplierPart } from '$lib/types';
-	import { PO_STATUS_OPTIONS as STATUS_OPTIONS } from '$lib/status';
+	import { CREATED_COLUMN, PO_STATUS_OPTIONS as STATUS_OPTIONS } from '$lib/status';
 	import { expert } from '$lib/expert.svelte';
 	import { STATUS_OPTIONS as STOCK_STATUS_OPTIONS } from '$lib/validators';
 
@@ -143,6 +143,7 @@
 
 	const stockCols: Column<StockItem>[] = [
 		{ key: 'id', header: '#', mono: true, width: '80px' },
+		CREATED_COLUMN,
 		{ key: 'sku', header: 'SKU', mono: true, width: '140px' },
 		{ key: 'description', header: 'Description', truncate: true },
 		{ key: 'count', header: 'Count', mono: true, width: '100px' },

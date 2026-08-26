@@ -27,7 +27,10 @@ from importlib.metadata import PackageNotFoundError, version
 # unique globally, supplier_parts.sku only within its supplier -- two suppliers
 # may use the same code, one supplier may not.
 # 6 added the optional bom_lines.note. Purely additive, like 4.
-SCHEMA_VERSION = 6
+# 7 added stock_items.created_at. Additive, but NOT NULL, so unlike 4 and 6 it
+# is not a no-op: replayed rows would all read as "created today". The step
+# backfills them from the order that created them (db._to_v7).
+SCHEMA_VERSION = 7
 
 try:
     APP_VERSION = version("stronghold")
