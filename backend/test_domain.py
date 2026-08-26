@@ -124,6 +124,7 @@ def test_purchasing_flow(database):
         assert item.po_id == 1  # stock linked back to its PO
         assert line.received == 20  # in ordered units, not expanded count
         assert booking.po_line_id == line_id
+        assert item.created_at.date() == date.today()
     # regression: a booked line must not be removable
     with pytest.raises(db.InventoryError):
         db.remove_po_line(line_id)
@@ -907,6 +908,43 @@ def test_v1_data_file_drops_the_stored_order_references(tmp_path):
     text = _exported(data_file)
     assert "whatever-they-typed" not in text and "BO-XXXX" not in text
     assert po_ref(7) == "PO-0007"
+
+
+def test_v6_stock_is_dated_from_the_order_it_came_from(tmp_path):
+    """The real schema 6 -> 7 step. A file written before created_at existed has
+    no value to replay, so every row would come up stamped "today"; the step
+    backfills the order's own date instead."""
+    data_file = tmp_path / "inventory"
+    db.init(data_file)
+    db.create_part(1, "BOLT-M3", "M3 bolt")
+    db.create_supplier(1, "Acme")
+    db.create_supplier_part(1, 1, "ACME-B3", 1, pack_qty=1)
+    db.create_po(7, 1, start_date=date(2026, 1, 5))
+    line_id = db.next_line_id()
+    db.add_po_line(line_id, 7, 1, 4, 0.05)
+    db.book_po_line(line_id, db.next_item_id(), 4)
+    db.create_item(99, 1)  # no order behind it: nothing to backfill from
+
+    # rewrite the export as a 6.x app wrote it: no created_at column at all.
+    # It is exported last, so dropping it is the column name plus the final
+    # value of each INSERT.
+    v6 = re.sub(
+        r", created_at\)|, '[\d: .-]+'\);",
+        lambda m: ")" if m.group(0).endswith(")") else ");",
+        _table_sql(data_file, "stock_items"),
+    )
+    assert "created_at" not in "".join(
+        line for line in v6.splitlines() if line.startswith("INSERT")
+    )
+    _write_table_sql(data_file, "stock_items", v6)
+    _set_stamp(data_file, 6)
+
+    db.init(data_file)
+
+    assert db.data_schema_version() == SCHEMA_VERSION
+    with db.session() as s:
+        assert s.get(StockItem, 1).created_at.date() == date(2026, 1, 5)
+        assert s.get(StockItem, 99).created_at.date() == date.today()
 
 
 def _code_of(codes, member):

@@ -1727,6 +1727,11 @@ export interface components {
              * @enum {string}
              */
             price_basis: "po" | "build" | "build_partial" | "estimate" | "virtual" | "po_no_price" | "none";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
             /** Stocktake At */
             stocktake_at: string | null;
             /** Stocktake Reason */

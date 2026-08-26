@@ -392,6 +392,26 @@ def _clean_skus(s: Session, table: str, scope: str | None) -> None:
             )
 
 
+def _to_v7(s: Session) -> None:
+    """Date pre-v7 stock from the order it came from. There is no exact
+    timestamp to recover -- the replay just stamped every row with "now" -- so
+    this is the approximate date the stock log already showed
+    (api._stock_log_entries), promoted onto the column. Same precedence: the
+    stocktake that wrote the row, else the build that produced it, else the PO
+    it was received against. A row with none of the three keeps "now"; that is
+    all anything ever knew about it."""
+    s.execute(
+        text("""
+        UPDATE stock_items SET created_at = COALESCE(
+            stocktake_at,
+            (SELECT b.start_date FROM build_orders b WHERE b.id = build_id),
+            (SELECT p.start_date FROM purchase_orders p WHERE p.id = po_id),
+            created_at
+        )
+        """)
+    )
+
+
 _MIGRATIONS = {
     2: lambda s: _drop_columns(s, 2),
     3: _to_v3,
@@ -403,6 +423,7 @@ _MIGRATIONS = {
     5: _to_v5,
     # 6 only added a nullable column -- see the note on step 4.
     6: lambda s: None,
+    7: _to_v7,
 }
 
 
