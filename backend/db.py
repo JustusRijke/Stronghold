@@ -394,13 +394,17 @@ def _clean_skus(s: Session, table: str, scope: str | None) -> None:
 
 def _to_v7(s: Session) -> None:
     """Date pre-v7 stock from the order it came from. There is no exact
-    timestamp to recover -- the replay just stamped every row with "now" -- so
-    this is the approximate date the stock log already showed
-    (api._stock_log_entries), promoted onto the column, and in that function's
-    precedence: what happened *to* the stock wins over where it came from, so a
-    consumed row is dated by the order that ate it, not the PO it was bought
-    on. A row nothing can date keeps "now"; that is all anything ever knew
-    about it (26 rows of 4009 in the dataset this was written for)."""
+    timestamp to recover, so this is the approximate date the stock log already
+    showed (api._stock_log_entries), promoted onto the column, and in that
+    function's precedence: what happened *to* the stock wins over where it came
+    from, so a consumed row is dated by the order that ate it, not the PO it was
+    bought on.
+
+    A row none of those can date stays NULL, and the UI shows it blank. That is
+    deliberate: "unknown" is the truth about such a row, and stamping it with
+    the migration's own "now" would invent a creation date that the data would
+    then carry forever as if it were real (26 rows of 4009 in the dataset this
+    was written for)."""
     s.execute(
         text("""
         UPDATE stock_items SET created_at = COALESCE(
@@ -408,8 +412,7 @@ def _to_v7(s: Session) -> None:
             (SELECT o.date_created FROM sales_orders o WHERE o.id = consumed_by_so_id),
             stocktake_at,
             (SELECT b.start_date FROM build_orders b WHERE b.id = build_id),
-            (SELECT p.start_date FROM purchase_orders p WHERE p.id = po_id),
-            created_at
+            (SELECT p.start_date FROM purchase_orders p WHERE p.id = po_id)
         )
         """)
     )

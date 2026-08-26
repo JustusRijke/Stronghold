@@ -118,7 +118,7 @@
 						{/if}
 					</p>
 				{/if}
-				<p>Created: {new Date(item.created_at).toLocaleString()}</p>
+				<p>Created: {item.created_at ? new Date(item.created_at).toLocaleString() : 'unknown'}</p>
 				<p>Status: {stockStatusLabel(item.status)}</p>
 				<p>
 					Value:

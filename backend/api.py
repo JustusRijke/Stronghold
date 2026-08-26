@@ -160,7 +160,8 @@ class StockItemOut(BaseModel):
     status: StockStatus
     unit_price: float | None  # what THIS stock is worth per item
     price_basis: PriceBasisOut
-    created_at: datetime  # when the row was written (backfilled before v7)
+    # when the row was written; null where nothing could date it (see db._to_v7)
+    created_at: datetime | None
     stocktake_at: datetime | None  # set when a stocktake wrote this row
     stocktake_reason: str  # "" unless a stocktake wrote this row
 

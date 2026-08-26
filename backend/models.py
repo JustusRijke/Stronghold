@@ -19,7 +19,6 @@ from sqlalchemy import (
     String,
     TypeDecorator,
     UniqueConstraint,
-    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -329,21 +328,12 @@ class StockItem(Base):
         EnumCode(PriceBasis, PRICE_BASIS_CODES), default=PriceBasis.NONE
     )
     price_po_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_orders.id"))
-    # when this row was written. Naive local time, like Activity.at. Unlike the
-    # stock log's dates (which fall back to the order's own date) this is exact
-    # -- but only for rows written since schema 7; older ones were backfilled
-    # from their order, see db._to_v7.
-    # server_default so replaying a pre-v7 .sql works: those INSERTs name no
-    # created_at, and _import_sql replays over a raw sqlite3 connection, which
-    # never sees the Python-side default (same reason as Part.purchasable).
-    # db._to_v7 then replaces this placeholder with the order's own date.
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.now,
-        # localtime, not CURRENT_TIMESTAMP: every other timestamp here is naive
-        # local, and a UTC placeholder would read hours off
-        server_default=text("(datetime('now', 'localtime'))"),
-    )
+    # when this row was written. Naive local time, like Activity.at. Set on
+    # every row the app writes; NULL only where nothing knows the answer -- a
+    # pre-v7 row with no order to date it from (db._to_v7). Nullable precisely
+    # so that gap stays visible: stamping such a row with the migration's own
+    # "now" would invent a creation date and the data would carry it forever.
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now)
     # set when a stocktake created this row (a correction, not a PO or build).
     # Naive local time, like Activity.at.
     stocktake_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)

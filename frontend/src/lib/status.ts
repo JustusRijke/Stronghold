@@ -104,5 +104,6 @@ export const CREATED_COLUMN = {
   key: "created_at" as const,
   header: "Created",
   width: "120px",
-  format: (v: unknown) => new Date(String(v)).toLocaleDateString(),
+  // null for stock nothing could date (see db._to_v7): blank, not a guess
+  format: (v: unknown) => (v == null ? "--" : new Date(String(v)).toLocaleDateString()),
 };

@@ -936,7 +936,7 @@ def test_v6_stock_is_dated_from_the_order_it_came_from(tmp_path):
             for i in s.query(StockItem)
             if i.consumed_by_build_id == 3 and i.po_id is not None
         )
-    db.create_item(99, 1)  # no order behind it: nothing to backfill from
+    db.create_item(99, 1)  # no order behind it: nothing to date it by
 
     # rewrite the export as a 6.x app wrote it: no created_at column at all.
     # It is exported last, so dropping it is the column name plus the final
@@ -959,7 +959,9 @@ def test_v6_stock_is_dated_from_the_order_it_came_from(tmp_path):
         assert s.get(StockItem, 1).created_at.date() == date(2026, 1, 5)
         # the build that ate it wins over the PO it was bought on
         assert s.get(StockItem, consumed_id).created_at.date() == date(2026, 4, 9)
-        assert s.get(StockItem, 99).created_at.date() == date.today()
+        # nothing knows when this one was made, and it says so rather than
+        # claiming the day the migration happened to run
+        assert s.get(StockItem, 99).created_at is None
 
 
 def _code_of(codes, member):

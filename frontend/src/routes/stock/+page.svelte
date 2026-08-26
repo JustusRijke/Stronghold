@@ -16,7 +16,7 @@
 		sku: string;
 		description: string;
 		count: number;
-		created_at: string;
+		created_at: string | null;
 		order: string;
 		order_url: string;
 		consumed_by: string;
