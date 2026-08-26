@@ -923,6 +923,19 @@ def test_v6_stock_is_dated_from_the_order_it_came_from(tmp_path):
     line_id = db.next_line_id()
     db.add_po_line(line_id, 7, 1, 4, 0.05)
     db.book_po_line(line_id, db.next_item_id(), 4)
+    # an assembly that eats some of it: the consumed row it splits off carries
+    # the PO as well as the build, and must be dated by the build that ate it
+    db.create_part(2, "ASM", "an assembly")
+    db.set_part_assembly(2, True)
+    db.add_bomline(db.next_bomline_id(), 2, 1, 1.0)
+    db.create_build(3, 2, 1, start_date=date(2026, 4, 9), status=BuildStatus.PRODUCTION)
+    db.produce_build(3, 1)
+    with db.session() as s:
+        consumed_id = next(
+            i.id
+            for i in s.query(StockItem)
+            if i.consumed_by_build_id == 3 and i.po_id is not None
+        )
     db.create_item(99, 1)  # no order behind it: nothing to backfill from
 
     # rewrite the export as a 6.x app wrote it: no created_at column at all.
@@ -944,6 +957,8 @@ def test_v6_stock_is_dated_from_the_order_it_came_from(tmp_path):
     assert db.data_schema_version() == SCHEMA_VERSION
     with db.session() as s:
         assert s.get(StockItem, 1).created_at.date() == date(2026, 1, 5)
+        # the build that ate it wins over the PO it was bought on
+        assert s.get(StockItem, consumed_id).created_at.date() == date(2026, 4, 9)
         assert s.get(StockItem, 99).created_at.date() == date.today()
 
 
