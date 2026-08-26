@@ -17,6 +17,7 @@
 		PO_STATUS_OPTIONS,
 		stockOrderLabel,
 		stockOrderUrl,
+		CREATED_COLUMN,
 		STOCK_CONSUMED,
 		stockStatusLabel,
 		STOCK_STATUS_OPTIONS,
@@ -323,6 +324,7 @@
 	];
 	const stockCols: Column<StockRow>[] = [
 		{ key: 'id', header: '#', mono: true, width: '80px' },
+		CREATED_COLUMN,
 		{ key: 'count', header: 'Count', mono: true, width: '110px' },
 		{ key: 'order', header: 'Order', mono: true, width: '140px', cellHref: (r) => r.order_url },
 		{

@@ -7,7 +7,8 @@
 		stockOrderUrl,
 		STOCK_CONSUMED,
 		stockStatusLabel,
-		STOCK_STATUS_OPTIONS
+		STOCK_STATUS_OPTIONS,
+		CREATED_COLUMN
 	} from '$lib/status';
 
 	type Row = {
@@ -15,6 +16,7 @@
 		sku: string;
 		description: string;
 		count: number;
+		created_at: string;
 		order: string;
 		order_url: string;
 		consumed_by: string;
@@ -30,6 +32,7 @@
 			sku: i.sku,
 			description: i.description,
 			count: i.count,
+			created_at: i.created_at,
 			order: stockOrderLabel(i),
 			order_url: stockOrderUrl(i),
 			consumed_by: i.consumed_by_reference,
@@ -44,6 +47,7 @@
 
 	const columns: Column<Row>[] = [
 		{ key: 'id', header: '#', width: '70px', mono: true, hideByDefault: true },
+		CREATED_COLUMN,
 		{ key: 'sku', header: 'SKU', mono: true, width: '160px' },
 		{ key: 'description', header: 'Description', truncate: true },
 		{ key: 'count', header: 'Count', width: '110px', mono: true },
@@ -86,7 +90,13 @@
 <div class="content nosidebar">
 	<!-- no add button: stock items come from receiving a PO, a build, or a
 	     stocktake on the part page -- never by hand -->
-	<DataTable {columns} {rows} href={(r) => `/stock/${r.id}`} storageKey="/stock" />
+	<DataTable
+		{columns}
+		{rows}
+		href={(r) => `/stock/${r.id}`}
+		defaultSort={{ key: 'created_at', dir: 'desc' }}
+		storageKey="/stock-v2"
+	/>
 </div>
 
 <style>

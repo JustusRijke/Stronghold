@@ -8,6 +8,7 @@
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
 	import type { Part, PartPurchaseOrder, POLine, PurchaseOrder, StockItem, SupplierPart } from '$lib/types';
 	import {
+		CREATED_COLUMN,
 		PO_STATUS_OPTIONS,
 		STOCK_AVAILABLE,
 		STOCK_CONSUMED,
@@ -162,6 +163,7 @@
 	];
 	const stockCols: Column<StockItem>[] = [
 		{ key: 'id', header: '#', mono: true, width: '80px' },
+		CREATED_COLUMN,
 		{ key: 'count', header: 'Count', mono: true, width: '110px' },
 		{ key: 'po_reference', header: 'PO', mono: true, width: '140px' },
 		{

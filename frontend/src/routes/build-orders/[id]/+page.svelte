@@ -6,7 +6,11 @@
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
 	import type { BuildLine, BuildOrder, StockItem } from '$lib/types';
-	import { BUILD_STATUS_OPTIONS as BUILD_STATUS, STOCK_AVAILABLE } from '$lib/status';
+	import {
+		BUILD_STATUS_OPTIONS as BUILD_STATUS,
+		CREATED_COLUMN,
+		STOCK_AVAILABLE
+	} from '$lib/status';
 	import { expert } from '$lib/expert.svelte';
 	import { STATUS_OPTIONS as STOCK_STATUS_OPTIONS } from '$lib/validators';
 
@@ -138,6 +142,7 @@
 
 	const stockCols: Column<StockItem>[] = [
 		{ key: 'id', header: '#', mono: true, width: '80px' },
+		CREATED_COLUMN,
 		{ key: 'sku', header: 'SKU', mono: true, width: '140px' },
 		{ key: 'description', header: 'Description', truncate: true },
 		{ key: 'count', header: 'Count', mono: true, width: '100px' },
@@ -196,6 +201,7 @@
 
 	const consumedCols: Column<StockItem>[] = [
 		{ key: 'id', header: '#', mono: true, width: '80px' },
+		CREATED_COLUMN,
 		{ key: 'sku', header: 'SKU', mono: true, width: '140px' },
 		{ key: 'description', header: 'Description', truncate: true },
 		{ key: 'count', header: 'Count', mono: true, width: '100px' },

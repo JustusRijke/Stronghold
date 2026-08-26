@@ -118,6 +118,7 @@
 						{/if}
 					</p>
 				{/if}
+				<p>Created: {new Date(item.created_at).toLocaleString()}</p>
 				<p>Status: {stockStatusLabel(item.status)}</p>
 				<p>
 					Value:

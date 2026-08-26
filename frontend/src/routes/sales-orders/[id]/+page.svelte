@@ -7,7 +7,7 @@
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
 	import Picker from '$lib/components/Picker.svelte';
 	import type { Part, SalesOrder, SalesOrderLine, SalesShortage, StockItem } from '$lib/types';
-	import { soStatusLabel } from '$lib/status';
+	import { CREATED_COLUMN, soStatusLabel } from '$lib/status';
 	import { STATUS_OPTIONS as STOCK_STATUS_OPTIONS } from '$lib/validators';
 
 	const id = $derived(Number($page.params.id));
@@ -93,6 +93,7 @@
 
 	const consumedCols: Column<StockItem>[] = [
 		{ key: 'id', header: '#', mono: true, width: '80px' },
+		CREATED_COLUMN,
 		{ key: 'sku', header: 'SKU', mono: true, width: '140px' },
 		{ key: 'description', header: 'Description', truncate: true },
 		{ key: 'count', header: 'Count', mono: true, width: '100px' },
