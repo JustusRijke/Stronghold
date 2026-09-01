@@ -1352,14 +1352,25 @@ def test_product_sku_prefill_over_the_api(client):
     ]
 
     so_id = _seed_sale(client, qty=2.0, sku="HBT-H-DR")
+    # the add box offers what the orders actually sold, mapped ones flagged so
+    # the page can drop them from the picker
+    assert [
+        (r["sku"], r["lines"], r["mapped"])
+        for r in client.get("/api/product-skus/sold").json()
+    ] == [("HBT-H-DR", 1, True)]
+
     lines = client.post(f"/api/sales-orders/{so_id}/prefill").json()
     assert [(p["sku"], p["quantity"], p["required"]) for p in lines[0]["parts"]] == [
         ("B1", 4.0, 8.0)
     ]
 
     # a plain part maps too, to one of itself
-    client.put("/api/product-skus", json={"sku": "B1-SINGLE", "part_id": bolt["id"]})
     plain = _seed_sale(client, so_id=2, wc_order_id=102, qty=3.0, sku="B1-SINGLE")
+    # an unmapped sku is exactly what the picker exists to offer
+    assert [
+        (r["sku"], r["mapped"]) for r in client.get("/api/product-skus/sold").json()
+    ] == [("B1-SINGLE", False), ("HBT-H-DR", True)]
+    client.put("/api/product-skus", json={"sku": "B1-SINGLE", "part_id": bolt["id"]})
     lines = client.post(f"/api/sales-orders/{plain}/prefill").json()
     assert [(p["sku"], p["quantity"], p["required"]) for p in lines[0]["parts"]] == [
         ("B1", 1.0, 3.0)

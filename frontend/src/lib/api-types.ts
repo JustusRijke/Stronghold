@@ -854,6 +854,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/product-skus/sold": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Sold Skus
+         * @description The skus WooCommerce has actually sold, most-used first. What the mapping
+         *     page offers to pick from, so a key is never typed in by hand.
+         */
+        get: operations["list_sold_skus_api_product_skus_sold_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/product-skus/{sku}": {
         parameters: {
             query?: never;
@@ -1774,6 +1795,20 @@ export interface components {
             quantity: number;
             /** Item Id */
             item_id?: number | null;
+        };
+        /**
+         * SoldSkuOut
+         * @description A sku the imported sales orders actually use, for the mapping picker.
+         */
+        SoldSkuOut: {
+            /** Sku */
+            sku: string;
+            /** Description */
+            description: string;
+            /** Lines */
+            lines: number;
+            /** Mapped */
+            mapped: boolean;
         };
         /** StockItemIn */
         StockItemIn: {
@@ -3984,6 +4019,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sold_skus_api_product_skus_sold_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoldSkuOut"][];
                 };
             };
         };

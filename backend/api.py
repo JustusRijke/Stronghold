@@ -510,6 +510,15 @@ class ProductSkuOut(BaseModel):
     part_description: str
 
 
+class SoldSkuOut(BaseModel):
+    """A sku the imported sales orders actually use, for the mapping picker."""
+
+    sku: str
+    description: str
+    lines: int  # how many sold line items carry it
+    mapped: bool
+
+
 class ProductSkuIn(BaseModel):
     sku: str
     part_id: int
@@ -1950,6 +1959,17 @@ def list_product_skus() -> list[ProductSkuOut]:
                 sku=sku, part_id=part_id, part_sku=part_sku or "", part_description=desc
             )
             for sku, part_id, part_sku, desc in db.product_skus(s)
+        ]
+
+
+@router.get("/product-skus/sold", response_model=list[SoldSkuOut])
+def list_sold_skus() -> list[SoldSkuOut]:
+    """The skus WooCommerce has actually sold, most-used first. What the mapping
+    page offers to pick from, so a key is never typed in by hand."""
+    with db.session() as s:
+        return [
+            SoldSkuOut(sku=sku, description=desc, lines=n, mapped=mapped)
+            for sku, desc, n, mapped in db.sold_skus(s)
         ]
 
 

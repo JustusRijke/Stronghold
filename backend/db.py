@@ -3140,9 +3140,10 @@ def remove_line_part(s: Session, link_id: int) -> None:
 # -- product skus -----------------------------------------------------------
 #
 # The map from what WooCommerce sells to what it is made of. A sales line
-# carries a sku; a sku names an assembly Part; that part's BOM is what the line
-# consumes. Many skus may name one part (a door-left and a door-right variant
-# are the same build), which is why the sku is the key and not the part.
+# carries a sku; a sku names a Part -- an assembly, whose BOM the line consumes,
+# or any other part, one of which the line consumes. Many skus may name one part
+# (a door-left and a door-right variant are the same build), which is why the
+# sku is the key and not the part.
 
 
 def product_skus(s: Session) -> list:
@@ -3154,6 +3155,29 @@ def product_skus(s: Session) -> list:
             .order_by(ProductSku.sku)
         )
     )
+
+
+def sold_skus(s: Session) -> list[tuple[str, str, int, bool]]:
+    """(sku, an example description, how many lines carry it, already mapped)
+    for every non-blank sku the imported sales orders actually use.
+
+    What the mapping page offers instead of a free-text box: these skus are
+    WooCommerce's, so typing one by hand is a chance to typo a key that then
+    silently matches nothing. The description is whichever line's it happens to
+    be -- the same sku sells under a tidied-up name sometimes, and any of them
+    identifies it well enough to pick from a list."""
+    mapped = set(s.scalars(select(ProductSku.sku)))
+    rows = s.execute(
+        select(
+            SalesOrderLine.sku,
+            func.min(SalesOrderLine.description),
+            func.count(),
+        )
+        .where(SalesOrderLine.sku != "")
+        .group_by(SalesOrderLine.sku)
+        .order_by(func.count().desc(), SalesOrderLine.sku)
+    )
+    return [(sku, desc, n, sku in mapped) for sku, desc, n in rows]
 
 
 def get_product_sku(s: Session, sku: str) -> ProductSku:
