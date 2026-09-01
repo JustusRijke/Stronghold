@@ -89,8 +89,14 @@ def create_app(settings: Settings) -> FastAPI:
     crypto.init(settings.path_of("secrets", "key_file"))
     db.init(data_path, settings.get("db", "auto_commit"))
     # prices are kept current by the writes that change them; recomputing at
-    # startup covers rows written outside the app (an import, a restored .sql)
-    db.refresh_all_prices()
+    # startup covers rows written outside the app (an import, a restored .sql).
+    # It runs after db.init, so its export is a second startup commit and needs
+    # its own message -- an Activity row would log on every boot instead.
+    db.startup_message("Recalculated prices on startup")
+    try:
+        db.refresh_all_prices()
+    finally:
+        db.startup_message(None)
     _mount_frontend()
     return app
 
