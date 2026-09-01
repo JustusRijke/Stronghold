@@ -8,6 +8,7 @@
     - the whole view (filters, sort, hidden columns) persisted to localStorage
       per `storageKey`, across navigation
     - live filtered row count
+    - a print button (new tab, A4 landscape, rows as currently viewed)
   Native implementation: plain reactive predicates, markup and styling are ours.
 -->
 <script lang="ts" module>
@@ -260,6 +261,50 @@
 		return s.dir === 'asc' ? '▲' : '▼';
 	}
 
+	// --- print --------------------------------------------------------------
+	// A plain document.write into a new tab: the rows are already filtered and
+	// sorted here, so printing is a stringify + `@page`. ponytail: no paged.js --
+	// browsers repeat <thead> on every page natively; add one if we ever need
+	// running headers/footers or page numbers.
+	const esc = (v: unknown) =>
+		String(v ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!);
+
+	function cellText(c: Column<T>, row: T): string {
+		if (c.bool) return row[c.key] ? '✓' : '—';
+		return String(c.format ? c.format(row[c.key], row) : (row[c.key] ?? ''));
+	}
+
+	function printTable() {
+		const title = storageKey.replace(/^\//, '').replace(/-v\d+$/, '');
+		const head = visibleColumns.map((c) => `<th>${esc(c.header)}</th>`).join('');
+		const body = filtered
+			.map(
+				(r) =>
+					`<tr>${visibleColumns.map((c) => `<td${c.bool ? ' class="c"' : ''}>${esc(cellText(c, r))}</td>`).join('')}</tr>`
+			)
+			.join('');
+		const w = window.open('', '_blank');
+		if (!w) return; // popup blocked
+		w.document.write(
+			`<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><style>
+@page { size: A4 landscape; margin: 12mm; }
+body { font: 10px system-ui, sans-serif; margin: 0; }
+h1 { font-size: 14px; margin: 0 0 2mm; }
+.meta { font-size: 9px; color: #555; margin-bottom: 3mm; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #999; padding: 2px 4px; text-align: left; }
+th { background: #eee; }
+td.c { text-align: center; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+</style><h1>${esc(title)}</h1><div class="meta">${filtered.length} rows &middot; ${new Date().toLocaleString()}</div>
+<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`
+		);
+		w.document.close();
+		w.focus();
+		w.print();
+	}
+
 	// column-picker menu
 	let menuOpen = $state(false);
 </script>
@@ -295,6 +340,9 @@
 			</div>
 		{/if}
 	</div>
+	<button class="tool" title="Print this table" aria-label="Print table" onclick={printTable}
+		>&#128424;</button
+	>
 	<button class="tool" title="Reset view (filters, sort, columns)" aria-label="Reset view" onclick={resetView}
 		>&#8635;</button
 	>

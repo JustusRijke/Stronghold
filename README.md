@@ -13,7 +13,9 @@ Open-source inventory/stock tracking for small and medium businesses.
   detail page (left-click opens it, right-click opens it in a new tab), where all
   editing happens. Below each table a count reads "X of N rows": how many the
   filters let through, out of how many there are. Add records with the "Add"
-  button; remove asks to confirm. The
+  button; remove asks to confirm. The printer button opens the table as it is
+  currently sorted, filtered and columned in a new tab, laid out for A4
+  landscape, and raises the print dialog. The
   parts list also shows each part's total stock on hand, how many units the
   planned build orders still have to consume ("Needed"), how
   many are still to be received on open purchase orders ("On order"), and the
