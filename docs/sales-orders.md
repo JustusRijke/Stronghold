@@ -47,21 +47,25 @@ the key file that decrypts them.
 ## Product SKUs: linking by hand once, not once per order
 
 The same products sell over and over, so mapping their parts by hand on every
-order would be the same work every week. The **Product SKUs** page is where that
-mapping lives instead: it points a sold SKU at the **assembly part** whose bill
-of materials the product is made of.
+order would be the same work every week. The **Product SKUs** tab, next to
+Overview on the sales orders page, is where that mapping lives instead: it points
+a sold SKU at the part it is made of.
 
-Several SKUs may point at the same assembly, which is the usual case for
-variants -- a haybutler with the door on the left (`HBT-H-DL`) and one with it on
-the right (`HBT-H-DR`) are the same build, so both rows name the same assembly.
+What gets copied onto the line depends on which part you map:
 
-Only an assembly can be a product: the whole point is to have a BOM to copy, and
-a plain part does not have one.
+| You map | The line gets |
+| --- | --- |
+| An **assembly** | Its whole bill of materials, one link per component, at the BOM quantities |
+| **Any other part** | One link to that part, quantity 1 -- a line selling a single bolt consumes one bolt |
 
-With a SKU mapped, its BOM is copied onto matching line items:
+Several SKUs may point at the same part, which is the usual case for variants --
+a haybutler with the door on the left (`HBT-H-DL`) and one with it on the right
+(`HBT-H-DR`) are the same build, so both rows name the same assembly.
+
+With a SKU mapped, it is applied to matching line items:
 
 - automatically, whenever an order is imported, and
-- on demand, with **Prefill from BOM** on a sales order.
+- on demand, with **Prefill from SKUs** on a sales order.
 
 Either way, it is a *starting point* -- ordinary part links are written and you
 are then free to edit them. Two rules keep it from ever undoing your work:
@@ -71,8 +75,9 @@ are then free to edit them. Two rules keep it from ever undoing your work:
 - Changing a mapping, or the BOM behind it, **never rewrites an order that was
   already filled in.** Orders keep what they were costed against.
 
-A line whose SKU has no mapping (or whose assembly has an empty BOM) is simply
-left for you to link by hand, as below.
+A line whose SKU has no mapping is simply left for you to link by hand, as below.
+So is one mapped to an assembly whose BOM is still empty: there is nothing to
+copy yet, and linking the assembly to itself would not be what you meant.
 
 ## Linking parts to a line
 

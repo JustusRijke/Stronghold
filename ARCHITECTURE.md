@@ -252,9 +252,12 @@ step when one is actually needed.
   `SalesOrderLinePart(id, line_id, part_id, quantity)` is the mapping -- one of
   the two sales tables the user writes to -- quantity being per sold unit, like
   `BomLine`. `ProductSku(sku, part_id)` is the other: the sold SKU mapped to the
-  assembly `Part` whose BOM it is made of, many SKUs to one part (variants share
-  a build), which is why the sku is the pk. It only ever *prefills*:
-  `db._prefill_so_parts` copies that BOM into ordinary `SalesOrderLinePart` rows
+  `Part` it is made of, many SKUs to one part (variants share a build), which is
+  why the sku is the pk. **Any** part maps -- an assembly contributes its whole
+  BOM, anything else one link of itself at quantity 1, since a line selling a
+  single bolt has no BOM to copy and requiring one would leave exactly that case
+  to be hand-linked forever. It only ever *prefills*:
+  `db._prefill_so_parts` writes ordinary `SalesOrderLinePart` rows
   on a line that has none yet -- run per order by `prefill_so_parts` (POST
   `/sales-orders/{id}/prefill`, which logs) and for every order the WooCommerce
   import touches (which logs once for the run). Never on a line the user has
