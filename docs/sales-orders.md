@@ -58,6 +58,12 @@ What gets copied onto the line depends on which part you map:
 | An **assembly** | Its whole bill of materials, one link per component, at the BOM quantities |
 | **Any other part** | One link to that part, quantity 1 -- a line selling a single bolt consumes one bolt |
 
+The **Sold SKU** box suggests the SKUs your imported orders actually use, most-
+sold first, and drops each one from the list as you map it -- so the key is
+picked rather than typed. A SKU that has not been sold yet can still be typed in
+by hand. The count in brackets is how many sold line items carry it, which is a
+fair guide to what is worth mapping first.
+
 Several SKUs may point at the same part, which is the usual case for variants --
 a haybutler with the door on the left (`HBT-H-DL`) and one with it on the right
 (`HBT-H-DR`) are the same build, so both rows name the same assembly.
