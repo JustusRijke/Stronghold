@@ -39,10 +39,19 @@ Open-source inventory/stock tracking for small and medium businesses.
   order, so the cheapest source is visible at a glance. The 🛒 button on a row
   purchases from that supplier specifically, using the same dialog
 - A purchase order's lines are a full table (quantity, pack size, unit price,
-  line total, received, and an order total): edit a line's quantity or price in
-  place and the part's estimated price -- plus any stock already booked against
-  that line -- is revalued to match. Lines lock once the order is completed or
-  cancelled
+  line total, landed total, received, and a Goods / Delivery / Total summary):
+  edit a line's quantity or price in place and the part's estimated price --
+  plus any stock already booked against that line -- is revalued to match. Lines
+  lock once the order is completed or cancelled
+- An order's delivery cost is split over its lines in proportion to their value,
+  so freight ends up in the part price and in the stock received against the
+  order rather than being forgotten. The "Landed" column shows each line's goods
+  price plus its share; the purchase order list shows the order total (goods
+  plus delivery). Every price shown elsewhere -- part estimates, the unit price
+  in the purchase order tables on a part or supplier part page, stock values --
+  is landed. Only the order's own line prices stay bare, since that is what the
+  delivery cost is added to; reordering prefills that bare price, so freight is
+  never charged twice
 - Every order's reference is its own number, shown as "PO-0042" / "BO-0042".
   It is derived, not stored, so it is always present, always unique and cannot
   be edited into something that no longer matches the order. Use the supplier
@@ -125,8 +134,9 @@ Open-source inventory/stock tracking for small and medium businesses.
   whose components actually include the part, and the shortfall settles itself
   when the parts are received on a purchase order
 - Each stock item carries its own value, shown on the stock page: what the
-  purchase order it came from actually paid. This is deliberately not the part's
-  current price -- a batch bought last year at 0.07 stays worth 0.07 even if the
+  purchase order it came from actually paid, delivery included. This is
+  deliberately not the part's current price -- a batch bought last year at 0.07
+  stays worth 0.07 even if the
   part now costs 0.08. Only stock with no priced order of its own falls back to
   the part's estimated price
 - Assembly stock produced by a build order is worth what that build actually
@@ -157,7 +167,8 @@ Open-source inventory/stock tracking for small and medium businesses.
   rests on an estimate (a build whose inputs were themselves estimated, or which
   still owes parts) so an underestimate cannot hide inside the total
 - Every part carries an estimated unit price, shown on the part page and in the
-  parts overview. A purchased part is worth its most recent purchase price; an
+  parts overview. A purchased part is worth its most recent purchase price
+  (including that order's delivery cost, split over its lines by value); an
   assembly is worth the sum of its BOM components (recursively, so assemblies
   inside assemblies roll up). A price marked "partial" (`*` in the overview) is
   a floor: some component has never been purchased, so the real cost is higher.

@@ -1445,6 +1445,8 @@ export interface components {
             supplier_reference: string;
             /** Description */
             description: string;
+            /** Total */
+            total: number;
             /** Quantity */
             quantity: number;
             /** Unit Price */
@@ -1548,6 +1550,8 @@ export interface components {
             supplier_reference: string;
             /** Description */
             description: string;
+            /** Total */
+            total: number;
         };
         /** PurchaseOrderPatch */
         PurchaseOrderPatch: {
@@ -1937,6 +1941,8 @@ export interface components {
             active: boolean;
             /** Last Price */
             last_price?: number | null;
+            /** Last Goods Price */
+            last_goods_price?: number | null;
             /** Last Po Date */
             last_po_date?: string | null;
         };

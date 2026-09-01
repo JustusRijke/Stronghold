@@ -320,6 +320,26 @@ def test_purchasing_and_booking(client):
         json={"supplier_part_id": sp_id, "quantity": 20, "price": 0.05},
     ).json()
     line_id = lines[0]["id"]
+    # the order total the list page shows is goods + delivery
+    assert client.get(f"/api/purchase-orders/{po_id}").json()["total"] == 1.0
+    assert client.patch(
+        f"/api/purchase-orders/{po_id}", json={"delivery_cost": 0.25}
+    ).is_success
+    listed = {p["id"]: p for p in client.get("/api/purchase-orders").json()}
+    assert listed[po_id]["total"] == 1.25
+    # every price shown outside the order's own line table is landed: goods
+    # 1.00 + delivery 0.25 is a factor of 1.25 on a 0.005/item line price
+    sp = client.get(f"/api/supplier-parts/{sp_id}").json()
+    assert sp["last_price"] == pytest.approx(0.00625)
+    # ... except the one that seeds a new line, which must stay the bare price
+    # or the freight would compound on every reorder
+    assert sp["last_goods_price"] == pytest.approx(0.005)
+    part_pos = client.get(f"/api/parts/{pid}/purchase-orders").json()
+    assert part_pos[0]["unit_price"] == pytest.approx(0.00625)
+    assert client.patch(
+        f"/api/purchase-orders/{po_id}", json={"delivery_cost": 0.0}
+    ).is_success
+    assert client.get(f"/api/supplier-parts/{sp_id}").json()["last_price"] == 0.005
     # empty / non-positive receive qty is rejected before it reaches the domain
     assert (
         client.post(f"/api/po-lines/{line_id}/book", json={"quantity": ""}).status_code
