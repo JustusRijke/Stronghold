@@ -13,6 +13,7 @@
 		description: string;
 		supplier: string;
 		status: string;
+		total: number;
 		end_date: string;
 	};
 	let rows = $state<Row[]>([]);
@@ -25,6 +26,7 @@
 			description: po.description,
 			supplier: suppliers.get(po.supplier_id) ?? String(po.supplier_id),
 			status: po.status,
+			total: po.total,
 			end_date: po.end_date ?? ''
 		}));
 	}
@@ -36,6 +38,13 @@
 		{ key: 'reference', header: 'PO', mono: true, width: '160px' },
 		{ key: 'description', header: 'Description', truncate: true },
 		{ key: 'supplier', header: 'Supplier', width: '160px', truncate: true },
+		{
+			key: 'total', // goods + delivery
+			header: 'Total',
+			mono: true,
+			width: '110px',
+			format: (v) => (v as number).toFixed(2)
+		},
 		{
 			key: 'status',
 			header: 'Status',

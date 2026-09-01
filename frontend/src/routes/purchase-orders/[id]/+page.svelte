@@ -136,6 +136,12 @@
 	// (when cancelled) receiving -- grey out the matching controls to match
 	const locked = $derived(po?.status === 'Complete' || po?.status === 'Cancelled');
 	const outstanding = $derived(lines.reduce((n, l) => n + Math.max(l.quantity - l.received, 0), 0));
+
+	// mirrors db._delivery_factor: the delivery cost is spread over the lines in
+	// proportion to their value, so every line scales by the same factor
+	const goods = $derived(lines.reduce((t, l) => t + l.quantity * l.price, 0));
+	const delivery = $derived(po?.delivery_cost ?? 0);
+	const factor = $derived(delivery > 0 && goods > 0 ? 1 + delivery / goods : 1);
 	async function receiveAll() {
 		if (!confirm(`Receive all outstanding quantity on ${lines.length} line(s)?`)) return;
 		if (await toast.run(() => api.receiveAllPo(id))) load();
@@ -246,6 +252,7 @@
 								<th class="num">Pack</th>
 								<th class="num">Unit price</th>
 								<th class="num">Line total</th>
+								<th class="num" title="Line total plus its share of the delivery cost">Landed</th>
 								<th class="num">Received</th>
 								{#if !locked}<th></th>{/if}
 							</tr>
@@ -290,6 +297,7 @@
 										{/if}
 									</td>
 									<td class="num">{(line.quantity * line.price).toFixed(2)}</td>
+									<td class="num">{(line.quantity * line.price * factor).toFixed(2)}</td>
 									<td class="num" class:over={line.received > line.quantity}>
 										{line.received}/{line.quantity}
 									</td>
@@ -314,9 +322,19 @@
 						</tbody>
 						<tfoot>
 							<tr>
+								<td colspan="4">Goods</td>
+								<td class="num">{goods.toFixed(2)}</td>
+								<td colspan={locked ? 2 : 3}></td>
+							</tr>
+							<tr>
+								<td colspan="4">Delivery</td>
+								<td class="num">{delivery.toFixed(2)}</td>
+								<td colspan={locked ? 2 : 3}></td>
+							</tr>
+							<tr>
 								<td colspan="4">Total</td>
-								<td class="num">{lines.reduce((t, l) => t + l.quantity * l.price, 0).toFixed(2)}</td>
-								<td colspan={locked ? 1 : 2}></td>
+								<td class="num">{(goods + delivery).toFixed(2)}</td>
+								<td colspan={locked ? 2 : 3}></td>
 							</tr>
 						</tfoot>
 					</table>
