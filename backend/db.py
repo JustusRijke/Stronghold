@@ -136,7 +136,7 @@ def init(sql_path: Path, auto_commit: bool = False) -> None:
     SQLite is only how we query them, so the .db is rebuilt from scratch in a
     temp directory on every startup and never has to be looked after."""
     global _engine, _export_dir, _legacy_file, _db_path, _export_enabled
-    global _auto_commit, _committed_activity_id, _startup_message
+    global _auto_commit, _committed_activity_id
     # one path setting, two shapes: a directory of per-table .sql files, or --
     # for data written before the split -- a single .sql, replayed once and
     # re-exported into a directory beside it.
@@ -167,11 +167,11 @@ def init(sql_path: Path, auto_commit: bool = False) -> None:
     _export_dir.mkdir(parents=True, exist_ok=True)
     _stamp_versions()
     # startup's export is not a domain write, so it says what it actually did
-    _startup_message = _startup_commit_message(was)
+    startup_message(_startup_commit_message(was))
     try:
         export()
     finally:
-        _startup_message = None
+        startup_message(None)
 
 
 def _working_db_path(sql_path: Path) -> Path:
@@ -629,6 +629,14 @@ _NO_ACTIVITY_MESSAGE = (
 )
 
 
+def startup_message(message: str | None) -> None:
+    """Name the commit for an export that is not a domain write. Startup uses
+    it for the version stamp and the price refresh, which would otherwise reuse
+    an unrelated earlier Activity row or commit as "no activity log record"."""
+    global _startup_message
+    _startup_message = message
+
+
 def _git(*args: str) -> subprocess.CompletedProcess:
     """Run git in the data directory itself. Failures are the caller's to
     interpret: no repo, nothing staged and no identity are all ordinary here."""
@@ -723,6 +731,12 @@ def _field_changes(row, **new) -> list[str]:
     return [
         f"{k} {getattr(row, k)} -> {v}" for k, v in new.items() if getattr(row, k) != v
     ]
+
+
+def _supplier_part_label(s: Session, sp: SupplierPart) -> str:
+    """Name a supplier part in a log line. Most have neither sku nor their own
+    description, so the part's description is the only thing that identifies it."""
+    return sp.sku or sp.description or get_part(s, sp.part_id).description
 
 
 def _activity(s: Session, action: str, message: str, refs: list[tuple]) -> None:
@@ -849,7 +863,16 @@ def create_part(
 
 @_write
 def edit_part(s: Session, part_id: int, description: str) -> None:
-    get_part(s, part_id).description = description
+    part = get_part(s, part_id)
+    changes = _field_changes(part, description=description)
+    part.description = description
+    if changes:
+        _activity(
+            s,
+            "edit_part",
+            f"Part {part.description}: {', '.join(changes)}",
+            [("part", part_id, part.sku or "")],
+        )
 
 
 @_write
@@ -1344,9 +1367,17 @@ def set_part_assembly(s: Session, part_id: int, assembly: bool) -> None:
         raise InventoryError(
             f"part {part_id} is sold by a supplier; assemblies are built, not purchased"
         )
+    changes = _field_changes(part, assembly=assembly)
     part.assembly = assembly
     s.flush()
     refresh_part_price(s, part_id)  # the pricing rule itself changed
+    if changes:
+        _activity(
+            s,
+            "set_part_assembly",
+            f"Part {part.description}: {', '.join(changes)}",
+            [("part", part_id, part.sku or "")],
+        )
 
 
 @_write
@@ -1354,11 +1385,19 @@ def set_part_virtual(s: Session, part_id: int, virtual: bool) -> None:
     part = get_part(s, part_id)
     if virtual and part.assembly:
         raise InventoryError(f"part {part_id} is an assembly; cannot be virtual")
+    changes = _field_changes(part, virtual=virtual)
     part.virtual = virtual
     if not virtual:
         part.estimated_price = None  # a hand-entered price no longer applies
     s.flush()
     refresh_part_price(s, part_id)  # the pricing rule itself changed
+    if changes:
+        _activity(
+            s,
+            "set_part_virtual",
+            f"Part {part.description}: {', '.join(changes)}",
+            [("part", part_id, part.sku or "")],
+        )
 
 
 @_write
@@ -1370,7 +1409,15 @@ def set_part_purchasable(s: Session, part_id: int, purchasable: bool) -> None:
         raise InventoryError(
             f"part {part_id} is sold by a supplier; remove those supplier parts first"
         )
+    changes = _field_changes(part, purchasable=purchasable)
     part.purchasable = purchasable
+    if changes:
+        _activity(
+            s,
+            "set_part_purchasable",
+            f"Part {part.description}: {', '.join(changes)}",
+            [("part", part_id, part.sku or "")],
+        )
 
 
 @_write
@@ -1384,10 +1431,18 @@ def set_part_price(s: Session, part_id: int, price: float | None) -> None:
         )
     if price is not None and price < 0:
         raise InventoryError("price cannot be negative")
+    changes = _field_changes(part, estimated_price=price)
     part.estimated_price = price
     part.price_partial = price is None
     s.flush()
     refresh_part_price(s, part_id)  # cascade to the assemblies using it
+    if changes:
+        _activity(
+            s,
+            "set_part_price",
+            f"Part {part.description}: {', '.join(changes)}",
+            [("part", part_id, part.sku or "")],
+        )
 
 
 @_write
@@ -1432,6 +1487,13 @@ def add_bomline(
     )
     s.flush()
     refresh_part_price(s, parent_part_id)
+    component = get_part(s, component_part_id)
+    _activity(
+        s,
+        "add_bomline",
+        f"BOM {parent.description}: added {component.description} x{quantity:g}",
+        [("part", parent.id, parent.sku), ("part", component.id, component.sku)],
+    )
 
 
 @_write
@@ -1476,9 +1538,18 @@ def remove_bomline(s: Session, line_id: int) -> None:
     # ponytail: bom lines are order detail, plain delete (not master data)
     line = get_bomline(s, line_id)
     parent_part_id = line.parent_part_id
+    parent = get_part(s, parent_part_id)
+    component = get_part(s, line.component_part_id)
+    quantity = line.quantity
     s.delete(line)
     s.flush()
     refresh_part_price(s, parent_part_id)
+    _activity(
+        s,
+        "remove_bomline",
+        f"BOM {parent.description}: removed {component.description} x{quantity:g}",
+        [("part", parent.id, parent.sku), ("part", component.id, component.sku)],
+    )
 
 
 # -- stock ------------------------------------------------------------------
@@ -1505,6 +1576,13 @@ def create_item(s: Session, item_id: int, part_id: int) -> None:
     s.add(StockItem(id=item_id, count=0.0, part_id=part_id))
     s.flush()
     refresh_stock_price(s, get_item(s, item_id))  # no PO: the part estimate
+    part = get_part(s, part_id)
+    _activity(
+        s,
+        "create_item",
+        f"Created a stock item for {part.description}",
+        [("stock", item_id, f"0x {part.description}"), ("part", part_id, part.sku)],
+    )
 
 
 @_write
@@ -1544,7 +1622,20 @@ def set_count(s: Session, item_id: int, count: float) -> None:
 
 @_write
 def set_item_status(s: Session, item_id: int, status: str) -> None:
-    get_item(s, item_id).status = status
+    item = get_item(s, item_id)
+    changes = _field_changes(item, status=status)
+    item.status = status
+    if changes:
+        part = get_part(s, item.part_id)
+        _activity(
+            s,
+            "set_item_status",
+            f"Stock of {part.description}: {', '.join(changes)}",
+            [
+                ("stock", item_id, f"{item.count:g}x {part.description}"),
+                ("part", item.part_id, part.sku),
+            ],
+        )
 
 
 def on_hand(s: Session, part_id: int) -> float:
@@ -1952,12 +2043,30 @@ def create_supplier(s: Session, supplier_id: int, name: str) -> None:
 
 @_write
 def edit_supplier(s: Session, supplier_id: int, name: str) -> None:
-    get_supplier(s, supplier_id).name = name
+    supplier = get_supplier(s, supplier_id)
+    changes = _field_changes(supplier, name=name)
+    supplier.name = name
+    if changes:
+        _activity(
+            s,
+            "edit_supplier",
+            f"Supplier: {', '.join(changes)}",
+            [("supplier", supplier_id, name)],
+        )
 
 
 @_write
 def set_supplier_active(s: Session, supplier_id: int, active: bool) -> None:
-    get_supplier(s, supplier_id).active = active
+    supplier = get_supplier(s, supplier_id)
+    if not _field_changes(supplier, active=active):
+        return
+    supplier.active = active
+    _activity(
+        s,
+        "set_supplier_active",
+        f"{'Activated' if active else 'Deactivated'} supplier {supplier.name}",
+        [("supplier", supplier_id, supplier.name)],
+    )
 
 
 def _check_purchasable(s: Session, part_id: int) -> None:
@@ -2024,6 +2133,14 @@ def edit_supplier_part(
     sp = get_supplier_part(s, sp_id)
     _check_purchasable(s, part_id)
     was_part_id = sp.part_id
+    changes = _field_changes(
+        sp,
+        part_id=part_id,
+        description=description,
+        ean=ean,
+        hyperlink=hyperlink,
+        pack_qty=pack_qty,
+    )
     sp.part_id = part_id
     sp.description = description
     sp.ean = ean
@@ -2033,6 +2150,14 @@ def edit_supplier_part(
     refresh_part_price(s, part_id)
     if was_part_id != part_id:
         refresh_part_price(s, was_part_id)
+    if changes:
+        part = get_part(s, part_id)
+        _activity(
+            s,
+            "edit_supplier_part",
+            f"Supplier part {_supplier_part_label(s, sp)}: {', '.join(changes)}",
+            [("supplier-part", sp_id, sp.sku or ""), ("part", part_id, part.sku)],
+        )
 
 
 @_write
@@ -2054,7 +2179,20 @@ def set_supplier_part_sku(s: Session, sp_id: int, sku: str | None) -> None:
 
 @_write
 def set_supplier_part_active(s: Session, sp_id: int, active: bool) -> None:
-    get_supplier_part(s, sp_id).active = active
+    sp = get_supplier_part(s, sp_id)
+    if not _field_changes(sp, active=active):
+        return
+    sp.active = active
+    _activity(
+        s,
+        "set_supplier_part_active",
+        f"{'Activated' if active else 'Deactivated'} supplier part "
+        f"{_supplier_part_label(s, sp)}",
+        [
+            ("supplier-part", sp_id, sp.sku or ""),
+            ("part", sp.part_id, get_part(s, sp.part_id).sku),
+        ],
+    )
 
 
 @_write
@@ -2208,6 +2346,14 @@ def add_po_line(
         )
     )
     _refresh_po_parts(s, po_id)
+    part = get_part(s, sp.part_id)
+    _activity(
+        s,
+        "add_po_line",
+        f"{po_ref(po_id)} line added: {quantity}x "
+        f"{sp.description or part.description} at {price:g}",
+        [("purchase-order", po_id, po_ref(po_id)), ("part", part.id, part.sku)],
+    )
 
 
 @_write
@@ -2264,12 +2410,22 @@ def remove_po_line(s: Session, line_id: int) -> None:
     _check_po_line_editable(s, line)
     if s.scalar(select(Booking).where(Booking.po_line_id == line_id).limit(1)):
         raise InventoryError(f"po line {line_id} has bookings, cannot remove")
-    part_id = get_supplier_part(s, line.supplier_part_id).part_id
+    sp = get_supplier_part(s, line.supplier_part_id)
+    part_id = sp.part_id
     po_id = line.po_id
+    quantity = line.quantity
     s.delete(line)
     s.flush()  # the line must be gone before "latest price" is recomputed
     refresh_part_price(s, part_id)  # its own part is no longer on the order
     _refresh_po_parts(s, po_id)  # the rest share the delivery cost differently
+    part = get_part(s, part_id)
+    _activity(
+        s,
+        "remove_po_line",
+        f"{po_ref(po_id)} line removed: {quantity}x "
+        f"{sp.description or part.description}",
+        [("purchase-order", po_id, po_ref(po_id)), ("part", part_id, part.sku)],
+    )
 
 
 def _check_po_line_editable(s: Session, line: POLine) -> None:
