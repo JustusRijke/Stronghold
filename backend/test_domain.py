@@ -13,6 +13,7 @@ import crypto
 import db
 import import_woocommerce
 import pytest
+import woocommerce
 from models import (
     BUILD_STATUS_CODES,
     PO_STATUS_CODES,
@@ -1691,6 +1692,39 @@ def test_import_survives_orders_it_cannot_fully_understand(database):
         assert orders[2].date_created is None
     # and the user is told why, rather than it happening silently
     assert any("checkout-draft" in n for n in result["notes"])
+
+
+def test_woocommerce_line_names_arrive_as_plain_text():
+    """A variable product's name carries the store's own markup. We render it as
+    text, so the tags would otherwise show up literally on the order page."""
+    order = woocommerce._map_order(
+        {
+            "id": 1,
+            "number": "1",
+            "status": "processing",
+            "line_items": [
+                {
+                    "id": 10,
+                    "sku": "HF-1-SP",
+                    "name": "Hayfall<span> - </span>Met starterspakket",
+                    "price": 1.0,
+                    "quantity": 1,
+                },
+                # a tag becomes a space, so a break cannot weld two words together
+                {
+                    "id": 11,
+                    "sku": "X",
+                    "name": "A<br/>B &amp; C",
+                    "price": 1.0,
+                    "quantity": 1,
+                },
+            ],
+        }
+    )
+    assert [line["description"] for line in order["lines"]] == [
+        "Hayfall - Met starterspakket",
+        "A B & C",
+    ]
 
 
 def test_credential_settings_are_encrypted_at_rest(database, tmp_path):
