@@ -42,10 +42,29 @@ many **packs** turned up. Stronghold creates one Available stock item counting
 stamps it with the purchase order it came from.
 
 That stamp is what gives the stock its price: the item is worth what its own
-order actually paid.
+order actually paid -- **delivery included**, see below.
 
 You may receive more than you ordered -- over-receiving is allowed, suppliers
 over-deliver.
+
+#### Delivery cost
+
+An order's delivery cost is not a separate expense to be remembered later: it is
+part of what the goods cost you. Stronghold spreads it over the order's lines
+**in proportion to their value**, so a EUR 500 line carries more of the freight
+than a EUR 5 one.
+
+Order EUR 20 of one part and EUR 80 of another with EUR 10 delivery, and the
+freight splits EUR 2 / EUR 8 -- both lines land 10% above their goods price. The
+purchase order page shows this per line in the **Landed** column, and breaks the
+order into Goods / Delivery / Total underneath. The purchase order list shows
+that same total.
+
+That landed price is what the part is then worth and what stock received against
+the line is valued at, so delivery flows on into assembly costs and the stock
+value report. Change the delivery cost on an order and everything it touches is
+repriced immediately; set it to zero and the prices are exactly the goods prices
+again.
 
 ### 2. Producing a build order
 
@@ -168,7 +187,7 @@ worked out**:
 
 | Priced by | Meaning |
 | --- | --- |
-| Purchase order | What its own order actually paid. The best answer. |
+| Purchase order | What its own order actually paid, including its share of the delivery cost. The best answer. |
 | Build order | Built up from the real cost of what the build consumed. |
 | Build order (partly estimated) | Built, but an input was itself estimated or short. Worth **at least** the figure shown, probably more. |
 | Part price estimate | Never bought directly; valued at the part's latest known price. |
