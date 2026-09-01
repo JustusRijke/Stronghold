@@ -137,8 +137,10 @@
 	const locked = $derived(po?.status === 'Complete' || po?.status === 'Cancelled');
 	const outstanding = $derived(lines.reduce((n, l) => n + Math.max(l.quantity - l.received, 0), 0));
 
-	// mirrors db._delivery_factor: the delivery cost is spread over the lines in
-	// proportion to their value, so every line scales by the same factor
+	// mirrors db.po_totals: the delivery cost is spread over the lines in
+	// proportion to their value, so every line scales by the same factor.
+	// Computed from `lines` rather than derived from po.total on purpose --
+	// saveLine() refreshes lines but not po, so po.total lags an inline edit.
 	const goods = $derived(lines.reduce((t, l) => t + l.quantity * l.price, 0));
 	const delivery = $derived(po?.delivery_cost ?? 0);
 	const factor = $derived(delivery > 0 && goods > 0 ? 1 + delivery / goods : 1);

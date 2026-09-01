@@ -894,32 +894,43 @@ def set_part_active(s: Session, part_id: int, active: bool) -> None:
 # accident -- POLine.price is not nullable, so 0 means "not filled in".
 
 
-def delivery_factors(s: Session, po_id: int | None = None) -> dict[int, float]:
-    """Per order id: the factor its line prices scale by. An order's delivery
-    cost is split over its lines in proportion to their value, so every line on
-    the order scales by the same amount -- there is nothing to apportion per
-    line and no rounding remainder. Orders that charge no delivery, or have no
-    priced goods to spread it over, are absent (a caller reads 1.0 for them).
+def po_totals(s: Session, po_id: int | None = None) -> dict[int, tuple[float, float]]:
+    """Per order id: (goods subtotal, delivery factor). The delivery cost is
+    split over the lines in proportion to their value, so every line on the
+    order scales by the same factor -- nothing to apportion per line and no
+    rounding remainder. An order with no lines is absent; read (0.0, 1.0).
 
-    The whole map in one query, so callers pricing many lines at once do not go
-    N+1; pass po_id for a single order."""
+    One grouped query, so callers pricing many lines do not go N+1; pass po_id
+    for a single order."""
     q = (
         select(
-            PurchaseOrder.id,
+            POLine.po_id,
+            func.sum(POLine.quantity * POLine.price),
             PurchaseOrder.delivery_cost,
-            func.coalesce(func.sum(POLine.quantity * POLine.price), 0.0),
         )
-        .join(POLine, POLine.po_id == PurchaseOrder.id, isouter=True)
-        .where(PurchaseOrder.delivery_cost > 0)
-        .group_by(PurchaseOrder.id)
+        .join(PurchaseOrder, POLine.po_id == PurchaseOrder.id)
+        .group_by(POLine.po_id)
     )
     if po_id is not None:
-        q = q.where(PurchaseOrder.id == po_id)
-    return {row[0]: 1.0 + row[1] / row[2] for row in s.execute(q) if row[2] > 0}
+        q = q.where(POLine.po_id == po_id)
+    return {
+        po: (goods, 1.0 + delivery / goods if delivery > 0 and goods > 0 else 1.0)
+        for po, goods, delivery in s.execute(q)
+    }
+
+
+# ponytail: module-level cache, valid only for the duration of one
+# refresh_all_prices pass -- that pass writes no po_lines/purchase_orders rows,
+# so the factors cannot move under it. Deliberately NOT session-scoped: a write
+# transaction changes a line price and then reprices in the same session, where
+# a cached factor would be the pre-change one.
+_factor_cache: dict[int, float] = {}
 
 
 def _delivery_factor(s: Session, po_id: int) -> float:
-    return delivery_factors(s, po_id).get(po_id, 1.0)
+    if _factor_cache:
+        return _factor_cache.get(po_id, 1.0)
+    return po_totals(s, po_id).get(po_id, (0.0, 1.0))[1]
 
 
 def latest_po_price_source(s: Session, part_id: int) -> tuple[float, int, str] | None:
@@ -1171,20 +1182,27 @@ def refresh_all_prices(s: Session, log: bool = False) -> None:
     backfill path (e.g. after an import); normal writes keep prices current
     incrementally. `log` writes an Activity row -- off for the startup and
     import runs, which would otherwise log on every boot."""
-    for part_id in list(s.scalars(select(Part.id))):
-        part = get_part(s, part_id)
-        price, partial = _compute_price(s, part_id, set())
-        part.estimated_price = price
-        part.price_partial = partial
-    s.flush()  # stock prices read the part estimates just written
-    # consumed rows first: build-produced stock is costed from their prices
-    for consumed_first in (STOCK_CONSUMED, STOCK_AVAILABLE):
-        for item in s.scalars(
-            select(StockItem)
-            .where(StockItem.status == consumed_first)
-            .order_by(StockItem.id)
-        ):
-            refresh_stock_price(s, item)
+    # one query up front instead of one per part and per stock item (4k+ on a
+    # real dataset); cleared in the finally so a failure cannot leave a stale
+    # map behind for the next write
+    _factor_cache.update({po: factor for po, (_goods, factor) in po_totals(s).items()})
+    try:
+        for part_id in list(s.scalars(select(Part.id))):
+            part = get_part(s, part_id)
+            price, partial = _compute_price(s, part_id, set())
+            part.estimated_price = price
+            part.price_partial = partial
+        s.flush()  # stock prices read the part estimates just written
+        # consumed rows first: build-produced stock is costed from their prices
+        for consumed_first in (STOCK_CONSUMED, STOCK_AVAILABLE):
+            for item in s.scalars(
+                select(StockItem)
+                .where(StockItem.status == consumed_first)
+                .order_by(StockItem.id)
+            ):
+                refresh_stock_price(s, item)
+    finally:
+        _factor_cache.clear()
     if log:
         parts = s.scalar(select(func.count()).select_from(Part))
         _activity(s, "refresh_prices", f"Recalculated prices for {parts} parts", [])
@@ -1867,17 +1885,6 @@ def get_po_line(s: Session, line_id: int) -> POLine:
     if line is None:
         raise InventoryError(f"no po line {line_id}")
     return line
-
-
-def po_goods_totals(s: Session, po_id: int | None = None) -> dict[int, float]:
-    """Goods subtotal per order id -- delivery cost is the caller's to add. One
-    grouped query, so the order list does not go N+1; pass po_id for just one."""
-    q = select(POLine.po_id, func.sum(POLine.quantity * POLine.price)).group_by(
-        POLine.po_id
-    )
-    if po_id is not None:
-        q = q.where(POLine.po_id == po_id)
-    return {row[0]: row[1] for row in s.execute(q)}
 
 
 def next_supplier_id() -> int:

@@ -635,8 +635,7 @@ def _pos_with_qty(where) -> list[PartPurchaseOrderOut]:
     the landed price paid per unit on each (delivery included -- only the PO's
     own line table shows the bare goods price)."""
     with db.session() as s:
-        goods = db.po_goods_totals(s)
-        factors = db.delivery_factors(s)
+        totals = db.po_totals(s)
         rows: dict[int, PartPurchaseOrderOut] = {}
         for po, line, pack_qty in s.execute(
             select(PurchaseOrder, POLine, SupplierPart.pack_qty)
@@ -648,11 +647,11 @@ def _pos_with_qty(where) -> list[PartPurchaseOrderOut]:
             # a part can sit on several lines of one PO: sum the units, keep the last price
             row = rows.setdefault(
                 po.id,
-                PartPurchaseOrderOut(**_po_out(po, goods).model_dump(), quantity=0.0),
+                PartPurchaseOrderOut(**_po_out(po, totals).model_dump(), quantity=0.0),
             )
             row.quantity += line.quantity * pack_qty
             if line.price:
-                row.unit_price = line.price / pack_qty * factors.get(po.id, 1.0)
+                row.unit_price = line.price / pack_qty * totals[po.id][1]
         return list(rows.values())
 
 
@@ -1225,9 +1224,9 @@ def list_supplier_supplier_parts(supplier_id: int) -> list[SupplierPartOut]:
 )
 def list_supplier_pos(supplier_id: int) -> list[PurchaseOrderOut]:
     with db.session() as s:
-        goods = db.po_goods_totals(s)
+        totals = db.po_totals(s)
         return [
-            _po_out(po, goods)
+            _po_out(po, totals)
             for po in s.scalars(
                 select(PurchaseOrder)
                 .where(PurchaseOrder.supplier_id == supplier_id)
@@ -1240,13 +1239,12 @@ def list_supplier_pos(supplier_id: int) -> list[PurchaseOrderOut]:
 
 
 def _last_purchase() -> dict[int, tuple[float, float, date]]:
-    """Per supplier part: (landed price per pack, bare goods price per pack,
-    order date) of its newest priced, non-cancelled PO line. Read in one pass;
-    the caller divides by pack_qty. The landed price carries that line's share
-    of its order's delivery cost, like every price outside the order's own line
-    table; the goods price is what was typed on the line."""
+    """Per supplier part: (bare goods price per pack, delivery factor, order
+    date) of its newest priced, non-cancelled PO line. Read in one pass; the
+    caller divides by pack_qty and applies the factor -- landed everywhere
+    except the price that seeds a new line, where freight would compound."""
     with db.session() as s:
-        factors = db.delivery_factors(s)
+        totals = db.po_totals(s)
         rows = s.execute(
             select(
                 POLine.supplier_part_id,
@@ -1260,41 +1258,41 @@ def _last_purchase() -> dict[int, tuple[float, float, date]]:
         ).all()
     # later rows win, so the last one seen per supplier part is the newest
     return {
-        sp_id: (price * factors.get(po_id, 1.0), price, when)
+        sp_id: (price, totals.get(po_id, (0.0, 1.0))[1], when)
         for sp_id, price, when, po_id in rows
     }
 
 
 def _supplier_part_rows() -> list[SupplierPartOut]:
     last = _last_purchase()
+    rows = []
     with db.session() as s:
-        return [
-            SupplierPartOut(
-                id=p.id,
-                supplier_id=p.supplier_id,
-                sku=p.sku,
-                part_id=p.part_id,
-                part_sku=part_sku or "",
-                part_description=part_description or "",
-                description=p.description,
-                ean=p.ean,
-                hyperlink=p.hyperlink,
-                pack_qty=p.pack_qty,
-                active=p.active,
-                last_price=last[p.id][0] / p.pack_qty
-                if p.id in last and p.pack_qty > 0
-                else None,
-                last_goods_price=last[p.id][1] / p.pack_qty
-                if p.id in last and p.pack_qty > 0
-                else None,
-                last_po_date=last[p.id][2].isoformat() if p.id in last else None,
+        for p, part_sku, part_description in s.execute(
+            select(SupplierPart, Part.sku, Part.description)
+            .join(Part, SupplierPart.part_id == Part.id)
+            .order_by(SupplierPart.id)
+        ):
+            price, factor, when = last.get(p.id, (None, 1.0, None))
+            unit = price / p.pack_qty if price is not None and p.pack_qty > 0 else None
+            rows.append(
+                SupplierPartOut(
+                    id=p.id,
+                    supplier_id=p.supplier_id,
+                    sku=p.sku,
+                    part_id=p.part_id,
+                    part_sku=part_sku or "",
+                    part_description=part_description or "",
+                    description=p.description,
+                    ean=p.ean,
+                    hyperlink=p.hyperlink,
+                    pack_qty=p.pack_qty,
+                    active=p.active,
+                    last_price=None if unit is None else unit * factor,
+                    last_goods_price=unit,
+                    last_po_date=when.isoformat() if when else None,
+                )
             )
-            for p, part_sku, part_description in s.execute(
-                select(SupplierPart, Part.sku, Part.description)
-                .join(Part, SupplierPart.part_id == Part.id)
-                .order_by(SupplierPart.id)
-            )
-        ]
+    return rows
 
 
 @router.get("/supplier-parts", response_model=list[SupplierPartOut])
@@ -1371,9 +1369,11 @@ def list_supplier_part_pos(sp_id: int) -> list[PartPurchaseOrderOut]:
 # -- purchase orders --------------------------------------------------------
 
 
-def _po_out(po: PurchaseOrder, goods: dict[int, float]) -> PurchaseOrderOut:
-    """`goods` is db.po_goods_totals(): the subtotal for every order in one
-    query, so a list route does not go N+1. An order with no lines is absent."""
+def _po_out(
+    po: PurchaseOrder, totals: dict[int, tuple[float, float]]
+) -> PurchaseOrderOut:
+    """`totals` is db.po_totals(): (goods subtotal, delivery factor) for every
+    order in one query, so a list route does not go N+1."""
     return PurchaseOrderOut(
         id=po.id,
         supplier_id=po.supplier_id,
@@ -1384,16 +1384,16 @@ def _po_out(po: PurchaseOrder, goods: dict[int, float]) -> PurchaseOrderOut:
         delivery_cost=po.delivery_cost,
         supplier_reference=po.supplier_reference,
         description=po.description,
-        total=goods.get(po.id, 0.0) + po.delivery_cost,
+        total=totals.get(po.id, (0.0, 1.0))[0] + po.delivery_cost,
     )
 
 
 @router.get("/purchase-orders", response_model=list[PurchaseOrderOut])
 def list_pos() -> list[PurchaseOrderOut]:
     with db.session() as s:
-        goods = db.po_goods_totals(s)
+        totals = db.po_totals(s)
         return [
-            _po_out(po, goods)
+            _po_out(po, totals)
             for po in s.scalars(select(PurchaseOrder).order_by(PurchaseOrder.id))
         ]
 
@@ -1404,7 +1404,7 @@ def get_po(po_id: int) -> PurchaseOrderOut:
         po = s.get(PurchaseOrder, po_id)
         if po is None:
             raise HTTPException(status_code=404, detail=f"no purchase order {po_id}")
-        return _po_out(po, db.po_goods_totals(s, po_id))
+        return _po_out(po, db.po_totals(s, po_id))
 
 
 @router.post("/purchase-orders", response_model=PurchaseOrderOut, status_code=201)
