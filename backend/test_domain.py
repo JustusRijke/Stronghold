@@ -1415,7 +1415,9 @@ def test_set_count_cannot_cross_zero(database):
         db.set_count(debt.id, 5)
 
 
-def _seed_sale(so_id=1, wc_order_id=101, status=SalesOrderStatus.PROCESSING, qty=1.0):
+def _seed_sale(
+    so_id=1, wc_order_id=101, status=SalesOrderStatus.PROCESSING, qty=1.0, sku=""
+):
     """A sales order with one line, as the WooCommerce import would have left it.
     There is no create route: WooCommerce owns the order, we only map parts to it."""
     with db.session() as s:
@@ -1436,7 +1438,7 @@ def _seed_sale(so_id=1, wc_order_id=101, status=SalesOrderStatus.PROCESSING, qty
                 id=so_id,
                 so_id=so_id,
                 wc_line_id=so_id * 10,
-                sku="",  # WooCommerce often has none; it is never matched on
+                sku=sku,  # often empty; only the product sku map reads it
                 description="A Product",
                 unit_price=50.0,
                 quantity=qty,
@@ -1501,6 +1503,45 @@ def test_sales_order_flow(database):
         db.remove_line_part(link_id)
 
     assert "INSERT INTO sales_orders" in _exported(database)
+
+
+def test_product_sku_prefills_a_sales_line_from_the_bom(database):
+    bolt = db.next_part_id()
+    db.create_part(bolt, "B1", "Bolt")
+    nut = db.next_part_id()
+    db.create_part(nut, "N1", "Nut")
+    product = db.next_part_id()
+    db.create_part(product, "HBT-H", "Haybutler")
+    db.set_part_assembly(product, True)
+    db.add_bomline(db.next_bomline_id(), product, bolt, 4.0)
+    db.add_bomline(db.next_bomline_id(), product, nut, 4.0)
+
+    # two sold variants, one build: door left and door right are the same BOM
+    db.set_product_sku("HBT-H-DL", product)
+    db.set_product_sku("HBT-H-DR", product)
+    # only an assembly can be a product: its BOM is what the sale consumes
+    with pytest.raises(db.InventoryError):
+        db.set_product_sku("HBT-H-DX", bolt)
+
+    so_id, _ = _seed_sale(qty=2.0, sku="HBT-H-DR")
+    db.prefill_so_parts(so_id)
+    with db.session() as s:
+        assert db.so_needs(s, so_id) == {bolt: 8.0, nut: 8.0}  # 2 sold x 4 each
+
+    # prefilling again leaves an edited line alone -- the BOM is a starting
+    # point, not a thing that keeps rewriting the order
+    link_id = db.next_line_part_id() - 1
+    db.edit_line_part(link_id, 9.0)
+    db.prefill_so_parts(so_id)
+    with db.session() as s:
+        assert db.so_needs(s, so_id)[nut] == 18.0
+
+    # repointing the sku does not disturb the order already filled in
+    db.set_product_sku("HBT-H-DR", product)  # no-op, no activity row
+    db.remove_product_sku("HBT-H-DL")
+    with db.session() as s:
+        assert [r[0] for r in db.product_skus(s)] == ["HBT-H-DR"]
+        assert db.so_needs(s, so_id) == {bolt: 8.0, nut: 18.0}
 
 
 def test_sales_order_short_debt_settled_by_purchase(database):
@@ -1634,7 +1675,7 @@ def test_import_survives_orders_it_cannot_fully_understand(database):
             "lines": [],
         },
     ]
-    result = {"imported": 0, "updated": 0, "skipped": 0, "notes": []}
+    result = import_woocommerce._new_result()
     import_woocommerce._import(rows, result)
 
     assert result["imported"] == 3  # the good ones are NOT lost with the odd ones

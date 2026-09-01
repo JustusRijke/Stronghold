@@ -1249,7 +1249,7 @@ def test_stock_log_reconstructs_deleted_production(client):
     assert sum(e["quantity"] for e in produced()) == 10.0
 
 
-def _seed_sale(client, so_id=1, wc_order_id=101, qty=1.0):
+def _seed_sale(client, so_id=1, wc_order_id=101, qty=1.0, sku=""):
     """A sales order as the WooCommerce import leaves it. There is no create
     route -- WooCommerce owns the order; the app only maps parts onto it."""
     with db.session() as s:
@@ -1270,7 +1270,7 @@ def _seed_sale(client, so_id=1, wc_order_id=101, qty=1.0):
                 id=so_id,
                 so_id=so_id,
                 wc_line_id=so_id * 10,
-                sku="",
+                sku=sku,
                 description="A Product",
                 unit_price=50.0,
                 quantity=qty,
@@ -1325,6 +1325,47 @@ def test_sales_order_flow(client):
     # search finds it by its derived code and by who bought it
     assert client.get("/api/search?q=SO-0001").json()[0]["type"] == "sales_order"
     assert client.get("/api/search?q=Buyer").json()[0]["id"] == so_id
+
+
+def test_product_sku_prefill_over_the_api(client):
+    bolt = client.post("/api/parts", json={"sku": "B1", "description": "Bolt"}).json()
+    product = client.post(
+        "/api/parts", json={"sku": "HBT-H", "description": "Haybutler"}
+    ).json()
+    client.patch(f"/api/parts/{product['id']}", json={"assembly": True})
+    client.post(
+        f"/api/parts/{product['id']}/bom",
+        json={"component_part_id": bolt["id"], "quantity": 4},
+    )
+
+    # a plain part is not a product: it has no BOM to prefill from
+    bad = client.put(
+        "/api/product-skus", json={"sku": "HBT-H-DL", "part_id": bolt["id"]}
+    )
+    assert bad.status_code == 400 and "assembly" in bad.json()["detail"]
+
+    for sku in ("HBT-H-DL", "HBT-H-DR"):  # two sold variants, one BOM
+        assert (
+            client.put(
+                "/api/product-skus", json={"sku": sku, "part_id": product["id"]}
+            ).status_code
+            == 200
+        )
+    listed = client.get("/api/product-skus").json()
+    assert [(r["sku"], r["part_description"]) for r in listed] == [
+        ("HBT-H-DL", "Haybutler"),
+        ("HBT-H-DR", "Haybutler"),
+    ]
+
+    so_id = _seed_sale(client, qty=2.0, sku="HBT-H-DR")
+    lines = client.post(f"/api/sales-orders/{so_id}/prefill").json()
+    assert [(p["sku"], p["quantity"], p["required"]) for p in lines[0]["parts"]] == [
+        ("B1", 4.0, 8.0)
+    ]
+
+    assert client.delete("/api/product-skus/HBT-H-DL").status_code == 200
+    assert [r["sku"] for r in client.get("/api/product-skus").json()] == ["HBT-H-DR"]
+    assert client.delete("/api/product-skus/HBT-H-DL").status_code == 400
 
 
 def test_sales_order_margin_from_purchased_stock(client):

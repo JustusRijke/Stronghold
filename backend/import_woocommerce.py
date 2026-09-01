@@ -75,6 +75,10 @@ def _status(row: dict, notes: list[str]) -> str:
     return value
 
 
+def _new_result() -> dict:
+    return {"imported": 0, "updated": 0, "skipped": 0, "prefilled": 0, "notes": []}
+
+
 @db._write
 def _import(s, orders: list[dict], result: dict) -> None:
     notes: list[str] = result["notes"]
@@ -107,12 +111,17 @@ def _import(s, orders: list[dict], result: dict) -> None:
         so.date_created = db.date.fromisoformat(created) if created else None
         s.flush()  # the order must exist before its lines reference it
         _apply_lines(s, so, row["lines"], notes)
+        s.flush()  # ...and the lines must exist before the prefill reads them
+        # fill in what the sku mapping knows: only lines with no parts yet, so
+        # a re-import never overwrites the user's own work
+        result["prefilled"] += db._prefill_so_parts(s, so.id)[0]
 
     db._activity(
         s,
         "import_woocommerce",
         f"Imported WooCommerce orders: {result['imported']} new, "
-        f"{result['updated']} updated, {result['skipped']} skipped",
+        f"{result['updated']} updated, {result['skipped']} skipped, "
+        f"{result['prefilled']} part link(s) prefilled",
         [],
     )
 
@@ -126,6 +135,6 @@ def import_orders(base_url, key, secret, after, before=None) -> dict:
             "the settings page"
         )
     orders = woocommerce.fetch_orders(base_url, key, secret, after, before)
-    result = {"imported": 0, "updated": 0, "skipped": 0, "notes": []}
+    result = _new_result()
     _import(orders, result)
     return result

@@ -811,6 +811,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sales-orders/{so_id}/prefill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prefill Sales Order Parts
+         * @description Fill in each line's parts from the BOM its sku maps to. Lines that
+         *     already have parts are left alone.
+         */
+        post: operations["prefill_sales_order_parts_api_sales_orders__so_id__prefill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/product-skus": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Product Skus */
+        get: operations["list_product_skus_api_product_skus_get"];
+        /**
+         * Put Product Sku
+         * @description Point a sold sku at an assembly part. An upsert: the sku is the key, so
+         *     re-entering one repoints it rather than failing.
+         */
+        put: operations["put_product_sku_api_product_skus_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/product-skus/{sku}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Product Sku */
+        delete: operations["delete_product_sku_api_product_skus__sku__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sales-orders/import": {
         parameters: {
             query?: never;
@@ -1226,6 +1286,8 @@ export interface components {
             updated: number;
             /** Skipped */
             skipped: number;
+            /** Prefilled */
+            prefilled: number;
             /** Notes */
             notes: string[];
         };
@@ -1500,6 +1562,27 @@ export interface components {
         ProduceIn: {
             /** Quantity */
             quantity: number;
+        };
+        /** ProductSkuIn */
+        ProductSkuIn: {
+            /** Sku */
+            sku: string;
+            /** Part Id */
+            part_id: number;
+        };
+        /**
+         * ProductSkuOut
+         * @description A sold sku and the assembly part its BOM prefills sales lines from.
+         */
+        ProductSkuOut: {
+            /** Sku */
+            sku: string;
+            /** Part Id */
+            part_id: number;
+            /** Part Sku */
+            part_sku: string;
+            /** Part Description */
+            part_description: string;
         };
         /** PurchaseOrderIn */
         PurchaseOrderIn: {
@@ -3808,6 +3891,121 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StockItemOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prefill_sales_order_parts_api_sales_orders__so_id__prefill_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                so_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesOrderLineOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_product_skus_api_product_skus_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductSkuOut"][];
+                };
+            };
+        };
+    };
+    put_product_sku_api_product_skus_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductSkuIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_product_sku_api_product_skus__sku__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sku: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkOut"];
                 };
             };
             /** @description Validation Error */

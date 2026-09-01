@@ -515,6 +515,25 @@ class SalesOrderLinePart(Base):
     quantity: Mapped[float]
 
 
+class ProductSku(Base):
+    """The sku WooCommerce sells, mapped to the assembly Part it is made of.
+
+    Many skus to one part on purpose: a haybutler with the door on the left
+    (HBT-H-DL) and one on the right (HBT-H-DR) are the same bill of materials,
+    so both rows point at the same assembly. The sku is the pk -- it is the
+    thing WooCommerce sends and the only key a sales line has to match on.
+
+    It only prefills: copying the part's BOM onto a sales line writes ordinary
+    SalesOrderLinePart rows, which the user is then free to edit. Changing a
+    mapping (or the BOM behind it) never rewrites an order already filled in.
+    """
+
+    __tablename__ = "product_skus"
+
+    sku: Mapped[str] = mapped_column(primary_key=True)
+    part_id: Mapped[int] = mapped_column(ForeignKey(Part.id))
+
+
 class Booking(Base):
     """Links a stock item created by booking a PO line back to that line, so
     pricing and provenance stay queryable."""

@@ -38,6 +38,7 @@ from models import (
     POLine,
     POStatus,
     PriceBasis,
+    ProductSku,
     PurchaseOrder,
     SalesOrder,
     SalesOrderLine,
@@ -430,6 +431,8 @@ _MIGRATIONS = {
     # 6 only added a nullable column -- see the note on step 4.
     6: lambda s: None,
     7: _to_v7,
+    # 8 only added a table -- see the note on step 4.
+    8: lambda s: None,
 }
 
 
@@ -3132,6 +3135,145 @@ def remove_line_part(s: Session, link_id: int) -> None:
         f"{label}: no longer uses {part.description}",
         [("sales-order", so.id, label), ("part", part.id, part.sku)],
     )
+
+
+# -- product skus -----------------------------------------------------------
+#
+# The map from what WooCommerce sells to what it is made of. A sales line
+# carries a sku; a sku names an assembly Part; that part's BOM is what the line
+# consumes. Many skus may name one part (a door-left and a door-right variant
+# are the same build), which is why the sku is the key and not the part.
+
+
+def product_skus(s: Session) -> list:
+    """(sku, part_id, part_sku, part_description) for every mapping."""
+    return list(
+        s.execute(
+            select(ProductSku.sku, Part.id, Part.sku, Part.description)
+            .join(Part, ProductSku.part_id == Part.id)
+            .order_by(ProductSku.sku)
+        )
+    )
+
+
+def get_product_sku(s: Session, sku: str) -> ProductSku:
+    row = s.get(ProductSku, sku)
+    if row is None:
+        raise InventoryError(f"no product sku {sku!r}")
+    return row
+
+
+@_write
+def set_product_sku(s: Session, sku: str, part_id: int) -> None:
+    """Point a sold sku at the assembly it is made of, creating or repointing.
+
+    Upsert rather than separate add/edit: the sku is the key the user types, so
+    entering one that already exists means "this is what it should be", not an
+    error to hand back."""
+    sku = sku.strip()
+    if not sku:
+        raise InventoryError("sku is required")
+    part = get_part(s, part_id)
+    if not part.assembly:
+        raise InventoryError(
+            f"{part.description} is not an assembly; a product sku maps to an "
+            f"assembly part, whose BOM is what the sale consumes"
+        )
+    row = s.get(ProductSku, sku)
+    if row is None:
+        s.add(ProductSku(sku=sku, part_id=part_id))
+        verb = "maps to"
+    elif row.part_id == part_id:
+        return  # a no-op should not manufacture an activity row
+    else:
+        row.part_id = part_id
+        verb = "now maps to"
+    _activity(
+        s,
+        "set_product_sku",
+        f"Product sku {sku} {verb} {part.description}",
+        [("part", part_id, part.sku)],
+    )
+
+
+@_write
+def remove_product_sku(s: Session, sku: str) -> None:
+    # ponytail: a prefill lookup table, plain delete (orders keep their lines)
+    row = get_product_sku(s, sku)
+    part = get_part(s, row.part_id)
+    s.delete(row)
+    _activity(
+        s,
+        "remove_product_sku",
+        f"Product sku {sku} no longer maps to {part.description}",
+        [("part", part.id, part.sku)],
+    )
+
+
+@_write
+def prefill_so_parts(s: Session, so_id: int) -> None:
+    """The manual "prefill from BOM" write, logging what it filled in. The
+    importer calls _prefill_so_parts directly instead: it prefills every order
+    it touches and logs one row for the whole run.
+
+    Returns nothing, like every other @_write (the decorator commits and
+    re-exports around the call, and drops what fn returns); the route re-reads
+    the lines to show what changed."""
+    filled, lines = _prefill_so_parts(s, so_id)
+    if filled:
+        label = so_ref(so_id)
+        _activity(
+            s,
+            "prefill_so_parts",
+            f"{label}: filled in {filled} part link(s) on {lines} line(s) from "
+            f"the product sku BOMs",
+            [("sales-order", so_id, label)],
+        )
+
+
+def _prefill_so_parts(s: Session, so_id: int) -> tuple[int, int]:
+    """Fill in the parts of every line whose sku has a mapping, from that
+    mapping's BOM. Returns (links written, lines filled); the caller logs.
+
+    Only lines that have no parts yet are touched: once the user has edited a
+    line, the BOM is a starting point they already moved on from. A booked
+    order is skipped for the same reason add_line_part is allowed on one --
+    adding is safe, but there is nothing to add to a line that already has its
+    parts, and a booked order's lines all do."""
+    so = get_so(s, so_id)
+    link_id = (s.scalar(select(func.max(SalesOrderLinePart.id))) or 0) + 1
+    filled = 0
+    lines = 0
+    for line in so_lines_for(s, so.id):
+        if not line.sku:
+            continue
+        mapping = s.get(ProductSku, line.sku)
+        if mapping is None:
+            continue
+        if s.scalar(
+            select(func.count())
+            .select_from(SalesOrderLinePart)
+            .where(SalesOrderLinePart.line_id == line.id)
+        ):
+            continue
+        bom = s.scalars(
+            select(BomLine).where(BomLine.parent_part_id == mapping.part_id)
+        ).all()
+        if not bom:
+            continue
+        for bl in bom:
+            s.add(
+                SalesOrderLinePart(
+                    id=link_id,
+                    line_id=line.id,
+                    part_id=bl.component_part_id,
+                    quantity=bl.quantity,
+                )
+            )
+            link_id += 1
+            filled += 1
+        lines += 1
+    return filled, lines
 
 
 def so_needs(s: Session, so_id: int) -> dict[int, float]:

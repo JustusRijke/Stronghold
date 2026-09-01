@@ -497,7 +497,22 @@ class ImportResultOut(BaseModel):
     imported: int
     updated: int
     skipped: int
+    prefilled: int  # part links filled in from the product sku BOMs
     notes: list[str]
+
+
+class ProductSkuOut(BaseModel):
+    """A sold sku and the assembly part its BOM prefills sales lines from."""
+
+    sku: str
+    part_id: int
+    part_sku: str
+    part_description: str
+
+
+class ProductSkuIn(BaseModel):
+    sku: str
+    part_id: int
 
 
 class SettingOut(BaseModel):
@@ -1917,6 +1932,39 @@ def list_sales_order_stock(so_id: int) -> list[StockItemOut]:
                 _STOCK_SELECT.where(StockItem.consumed_by_so_id == so_id)
             )
         ]
+
+
+@router.post("/sales-orders/{so_id}/prefill", response_model=list[SalesOrderLineOut])
+def prefill_sales_order_parts(so_id: int) -> list[SalesOrderLineOut]:
+    """Fill in each line's parts from the BOM its sku maps to. Lines that
+    already have parts are left alone."""
+    _guard(db.prefill_so_parts, so_id)
+    return list_sales_order_lines(so_id)
+
+
+@router.get("/product-skus", response_model=list[ProductSkuOut])
+def list_product_skus() -> list[ProductSkuOut]:
+    with db.session() as s:
+        return [
+            ProductSkuOut(
+                sku=sku, part_id=part_id, part_sku=part_sku or "", part_description=desc
+            )
+            for sku, part_id, part_sku, desc in db.product_skus(s)
+        ]
+
+
+@router.put("/product-skus", response_model=OkOut)
+def put_product_sku(body: ProductSkuIn) -> OkOut:
+    """Point a sold sku at an assembly part. An upsert: the sku is the key, so
+    re-entering one repoints it rather than failing."""
+    _guard(db.set_product_sku, body.sku, body.part_id)
+    return OkOut(ok=True)
+
+
+@router.delete("/product-skus/{sku}", response_model=OkOut)
+def delete_product_sku(sku: str) -> OkOut:
+    _guard(db.remove_product_sku, sku)
+    return OkOut(ok=True)
 
 
 @router.post("/sales-orders/import", response_model=ImportResultOut)

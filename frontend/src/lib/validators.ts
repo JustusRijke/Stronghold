@@ -73,6 +73,10 @@ export const PartPatch = v.object({
 export const ProduceIn = v.object({
 	quantity: v.pipe(v.number(), v.integer(), v.gtValue(0, 'must be greater than 0')),
 	});
+export const ProductSkuIn = v.object({
+	sku: v.string(),
+	part_id: v.pipe(v.number(), v.integer()),
+	});
 export const PurchaseOrderIn = v.object({
 	supplier_id: v.pipe(v.number(), v.integer()),
 	status: v.optional(v.picklist(["Pending","Placed","On Hold","Complete","Cancelled","Lost","Returned"])),
