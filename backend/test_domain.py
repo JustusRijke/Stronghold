@@ -1246,12 +1246,23 @@ def test_auto_commit(tmp_path):
     db.init(tmp_path / "inventory", auto_commit=True)
     db.create_part(1, "BOLT-M3", "M3 bolt")
     db.set_setting("gui.title", "Warehouse")
-    db.edit_part(1, "M3 bolt, zinc")  # no activity record
+    db.edit_part(1, "M3 bolt, zinc")
+    db.refresh_all_prices()  # no activity record
 
     log = git("log", "--format=%s").splitlines()
     assert log[0] == db._NO_ACTIVITY_MESSAGE
-    assert log[1] == "Setting gui.title: 'Stronghold' -> 'Warehouse'"
-    assert log[2] == "Created part M3 bolt"
+    assert log[1] == "Part M3 bolt, zinc: description M3 bolt -> M3 bolt, zinc"
+    assert log[2] == "Setting gui.title: 'Stronghold' -> 'Warehouse'"
+    assert log[3] == "Created part M3 bolt"
+
+    # a non-write export names itself instead of blaming a missing activity row
+    db.create_part(2, "NUT-M3", "M3 nut")
+    db.startup_message("Recalculated prices on startup")
+    try:
+        db.refresh_all_prices()
+    finally:
+        db.startup_message(None)
+    assert git("log", "--format=%s", "-1").strip() == "Recalculated prices on startup"
 
     # committing the data into the app's own repo is never what the user meant
     with pytest.raises(ValueError, match="app repo"):

@@ -209,11 +209,12 @@ Open-source inventory/stock tracking for small and medium businesses.
   like "PO-0042" or "SO-0007" jumps to that order), grouped by type; a checkbox
   includes inactive records, otherwise only active ones show. Click a result to
   jump straight to its detail page
-- An activity log (clock icon, top right) records what you did -- parts and
-  orders created, stock received, builds produced, order lines and BOM
-  quantities edited, settings changed -- as a filterable table of
-  timestamped entries, each linking to the items it touched. It is a history to
-  glance over, not an undo
+- An activity log (clock icon, top right) records every change you make -- parts
+  and orders created, stock received, builds produced, order lines and BOM
+  lines added, edited and removed, records activated and deactivated, settings
+  changed -- as a filterable table of timestamped entries, each linking to the
+  items it touched. Edits name the fields that actually moved, and a change that
+  moves nothing writes no entry. It is a history to glance over, not an undo
 - Import your part catalog, BOMs, suppliers, supplier catalogs, purchase orders,
   build orders, and current stock from an InvenTree server (read-only, one-shot
   migration; nothing on the InvenTree side is changed). Builds have no "On
