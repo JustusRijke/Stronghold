@@ -1519,9 +1519,8 @@ def test_product_sku_prefills_a_sales_line_from_the_bom(database):
     # two sold variants, one build: door left and door right are the same BOM
     db.set_product_sku("HBT-H-DL", product)
     db.set_product_sku("HBT-H-DR", product)
-    # only an assembly can be a product: its BOM is what the sale consumes
-    with pytest.raises(db.InventoryError):
-        db.set_product_sku("HBT-H-DX", bolt)
+    # a plain part is a product too: it maps to one of itself, no BOM needed
+    db.set_product_sku("BOLT-SINGLE", bolt)
 
     so_id, _ = _seed_sale(qty=2.0, sku="HBT-H-DR")
     db.prefill_so_parts(so_id)
@@ -1536,11 +1535,17 @@ def test_product_sku_prefills_a_sales_line_from_the_bom(database):
     with db.session() as s:
         assert db.so_needs(s, so_id)[nut] == 18.0
 
+    # a plain part's line consumes one of it per unit sold
+    plain_so, _ = _seed_sale(so_id=2, wc_order_id=102, qty=3.0, sku="BOLT-SINGLE")
+    db.prefill_so_parts(plain_so)
+    with db.session() as s:
+        assert db.so_needs(s, plain_so) == {bolt: 3.0}
+
     # repointing the sku does not disturb the order already filled in
     db.set_product_sku("HBT-H-DR", product)  # no-op, no activity row
     db.remove_product_sku("HBT-H-DL")
     with db.session() as s:
-        assert [r[0] for r in db.product_skus(s)] == ["HBT-H-DR"]
+        assert [r[0] for r in db.product_skus(s)] == ["BOLT-SINGLE", "HBT-H-DR"]
         assert db.so_needs(s, so_id) == {bolt: 8.0, nut: 18.0}
 
 

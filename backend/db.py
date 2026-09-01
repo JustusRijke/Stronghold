@@ -3165,7 +3165,12 @@ def get_product_sku(s: Session, sku: str) -> ProductSku:
 
 @_write
 def set_product_sku(s: Session, sku: str, part_id: int) -> None:
-    """Point a sold sku at the assembly it is made of, creating or repointing.
+    """Point a sold sku at what it is made of, creating or repointing.
+
+    Any part will do. An assembly contributes its whole BOM; anything else is
+    one unit of itself -- a line that sells a single bolt has no bill of
+    materials to copy, and requiring one would leave exactly that case to be
+    hand-linked on every order, which is the work this exists to remove.
 
     Upsert rather than separate add/edit: the sku is the key the user types, so
     entering one that already exists means "this is what it should be", not an
@@ -3174,11 +3179,6 @@ def set_product_sku(s: Session, sku: str, part_id: int) -> None:
     if not sku:
         raise InventoryError("sku is required")
     part = get_part(s, part_id)
-    if not part.assembly:
-        raise InventoryError(
-            f"{part.description} is not an assembly; a product sku maps to an "
-            f"assembly part, whose BOM is what the sale consumes"
-        )
     row = s.get(ProductSku, sku)
     if row is None:
         s.add(ProductSku(sku=sku, part_id=part_id))
@@ -3212,7 +3212,7 @@ def remove_product_sku(s: Session, sku: str) -> None:
 
 @_write
 def prefill_so_parts(s: Session, so_id: int) -> None:
-    """The manual "prefill from BOM" write, logging what it filled in. The
+    """The manual "prefill from SKUs" write, logging what it filled in. The
     importer calls _prefill_so_parts directly instead: it prefills every order
     it touches and logs one row for the whole run.
 
@@ -3226,17 +3226,24 @@ def prefill_so_parts(s: Session, so_id: int) -> None:
             s,
             "prefill_so_parts",
             f"{label}: filled in {filled} part link(s) on {lines} line(s) from "
-            f"the product sku BOMs",
+            f"the product sku mappings",
             [("sales-order", so_id, label)],
         )
 
 
 def _prefill_so_parts(s: Session, so_id: int) -> tuple[int, int]:
-    """Fill in the parts of every line whose sku has a mapping, from that
-    mapping's BOM. Returns (links written, lines filled); the caller logs.
+    """Fill in the parts of every line whose sku has a mapping. Returns (links
+    written, lines filled); the caller logs.
+
+    What a mapping contributes depends on the part it names: an assembly gives
+    its whole BOM, one link per component; any other part gives one link of
+    itself, quantity 1 (a line selling a single bolt consumes one bolt). An
+    assembly with an empty BOM contributes nothing rather than a link to the
+    assembly itself -- it is a build with its components not filled in yet, so
+    "nothing to copy" is the truth about it.
 
     Only lines that have no parts yet are touched: once the user has edited a
-    line, the BOM is a starting point they already moved on from. A booked
+    line, the mapping is a starting point they already moved on from. A booked
     order is skipped for the same reason add_line_part is allowed on one --
     adding is safe, but there is nothing to add to a line that already has its
     parts, and a booked order's lines all do."""
@@ -3256,18 +3263,22 @@ def _prefill_so_parts(s: Session, so_id: int) -> tuple[int, int]:
             .where(SalesOrderLinePart.line_id == line.id)
         ):
             continue
-        bom = s.scalars(
-            select(BomLine).where(BomLine.parent_part_id == mapping.part_id)
-        ).all()
-        if not bom:
+        part = get_part(s, mapping.part_id)
+        if part.assembly:
+            wanted = [
+                (bl.component_part_id, bl.quantity)
+                for bl in s.scalars(
+                    select(BomLine).where(BomLine.parent_part_id == part.id)
+                )
+            ]
+        else:
+            wanted = [(part.id, 1.0)]
+        if not wanted:
             continue
-        for bl in bom:
+        for part_id, quantity in wanted:
             s.add(
                 SalesOrderLinePart(
-                    id=link_id,
-                    line_id=line.id,
-                    part_id=bl.component_part_id,
-                    quantity=bl.quantity,
+                    id=link_id, line_id=line.id, part_id=part_id, quantity=quantity
                 )
             )
             link_id += 1

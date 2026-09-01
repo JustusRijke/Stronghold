@@ -1338,12 +1338,6 @@ def test_product_sku_prefill_over_the_api(client):
         json={"component_part_id": bolt["id"], "quantity": 4},
     )
 
-    # a plain part is not a product: it has no BOM to prefill from
-    bad = client.put(
-        "/api/product-skus", json={"sku": "HBT-H-DL", "part_id": bolt["id"]}
-    )
-    assert bad.status_code == 400 and "assembly" in bad.json()["detail"]
-
     for sku in ("HBT-H-DL", "HBT-H-DR"):  # two sold variants, one BOM
         assert (
             client.put(
@@ -1363,8 +1357,19 @@ def test_product_sku_prefill_over_the_api(client):
         ("B1", 4.0, 8.0)
     ]
 
+    # a plain part maps too, to one of itself
+    client.put("/api/product-skus", json={"sku": "B1-SINGLE", "part_id": bolt["id"]})
+    plain = _seed_sale(client, so_id=2, wc_order_id=102, qty=3.0, sku="B1-SINGLE")
+    lines = client.post(f"/api/sales-orders/{plain}/prefill").json()
+    assert [(p["sku"], p["quantity"], p["required"]) for p in lines[0]["parts"]] == [
+        ("B1", 1.0, 3.0)
+    ]
+
     assert client.delete("/api/product-skus/HBT-H-DL").status_code == 200
-    assert [r["sku"] for r in client.get("/api/product-skus").json()] == ["HBT-H-DR"]
+    assert [r["sku"] for r in client.get("/api/product-skus").json()] == [
+        "B1-SINGLE",
+        "HBT-H-DR",
+    ]
     assert client.delete("/api/product-skus/HBT-H-DL").status_code == 400
 
 
