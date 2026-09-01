@@ -119,9 +119,14 @@
 						bind:value={newSku}
 						onkeydown={(e) => e.key === 'Enter' && add()}
 					/>
+					<!-- the description goes in `label`, never in the option's text: a
+					     datalist option's text content is what the browser inserts on
+					     pick, so writing it there fills the box with the description
+					     instead of the sku that is the key -->
 					<datalist id="soldskus">
 						{#each unmapped as s (s.sku)}
-							<option value={s.sku}>{s.description} ({s.lines})</option>
+							<option value={s.sku} label={`${s.sku} - ${s.description} (${s.lines})`}
+							></option>
 						{/each}
 					</datalist>
 				</td>
