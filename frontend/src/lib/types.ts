@@ -33,3 +33,4 @@ export type LinePart = S['LinePartOut'];
 export type SalesShortage = S['SalesShortageOut'];
 export type ImportResult = S['ImportResultOut'];
 export type ProductSku = S['ProductSkuOut'];
+export type SoldSku = S['SoldSkuOut'];

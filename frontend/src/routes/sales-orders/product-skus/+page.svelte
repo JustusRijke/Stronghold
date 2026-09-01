@@ -2,20 +2,31 @@
 	import { api } from '$lib/api';
 	import { toast } from '$lib/toast.svelte';
 	import Picker from '$lib/components/Picker.svelte';
-	import type { Part, ProductSku } from '$lib/types';
+	import type { Part, ProductSku, SoldSku } from '$lib/types';
 
 	let rows = $state<ProductSku[]>([]);
 	let parts = $state<Part[]>([]);
+	let sold = $state<SoldSku[]>([]);
 
 	let newSku = $state('');
 	let newPart = $state<number | ''>('');
 
+	// the SKUs the imported orders actually use and that nothing maps yet -- what
+	// the add box suggests, so a key is picked rather than typed (a typo here
+	// makes a mapping that silently matches nothing)
+	const unmapped = $derived(sold.filter((s) => !s.mapped));
+
 	async function load() {
-		const [skus, allParts] = await Promise.all([api.productSkus(), api.parts()]);
+		const [skus, allParts, soldSkus] = await Promise.all([
+			api.productSkus(),
+			api.parts(),
+			api.soldSkus()
+		]);
 		rows = skus;
 		picked = Object.fromEntries(skus.map((r) => [r.sku, r.part_id]));
 		// any part maps: an assembly contributes its BOM, anything else one of itself
 		parts = allParts;
+		sold = soldSkus;
 	}
 	$effect(() => {
 		load();
@@ -56,6 +67,13 @@
 		copying. It only ever fills in a line that has no parts yet: editing a mapping
 		never rewrites an order.
 	</p>
+	{#if unmapped.length}
+		<p class="muted">
+			<strong>{unmapped.length}</strong> SKU{unmapped.length === 1 ? '' : 's'} sold in the
+			imported orders {unmapped.length === 1 ? 'is' : 'are'} not mapped yet; the box below
+			suggests them, most-sold first.
+		</p>
+	{/if}
 
 	<table class="skus">
 		<thead>
@@ -93,7 +111,19 @@
 			{/if}
 			<tr class="add">
 				<td>
-					<input placeholder="HBT-H-DL" bind:value={newSku} onkeydown={(e) => e.key === 'Enter' && add()} />
+					<!-- a datalist, not a Picker: the key is the SKU string itself, and a
+					     SKU the orders have not used yet is still allowed to be typed -->
+					<input
+						list="soldskus"
+						placeholder={unmapped.length ? 'Pick or type a sold SKU' : 'HBT-H-DL'}
+						bind:value={newSku}
+						onkeydown={(e) => e.key === 'Enter' && add()}
+					/>
+					<datalist id="soldskus">
+						{#each unmapped as s (s.sku)}
+							<option value={s.sku}>{s.description} ({s.lines})</option>
+						{/each}
+					</datalist>
 				</td>
 				<td>
 					<Picker

@@ -24,7 +24,8 @@ import type {
 	SalesOrderLine,
 	SalesShortage,
 	ImportResult,
-	ProductSku
+	ProductSku,
+	SoldSku
 } from './types';
 
 export class ApiError extends Error {
@@ -226,6 +227,7 @@ export const api = {
 
 	// product skus: the sold-sku -> assembly map the prefill reads
 	productSkus: () => get<ProductSku[]>('/product-skus'),
+	soldSkus: () => get<SoldSku[]>('/product-skus/sold'),
 	setProductSku: (b: { sku: string; part_id: number }) => put<{ ok: boolean }>('/product-skus', b),
 	removeProductSku: (sku: string) =>
 		del<{ ok: boolean }>(`/product-skus/${encodeURIComponent(sku)}`),
