@@ -85,8 +85,8 @@
 		lines = filled;
 		toast.show(
 			added
-				? `Filled in ${added} part link(s) from the product SKU BOMs`
-				: 'Nothing to fill in: no line has an unmapped SKU with a BOM behind it'
+				? `Filled in ${added} part link(s) from the product SKU mappings`
+				: 'Nothing to fill in: no line has a mapped SKU that is still without parts'
 		);
 	}
 
@@ -209,7 +209,7 @@
 					     to an order already booked (booking consumes the delta) -->
 					<div class="actions">
 						{#if !so.booked}
-							<button class="btn ghost" onclick={prefill}>Prefill from BOM</button>
+							<button class="btn ghost" onclick={prefill}>Prefill from SKUs</button>
 						{/if}
 						{#if !so.booked || so.unbooked_parts > 0}
 							<button class="btn" onclick={() => dialog?.showModal()}>
@@ -220,8 +220,8 @@
 				</div>
 				<p class="muted">
 					What WooCommerce sold, and the parts each line consumes. WooCommerce does not
-					know what a product is made of. Map a sold SKU to an assembly on the
-					<a href="/product-skus">product SKUs</a> page and its BOM prefills these lines
+					know what a product is made of. Map a sold SKU to a part on the
+					<a href="/sales-orders/product-skus">product SKUs</a> page and it prefills these lines
 					(on import, or with the button above); anything unmapped is linked by hand.
 				</p>
 				{#if lines.length === 0}

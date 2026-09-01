@@ -5,17 +5,17 @@
 	import type { Part, ProductSku } from '$lib/types';
 
 	let rows = $state<ProductSku[]>([]);
-	let assemblies = $state<Part[]>([]);
+	let parts = $state<Part[]>([]);
 
 	let newSku = $state('');
 	let newPart = $state<number | ''>('');
 
 	async function load() {
-		const [skus, parts] = await Promise.all([api.productSkus(), api.parts()]);
+		const [skus, allParts] = await Promise.all([api.productSkus(), api.parts()]);
 		rows = skus;
 		picked = Object.fromEntries(skus.map((r) => [r.sku, r.part_id]));
-		// only an assembly has a BOM to prefill from, so only assemblies are offered
-		assemblies = parts.filter((p) => p.assembly);
+		// any part maps: an assembly contributes its BOM, anything else one of itself
+		parts = allParts;
 	}
 	$effect(() => {
 		load();
@@ -48,18 +48,20 @@
 	<h1 class="h1">Product SKUs</h1>
 	<p class="muted">
 		What a sold SKU is made of. WooCommerce knows the SKU it sold, not the parts behind
-		it, so each one is mapped to the assembly part whose BOM it consumes. Several SKUs
-		may map to the same assembly &mdash; a door-left and a door-right variant are the
-		same build. Importing an order, or the &ldquo;Prefill from BOM&rdquo; button on a
-		sales order, copies that BOM onto the matching line items. It only ever fills in a
-		line that has no parts yet: editing a mapping never rewrites an order.
+		it, so each one is mapped to a part here. Map an <strong>assembly</strong> and its
+		whole bill of materials is copied onto the line; map <strong>any other part</strong>
+		and the line consumes one of it per unit sold. Several SKUs may map to the same
+		part &mdash; a door-left and a door-right variant are the same build. Importing an
+		order, or the &ldquo;Prefill from SKUs&rdquo; button on a sales order, does the
+		copying. It only ever fills in a line that has no parts yet: editing a mapping
+		never rewrites an order.
 	</p>
 
 	<table class="skus">
 		<thead>
 			<tr>
 				<th>Sold SKU</th>
-				<th>Assembly</th>
+				<th>Part</th>
 				<th></th>
 			</tr>
 		</thead>
@@ -71,7 +73,7 @@
 						<!-- repointing is the same write as adding: the sku is the key -->
 						<Picker
 							bind:value={picked[r.sku]}
-							rows={assemblies}
+							rows={parts}
 							label={partLabel}
 							id={`sku-${r.sku}`}
 							onenter={() => repoint(r.sku)}
@@ -96,7 +98,7 @@
 				<td>
 					<Picker
 						bind:value={newPart}
-						rows={assemblies}
+						rows={parts}
 						label={partLabel}
 						id="newproductsku"
 						onenter={add}
