@@ -249,9 +249,17 @@ step when one is actually needed.
   `SalesOrderLine(id, so_id, wc_line_id, sku, description, unit_price,
   quantity)` is one WooCommerce line item, replaced wholesale by a re-import
   (its `sku` is plain text, often empty, and never matched against `Part.sku`).
-  `SalesOrderLinePart(id, line_id, part_id, quantity)` is the manual mapping --
-  the only sales table the user writes to -- quantity being per sold unit, like
-  `BomLine`. `db.book_sales_order` consumes those parts through the same
+  `SalesOrderLinePart(id, line_id, part_id, quantity)` is the mapping -- one of
+  the two sales tables the user writes to -- quantity being per sold unit, like
+  `BomLine`. `ProductSku(sku, part_id)` is the other: the sold SKU mapped to the
+  assembly `Part` whose BOM it is made of, many SKUs to one part (variants share
+  a build), which is why the sku is the pk. It only ever *prefills*:
+  `db._prefill_so_parts` copies that BOM into ordinary `SalesOrderLinePart` rows
+  on a line that has none yet -- run per order by `prefill_so_parts` (POST
+  `/sales-orders/{id}/prefill`, which logs) and for every order the WooCommerce
+  import touches (which logs once for the run). Never on a line the user has
+  already filled in, so editing a mapping or its BOM cannot rewrite an existing
+  order. `db.book_sales_order` consumes those parts through the same
   `_consume_fifo` helper `produce_build` uses, stamping `consumed_by_so_id` and
   producing nothing: a sale ships stock out rather than turning it into
   something. Shortfalls become the same negative-count debt a short build
@@ -384,12 +392,14 @@ Known ceilings, with their upgrade paths, deferred until they actually hurt
   setting appears.
 - In-memory substring filter on the parts page; add an index when parts grow
   large.
-- `_MIGRATIONS` now runs to schema 6: 2 dropped the stored order references, 3
+- `_MIGRATIONS` now runs to schema 8: 2 dropped the stored order references, 3
   moved the enum columns from text to int codes, 4 added the sales-order tables
   (additive, so its step is a no-op -- but it must exist, since `_migrate` walks
   every version in turn), 5 made `parts.sku` optional and unique, 6 added the
-  optional `bom_lines.note` (additive, so a no-op step like 4). See "Data
-  versioning".
+  optional `bom_lines.note` (additive, so a no-op step like 4), 7 added
+  `stock_items.created_at` (additive but NOT NULL, so its step backfills from
+  the order that created each row), 8 added `product_skus` (additive, a no-op
+  step). See "Data versioning".
 - Step 5 needed the mirror image of the `_DROPPED_COLUMNS` scaffold: an older
   file may hold rows that *violate* a constraint the current schema has (many
   parts sharing an empty sku), so the replay would fail before `_migrate` could
