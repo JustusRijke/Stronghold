@@ -287,8 +287,10 @@
 		if (!w) return; // popup blocked
 		w.document.write(
 			`<!doctype html><meta charset="utf-8"><title>${esc(title)}</title><style>
-@page { size: A4 landscape; margin: 12mm; }
-body { font: 10px system-ui, sans-serif; margin: 0; }
+/* margin:0 suppresses the browser's own URL/title/date headers -- they are
+   only drawn inside the default @page margin box; the body pads instead */
+@page { size: A4 landscape; margin: 0; }
+body { font: 10px system-ui, sans-serif; margin: 0; padding: 12mm; }
 h1 { font-size: 14px; margin: 0 0 2mm; }
 .meta { font-size: 9px; color: #555; margin-bottom: 3mm; }
 table { border-collapse: collapse; width: 100%; }
