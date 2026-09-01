@@ -35,6 +35,12 @@ Booked orders are skipped because booking already moved stock. Rewriting the
 lines underneath a completed stock movement would leave the consumption
 describing something that no longer exists.
 
+A variable product's line name arrives from WooCommerce wrapped in the store's
+own markup (`Hayfall<span> - </span>Met starterspakket`). The import strips it,
+so what you see is plain text. Lines imported before that was fixed keep the
+tags until the order is imported again -- and a **booked** order never is, by
+the rule above, so those keep them for good.
+
 Your part mapping survives a re-import: links are matched to line items by their
 WooCommerce id, not by position. If a line disappears from the WooCommerce order
 entirely, its links go with it and the import reports that it did so.
