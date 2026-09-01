@@ -142,6 +142,59 @@ def test_purchasing_flow(database):
     assert "INSERT INTO bookings" in sql
 
 
+def test_delivery_cost_is_split_over_the_lines_by_value(database):
+    """Freight is real money: it is spread over an order's lines in proportion
+    to their value and lands in the part price and in the stock booked from it.
+    """
+    db.create_supplier(1, "Acme Corp")
+    db.create_part(1, "CHEAP", "cheap part")
+    db.create_part(2, "PRICEY", "pricey part")
+    db.create_supplier_part(1, 1, "A-1", 1, pack_qty=1)
+    db.create_supplier_part(2, 1, "A-2", 2, pack_qty=1)
+    # goods subtotal 100: line 1 is 20 of it, line 2 is 80. Delivery 10 splits
+    # 2 / 8, so the factor is 1.10 for both lines.
+    db.create_po(1, 1, delivery_cost=10.0)
+    db.add_po_line(1, 1, 1, 10, 2.0)
+    db.add_po_line(2, 1, 2, 10, 8.0)
+    with db.session() as s:
+        assert s.get(Part, 1).estimated_price == pytest.approx(2.2)
+        assert s.get(Part, 2).estimated_price == pytest.approx(8.8)
+        # the cheap line carries the smaller share of the freight
+        assert (2.2 - 2.0) * 10 == pytest.approx(2.0)
+        assert (8.8 - 8.0) * 10 == pytest.approx(8.0)
+
+    db.book_po_line(1, db.next_item_id(), 10)
+    with db.session() as s:
+        item = s.scalars(select(StockItem).where(StockItem.part_id == 1)).one()
+        assert item.unit_price == pytest.approx(2.2)
+        assert item.price_basis == PriceBasis.PO
+
+    # raising the freight reprices every part on the order, booked stock too
+    db.edit_po(1, status="Pending", start_date=date.today(), delivery_cost=20.0)
+    with db.session() as s:
+        assert s.get(Part, 1).estimated_price == pytest.approx(2.4)
+        assert s.get(Part, 2).estimated_price == pytest.approx(9.6)
+        item = s.scalars(select(StockItem).where(StockItem.part_id == 1)).one()
+        assert item.unit_price == pytest.approx(2.4)
+
+    # a line's own price move changes the split for the *other* line as well
+    db.edit_po_line(2, price=18.0)  # subtotal 200, factor 1.10 again
+    with db.session() as s:
+        assert s.get(Part, 1).estimated_price == pytest.approx(2.2)
+        assert s.get(Part, 2).estimated_price == pytest.approx(19.8)
+
+    # removing it puts the whole delivery cost on what is left: goods 20,
+    # delivery 20, so the surviving line's part doubles
+    db.remove_po_line(2)
+    with db.session() as s:
+        assert s.get(Part, 1).estimated_price == pytest.approx(4.0)
+
+    # and with no delivery cost the price is exactly the goods price
+    db.edit_po(1, status="Pending", start_date=date.today(), delivery_cost=0.0)
+    with db.session() as s:
+        assert s.get(Part, 1).estimated_price == pytest.approx(2.0)
+
+
 def test_bom_flow(database):
     db.create_part(1, "ASM", "an assembly")
     db.create_part(2, "COMP-A", "component a")

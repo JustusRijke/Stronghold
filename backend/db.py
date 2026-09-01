@@ -894,10 +894,30 @@ def set_part_active(s: Session, part_id: int, active: bool) -> None:
 # accident -- POLine.price is not nullable, so 0 means "not filled in".
 
 
+def _delivery_factor(s: Session, po_id: int) -> float:
+    """An order's delivery cost is split over its lines in proportion to their
+    value, so every line on the order scales by the same factor -- there is
+    nothing to apportion per line and no rounding remainder. 1.0 when the order
+    charges no delivery or has no priced goods to spread it over."""
+    row = s.execute(
+        select(
+            PurchaseOrder.delivery_cost,
+            func.coalesce(func.sum(POLine.quantity * POLine.price), 0.0),
+        )
+        .join(POLine, POLine.po_id == PurchaseOrder.id, isouter=True)
+        .where(PurchaseOrder.id == po_id)
+        .group_by(PurchaseOrder.id)
+    ).first()
+    if row is None or row[0] <= 0 or row[1] <= 0:
+        return 1.0
+    return 1.0 + row[0] / row[1]
+
+
 def latest_po_price_source(s: Session, part_id: int) -> tuple[float, int, str] | None:
-    """(unit price, po id, po reference) from the most recent non-cancelled PO
-    that priced this part, or None. Ordered by order date (ids do not follow
-    date order); a line's price is per pack, so divide by pack_qty."""
+    """(landed unit price, po id, po reference) from the most recent
+    non-cancelled PO that priced this part, or None. Ordered by order date (ids
+    do not follow date order); a line's price is per pack, so divide by
+    pack_qty, then add that line's share of the order's delivery cost."""
     row = s.execute(
         select(
             POLine.price,
@@ -917,7 +937,9 @@ def latest_po_price_source(s: Session, part_id: int) -> tuple[float, int, str] |
         )
         .limit(1)
     ).first()
-    return (row[0] / row[1], row[2], po_ref(row[2])) if row else None
+    if row is None:
+        return None
+    return (row[0] / row[1] * _delivery_factor(s, row[2]), row[2], po_ref(row[2]))
 
 
 def latest_po_unit_price(s: Session, part_id: int) -> float | None:
@@ -998,10 +1020,10 @@ def refresh_part_price(s: Session, part_id: int) -> None:
 def _po_unit_price_for(
     s: Session, po_id: int, item_id: int, part_id: int
 ) -> float | None:
-    """What the order this stock came from paid per item, or None if that order
-    has no price for it. Prefers the booked line (the exact line received into
-    this item); migrated stock has no Booking, so fall back to that order's
-    line for the same part."""
+    """What the order this stock came from paid per item, delivery included, or
+    None if that order has no price for it. Prefers the booked line (the exact
+    line received into this item); migrated stock has no Booking, so fall back
+    to that order's line for the same part."""
     booked = s.execute(
         select(POLine.price, SupplierPart.pack_qty)
         .join(Booking, Booking.po_line_id == POLine.id)
@@ -1024,7 +1046,9 @@ def _po_unit_price_for(
     if booked is None:
         return None
     # price 0 means "not filled in": the order exists but does not price this
-    return booked[0] / booked[1] if booked[0] > 0 else None
+    if booked[0] <= 0:
+        return None
+    return booked[0] / booked[1] * _delivery_factor(s, po_id)
 
 
 def build_unit_cost(s: Session, build_id: int) -> tuple[float | None, bool]:
@@ -1836,6 +1860,17 @@ def get_po_line(s: Session, line_id: int) -> POLine:
     return line
 
 
+def po_goods_totals(s: Session, po_id: int | None = None) -> dict[int, float]:
+    """Goods subtotal per order id -- delivery cost is the caller's to add. One
+    grouped query, so the order list does not go N+1; pass po_id for just one."""
+    q = select(POLine.po_id, func.sum(POLine.quantity * POLine.price)).group_by(
+        POLine.po_id
+    )
+    if po_id is not None:
+        q = q.where(POLine.po_id == po_id)
+    return {row[0]: row[1] for row in s.execute(q)}
+
+
 def next_supplier_id() -> int:
     # ponytail: max+1 id generation; fine while one process owns the db
     with session() as s:
@@ -2070,7 +2105,11 @@ def edit_po(
         )
     if start_date is None:
         raise InventoryError("purchase order start date is required")
-    reprice = status != po.status or start_date != po.start_date
+    reprice = (
+        status != po.status
+        or start_date != po.start_date
+        or delivery_cost != po.delivery_cost
+    )
     changes = _field_changes(
         po,
         status=status,
@@ -2088,16 +2127,9 @@ def edit_po(
     po.description = description
     if reprice:
         # cancelling drops this order's prices; the date decides which order is
-        # "latest" -- either way every part on it may be repriced
-        s.flush()
-        for part_id in set(
-            s.scalars(
-                select(SupplierPart.part_id)
-                .join(POLine, POLine.supplier_part_id == SupplierPart.id)
-                .where(POLine.po_id == po_id)
-            )
-        ):
-            refresh_part_price(s, part_id)
+        # "latest"; the delivery cost is spread over the lines -- any of the
+        # three reprices every part on the order
+        _refresh_po_parts(s, po_id)
     if changes:
         label = po_ref(po_id)
         _activity(
@@ -2106,6 +2138,21 @@ def edit_po(
             f"Edited {label}: {', '.join(changes)}",
             [("po", po_id, label)],
         )
+
+
+def _refresh_po_parts(s: Session, po_id: int) -> None:
+    """Reprice every part on one order. Anything that moves an order's goods
+    subtotal moves the delivery-cost share of *every* line on it, so a single
+    line's price or quantity is never a one-part change."""
+    s.flush()  # the write must be visible to the recompute
+    for part_id in set(
+        s.scalars(
+            select(SupplierPart.part_id)
+            .join(POLine, POLine.supplier_part_id == SupplierPart.id)
+            .where(POLine.po_id == po_id)
+        )
+    ):
+        refresh_part_price(s, part_id)
 
 
 def _po_has_receipts(s: Session, po_id: int) -> bool:
@@ -2144,8 +2191,7 @@ def add_po_line(
             price=price,
         )
     )
-    s.flush()
-    refresh_part_price(s, sp.part_id)
+    _refresh_po_parts(s, po_id)
 
 
 @_write
@@ -2174,17 +2220,17 @@ def edit_po_line(
         if price < 0:
             raise InventoryError("po line price must not be negative")
         line.price = price
-        s.flush()  # the new price must be visible to the recompute below
-        # price feeds latest_po_unit_price, and any stock booked against this
-        # line was valued at the old one
-        refresh_part_price(s, get_supplier_part(s, line.supplier_part_id).part_id)
+    if changes:
+        # price feeds latest_po_unit_price, and both price and quantity move the
+        # order's goods subtotal, hence every line's share of the delivery cost
+        _refresh_po_parts(s, line.po_id)
+        # stock booked against this line was valued at the old price
         for item in s.scalars(
             select(StockItem)
             .join(Booking, Booking.stock_item_id == StockItem.id)
             .where(Booking.po_line_id == line_id)
         ):
             refresh_stock_price(s, item)
-    if changes:
         part = get_part(s, get_supplier_part(s, line.supplier_part_id).part_id)
         label = po_ref(line.po_id)
         _activity(
@@ -2203,9 +2249,11 @@ def remove_po_line(s: Session, line_id: int) -> None:
     if s.scalar(select(Booking).where(Booking.po_line_id == line_id).limit(1)):
         raise InventoryError(f"po line {line_id} has bookings, cannot remove")
     part_id = get_supplier_part(s, line.supplier_part_id).part_id
+    po_id = line.po_id
     s.delete(line)
     s.flush()  # the line must be gone before "latest price" is recomputed
-    refresh_part_price(s, part_id)
+    refresh_part_price(s, part_id)  # its own part is no longer on the order
+    _refresh_po_parts(s, po_id)  # the rest share the delivery cost differently
 
 
 def _check_po_line_editable(s: Session, line: POLine) -> None:

@@ -1445,6 +1445,8 @@ export interface components {
             supplier_reference: string;
             /** Description */
             description: string;
+            /** Total */
+            total: number;
             /** Quantity */
             quantity: number;
             /** Unit Price */
@@ -1548,6 +1550,8 @@ export interface components {
             supplier_reference: string;
             /** Description */
             description: string;
+            /** Total */
+            total: number;
         };
         /** PurchaseOrderPatch */
         PurchaseOrderPatch: {

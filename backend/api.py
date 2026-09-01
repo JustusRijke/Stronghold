@@ -290,6 +290,7 @@ class PurchaseOrderOut(BaseModel):
     delivery_cost: float
     supplier_reference: str
     description: str
+    total: float  # goods subtotal + delivery cost
 
 
 class PartPurchaseOrderOut(PurchaseOrderOut):
@@ -627,6 +628,7 @@ def _pos_with_qty(where) -> list[PartPurchaseOrderOut]:
     """POs whose lines match `where`, newest first, with the units ordered and
     the price paid per unit on each."""
     with db.session() as s:
+        goods = db.po_goods_totals(s)
         rows: dict[int, PartPurchaseOrderOut] = {}
         for po, line, pack_qty in s.execute(
             select(PurchaseOrder, POLine, SupplierPart.pack_qty)
@@ -637,7 +639,8 @@ def _pos_with_qty(where) -> list[PartPurchaseOrderOut]:
         ):
             # a part can sit on several lines of one PO: sum the units, keep the last price
             row = rows.setdefault(
-                po.id, PartPurchaseOrderOut(**_po_out(po).model_dump(), quantity=0.0)
+                po.id,
+                PartPurchaseOrderOut(**_po_out(po, goods).model_dump(), quantity=0.0),
             )
             row.quantity += line.quantity * pack_qty
             row.unit_price = line.price / pack_qty if line.price else row.unit_price
@@ -1213,8 +1216,9 @@ def list_supplier_supplier_parts(supplier_id: int) -> list[SupplierPartOut]:
 )
 def list_supplier_pos(supplier_id: int) -> list[PurchaseOrderOut]:
     with db.session() as s:
+        goods = db.po_goods_totals(s)
         return [
-            _po_out(po)
+            _po_out(po, goods)
             for po in s.scalars(
                 select(PurchaseOrder)
                 .where(PurchaseOrder.supplier_id == supplier_id)
@@ -1343,7 +1347,9 @@ def list_supplier_part_pos(sp_id: int) -> list[PartPurchaseOrderOut]:
 # -- purchase orders --------------------------------------------------------
 
 
-def _po_out(po: PurchaseOrder) -> PurchaseOrderOut:
+def _po_out(po: PurchaseOrder, goods: dict[int, float]) -> PurchaseOrderOut:
+    """`goods` is db.po_goods_totals(): the subtotal for every order in one
+    query, so a list route does not go N+1. An order with no lines is absent."""
     return PurchaseOrderOut(
         id=po.id,
         supplier_id=po.supplier_id,
@@ -1354,14 +1360,16 @@ def _po_out(po: PurchaseOrder) -> PurchaseOrderOut:
         delivery_cost=po.delivery_cost,
         supplier_reference=po.supplier_reference,
         description=po.description,
+        total=goods.get(po.id, 0.0) + po.delivery_cost,
     )
 
 
 @router.get("/purchase-orders", response_model=list[PurchaseOrderOut])
 def list_pos() -> list[PurchaseOrderOut]:
     with db.session() as s:
+        goods = db.po_goods_totals(s)
         return [
-            _po_out(po)
+            _po_out(po, goods)
             for po in s.scalars(select(PurchaseOrder).order_by(PurchaseOrder.id))
         ]
 
@@ -1370,9 +1378,9 @@ def list_pos() -> list[PurchaseOrderOut]:
 def get_po(po_id: int) -> PurchaseOrderOut:
     with db.session() as s:
         po = s.get(PurchaseOrder, po_id)
-    if po is None:
-        raise HTTPException(status_code=404, detail=f"no purchase order {po_id}")
-    return _po_out(po)
+        if po is None:
+            raise HTTPException(status_code=404, detail=f"no purchase order {po_id}")
+        return _po_out(po, db.po_goods_totals(s, po_id))
 
 
 @router.post("/purchase-orders", response_model=PurchaseOrderOut, status_code=201)

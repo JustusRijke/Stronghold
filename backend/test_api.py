@@ -320,6 +320,16 @@ def test_purchasing_and_booking(client):
         json={"supplier_part_id": sp_id, "quantity": 20, "price": 0.05},
     ).json()
     line_id = lines[0]["id"]
+    # the order total the list page shows is goods + delivery
+    assert client.get(f"/api/purchase-orders/{po_id}").json()["total"] == 1.0
+    assert client.patch(
+        f"/api/purchase-orders/{po_id}", json={"delivery_cost": 0.25}
+    ).is_success
+    listed = {p["id"]: p for p in client.get("/api/purchase-orders").json()}
+    assert listed[po_id]["total"] == 1.25
+    assert client.patch(
+        f"/api/purchase-orders/{po_id}", json={"delivery_cost": 0.0}
+    ).is_success
     # empty / non-positive receive qty is rejected before it reaches the domain
     assert (
         client.post(f"/api/po-lines/{line_id}/book", json={"quantity": ""}).status_code
