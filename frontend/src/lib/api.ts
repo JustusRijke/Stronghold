@@ -23,7 +23,8 @@ import type {
 	PartSalesOrder,
 	SalesOrderLine,
 	SalesShortage,
-	ImportResult
+	ImportResult,
+	ProductSku
 } from './types';
 
 export class ApiError extends Error {
@@ -221,6 +222,13 @@ export const api = {
 	partSalesOrders: (id: number) => get<PartSalesOrder[]>(`/parts/${id}/sales-orders`),
 	importSalesOrders: (b: { after: string; before?: string | null }) =>
 		post<ImportResult>('/sales-orders/import', b),
+	prefillSalesOrder: (id: number) => post<SalesOrderLine[]>(`/sales-orders/${id}/prefill`, {}),
+
+	// product skus: the sold-sku -> assembly map the prefill reads
+	productSkus: () => get<ProductSku[]>('/product-skus'),
+	setProductSku: (b: { sku: string; part_id: number }) => put<{ ok: boolean }>('/product-skus', b),
+	removeProductSku: (sku: string) =>
+		del<{ ok: boolean }>(`/product-skus/${encodeURIComponent(sku)}`),
 
 	// settings
 	settings: () => get<Setting[]>('/settings'),

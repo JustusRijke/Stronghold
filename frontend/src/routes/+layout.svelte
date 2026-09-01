@@ -20,6 +20,7 @@
 		['Purchase orders', '/purchase-orders'],
 		['Build orders', '/build-orders'],
 		['Sales orders', '/sales-orders'],
+		['Product SKUs', '/product-skus'],
 		['Reports', '/reports']
 	];
 

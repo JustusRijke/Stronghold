@@ -51,7 +51,8 @@
 				const r = await api.importSalesOrders({ after, before: before || null });
 				await load();
 				toast.show(
-					`Imported ${r.imported} new, updated ${r.updated}, skipped ${r.skipped}` +
+					`Imported ${r.imported} new, updated ${r.updated}, skipped ${r.skipped}, ` +
+						`prefilled ${r.prefilled} part link(s)` +
 						(r.notes.length ? ` (${r.notes.length} note(s))` : '')
 				);
 			});

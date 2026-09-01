@@ -76,6 +76,19 @@
 	async function removePart(linkId: number) {
 		if (await toast.run(() => api.removeLinePart(linkId))) load();
 	}
+	const linkCount = (ls: SalesOrderLine[]) => ls.reduce((n, l) => n + l.parts.length, 0);
+	async function prefill() {
+		const before = linkCount(lines);
+		let filled: SalesOrderLine[] = [];
+		if (!(await toast.run(async () => (filled = await api.prefillSalesOrder(id))))) return;
+		const added = linkCount(filled) - before;
+		lines = filled;
+		toast.show(
+			added
+				? `Filled in ${added} part link(s) from the product SKU BOMs`
+				: 'Nothing to fill in: no line has an unmapped SKU with a BOM behind it'
+		);
+	}
 
 	// book popup
 	let dialog = $state<HTMLDialogElement | null>(null);
@@ -194,15 +207,22 @@
 					<h2 class="h2">Line items</h2>
 					<!-- bookable while unbooked, and again once parts have been added
 					     to an order already booked (booking consumes the delta) -->
-					{#if !so.booked || so.unbooked_parts > 0}
-						<button class="btn" onclick={() => dialog?.showModal()}>
-							{so.booked ? 'Book added parts' : 'Book order'}
-						</button>
-					{/if}
+					<div class="actions">
+						{#if !so.booked}
+							<button class="btn ghost" onclick={prefill}>Prefill from BOM</button>
+						{/if}
+						{#if !so.booked || so.unbooked_parts > 0}
+							<button class="btn" onclick={() => dialog?.showModal()}>
+								{so.booked ? 'Book added parts' : 'Book order'}
+							</button>
+						{/if}
+					</div>
 				</div>
 				<p class="muted">
 					What WooCommerce sold, and the parts each line consumes. WooCommerce does not
-					know what a product is made of, so the parts are linked by hand.
+					know what a product is made of. Map a sold SKU to an assembly on the
+					<a href="/product-skus">product SKUs</a> page and its BOM prefills these lines
+					(on import, or with the button above); anything unmapped is linked by hand.
 				</p>
 				{#if lines.length === 0}
 					<p class="muted">This order has no line items.</p>
@@ -365,6 +385,10 @@
 	}
 	dialog.book::backdrop {
 		background: rgba(0, 0, 0, 0.4);
+	}
+	.head .actions {
+		display: flex;
+		gap: 8px;
 	}
 	dialog.book .actions {
 		display: flex;
