@@ -254,7 +254,13 @@ class SupplierPartOut(BaseModel):
     hyperlink: str
     pack_qty: int
     active: bool
-    last_price: float | None = None  # per item (line price / pack_qty)
+    # per item (line price / pack_qty). last_price is landed -- it carries the
+    # order's delivery share, like every price outside the order's own line
+    # table. last_goods_price is the bare price that was typed on the line, and
+    # exists only to prefill a *new* line: prefilling from the landed price
+    # would re-add delivery on top of delivery on every reorder.
+    last_price: float | None = None
+    last_goods_price: float | None = None
     last_po_date: str | None = None
 
 
@@ -626,9 +632,11 @@ def patch_part(part_id: int, body: PartPatch) -> PartOut:
 
 def _pos_with_qty(where) -> list[PartPurchaseOrderOut]:
     """POs whose lines match `where`, newest first, with the units ordered and
-    the price paid per unit on each."""
+    the landed price paid per unit on each (delivery included -- only the PO's
+    own line table shows the bare goods price)."""
     with db.session() as s:
         goods = db.po_goods_totals(s)
+        factors = db.delivery_factors(s)
         rows: dict[int, PartPurchaseOrderOut] = {}
         for po, line, pack_qty in s.execute(
             select(PurchaseOrder, POLine, SupplierPart.pack_qty)
@@ -643,7 +651,8 @@ def _pos_with_qty(where) -> list[PartPurchaseOrderOut]:
                 PartPurchaseOrderOut(**_po_out(po, goods).model_dump(), quantity=0.0),
             )
             row.quantity += line.quantity * pack_qty
-            row.unit_price = line.price / pack_qty if line.price else row.unit_price
+            if line.price:
+                row.unit_price = line.price / pack_qty * factors.get(po.id, 1.0)
         return list(rows.values())
 
 
@@ -1230,18 +1239,30 @@ def list_supplier_pos(supplier_id: int) -> list[PurchaseOrderOut]:
 # -- supplier parts ---------------------------------------------------------
 
 
-def _last_purchase() -> dict[int, tuple[float, date]]:
-    """Per supplier part: (price per pack, order date) of its newest priced,
-    non-cancelled PO line. Read in one pass; the caller divides by pack_qty."""
+def _last_purchase() -> dict[int, tuple[float, float, date]]:
+    """Per supplier part: (landed price per pack, bare goods price per pack,
+    order date) of its newest priced, non-cancelled PO line. Read in one pass;
+    the caller divides by pack_qty. The landed price carries that line's share
+    of its order's delivery cost, like every price outside the order's own line
+    table; the goods price is what was typed on the line."""
     with db.session() as s:
+        factors = db.delivery_factors(s)
         rows = s.execute(
-            select(POLine.supplier_part_id, POLine.price, PurchaseOrder.start_date)
+            select(
+                POLine.supplier_part_id,
+                POLine.price,
+                PurchaseOrder.start_date,
+                PurchaseOrder.id,
+            )
             .join(PurchaseOrder, POLine.po_id == PurchaseOrder.id)
             .where(POLine.price > 0, PurchaseOrder.status != POStatus.CANCELLED)
             .order_by(PurchaseOrder.start_date, PurchaseOrder.id, POLine.id)
         ).all()
     # later rows win, so the last one seen per supplier part is the newest
-    return {sp_id: (price, when) for sp_id, price, when in rows}
+    return {
+        sp_id: (price * factors.get(po_id, 1.0), price, when)
+        for sp_id, price, when, po_id in rows
+    }
 
 
 def _supplier_part_rows() -> list[SupplierPartOut]:
@@ -1263,7 +1284,10 @@ def _supplier_part_rows() -> list[SupplierPartOut]:
                 last_price=last[p.id][0] / p.pack_qty
                 if p.id in last and p.pack_qty > 0
                 else None,
-                last_po_date=last[p.id][1].isoformat() if p.id in last else None,
+                last_goods_price=last[p.id][1] / p.pack_qty
+                if p.id in last and p.pack_qty > 0
+                else None,
+                last_po_date=last[p.id][2].isoformat() if p.id in last else None,
             )
             for p, part_sku, part_description in s.execute(
                 select(SupplierPart, Part.sku, Part.description)

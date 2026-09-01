@@ -66,6 +66,14 @@ value report. Change the delivery cost on an order and everything it touches is
 repriced immediately; set it to zero and the prices are exactly the goods prices
 again.
 
+**The rule: every price you see is landed, except the line prices on the order
+itself.** Those stay the bare price you agreed with the supplier, because that
+is what you typed and what the delivery cost is then added to. Everywhere else
+-- the part's estimated price, the unit price in the purchase order tables on a
+part or supplier part page, stock values -- is what the goods really cost you,
+delivery included. Ordering again prefills the bare price, not the landed one,
+so freight is never charged twice.
+
 ### 2. Producing a build order
 
 A build order turns components into an assembly. Each time you produce units,

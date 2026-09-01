@@ -101,9 +101,12 @@
 			line: linesByPo[i].find((l) => l.supplier_part_id === id) ?? null
 		}));
 		poQty = 1;
-		// a line is priced per pack; the part estimate is per unit
+		// a line is priced per pack; last_goods_price and the part estimate are per
+		// unit. Prefill from the *goods* price, never the landed one: the order's
+		// delivery cost is added on top of a line, so seeding it landed compounds
+		// the freight on every reorder.
 		const est = parts.find((p) => p.id === sp!.part_id)?.estimated_price ?? 0;
-		poPrice = Number((est * (sp!.pack_qty || 1)).toFixed(4));
+		poPrice = Number(((sp!.last_goods_price ?? est) * (sp!.pack_qty || 1)).toFixed(4));
 		poDescription = sp!.part_description || sp!.part_sku || sp!.sku || '';
 		poDialog?.showModal();
 	}

@@ -47,7 +47,11 @@ Open-source inventory/stock tracking for small and medium businesses.
   so freight ends up in the part price and in the stock received against the
   order rather than being forgotten. The "Landed" column shows each line's goods
   price plus its share; the purchase order list shows the order total (goods
-  plus delivery)
+  plus delivery). Every price shown elsewhere -- part estimates, the unit price
+  in the purchase order tables on a part or supplier part page, stock values --
+  is landed. Only the order's own line prices stay bare, since that is what the
+  delivery cost is added to; reordering prefills that bare price, so freight is
+  never charged twice
 - Every order's reference is its own number, shown as "PO-0042" / "BO-0042".
   It is derived, not stored, so it is always present, always unique and cannot
   be edited into something that no longer matches the order. Use the supplier

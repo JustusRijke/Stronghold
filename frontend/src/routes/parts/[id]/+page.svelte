@@ -102,12 +102,15 @@
 		poQty = Object.fromEntries(
 			activeSp.map((sp) => [sp.id, Math.max(1, Math.ceil(suggested / (sp.pack_qty || 1)))])
 		);
-		// a line is priced per pack; last_price and the part estimate are per unit
+		// a line is priced per pack; last_goods_price and the part estimate are per
+		// unit. Prefill from the *goods* price, never the landed one: a PO line
+		// holds what the supplier charges for the goods, and the order's delivery
+		// cost is added on top of it -- seeding it landed compounds the freight.
 		const est = part?.estimated_price ?? 0;
 		poPrice = Object.fromEntries(
 			activeSp.map((sp) => [
 				sp.id,
-				Number(((sp.last_price ?? est) * (sp.pack_qty || 1)).toFixed(4))
+				Number(((sp.last_goods_price ?? est) * (sp.pack_qty || 1)).toFixed(4))
 			])
 		);
 		poDescription = part ? part.description || part.sku || '' : '';

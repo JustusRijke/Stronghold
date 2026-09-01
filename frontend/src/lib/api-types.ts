@@ -1941,6 +1941,8 @@ export interface components {
             active: boolean;
             /** Last Price */
             last_price?: number | null;
+            /** Last Goods Price */
+            last_goods_price?: number | null;
             /** Last Po Date */
             last_po_date?: string | null;
         };

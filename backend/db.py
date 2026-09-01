@@ -894,23 +894,32 @@ def set_part_active(s: Session, part_id: int, active: bool) -> None:
 # accident -- POLine.price is not nullable, so 0 means "not filled in".
 
 
-def _delivery_factor(s: Session, po_id: int) -> float:
-    """An order's delivery cost is split over its lines in proportion to their
-    value, so every line on the order scales by the same factor -- there is
-    nothing to apportion per line and no rounding remainder. 1.0 when the order
-    charges no delivery or has no priced goods to spread it over."""
-    row = s.execute(
+def delivery_factors(s: Session, po_id: int | None = None) -> dict[int, float]:
+    """Per order id: the factor its line prices scale by. An order's delivery
+    cost is split over its lines in proportion to their value, so every line on
+    the order scales by the same amount -- there is nothing to apportion per
+    line and no rounding remainder. Orders that charge no delivery, or have no
+    priced goods to spread it over, are absent (a caller reads 1.0 for them).
+
+    The whole map in one query, so callers pricing many lines at once do not go
+    N+1; pass po_id for a single order."""
+    q = (
         select(
+            PurchaseOrder.id,
             PurchaseOrder.delivery_cost,
             func.coalesce(func.sum(POLine.quantity * POLine.price), 0.0),
         )
         .join(POLine, POLine.po_id == PurchaseOrder.id, isouter=True)
-        .where(PurchaseOrder.id == po_id)
+        .where(PurchaseOrder.delivery_cost > 0)
         .group_by(PurchaseOrder.id)
-    ).first()
-    if row is None or row[0] <= 0 or row[1] <= 0:
-        return 1.0
-    return 1.0 + row[0] / row[1]
+    )
+    if po_id is not None:
+        q = q.where(PurchaseOrder.id == po_id)
+    return {row[0]: 1.0 + row[1] / row[2] for row in s.execute(q) if row[2] > 0}
+
+
+def _delivery_factor(s: Session, po_id: int) -> float:
+    return delivery_factors(s, po_id).get(po_id, 1.0)
 
 
 def latest_po_price_source(s: Session, part_id: int) -> tuple[float, int, str] | None:
