@@ -137,6 +137,35 @@
 	const locked = $derived(po?.status === 'Complete' || po?.status === 'Cancelled');
 	const outstanding = $derived(lines.reduce((n, l) => n + Math.max(l.quantity - l.received, 0), 0));
 
+	// click-to-sort over the lines table. Hand-rolled rather than DataTable: this
+	// table has a totals tfoot and per-row receive controls DataTable has no slot
+	// for. Sort keys are the raw line fields plus the two derived money columns.
+	type LineSort = keyof POLine | 'total' | 'landed';
+	let sortKey = $state<LineSort | null>(null);
+	let sortDir = $state<'asc' | 'desc'>('asc');
+	function sortBy(key: LineSort) {
+		if (sortKey !== key) {
+			sortKey = key;
+			sortDir = 'asc';
+		} else if (sortDir === 'asc') sortDir = 'desc';
+		else sortKey = null;
+	}
+	function sortVal(l: POLine, key: LineSort) {
+		if (key === 'total' || key === 'landed') return l.quantity * l.price;
+		return l[key];
+	}
+	const sorted = $derived.by(() => {
+		if (!sortKey) return lines;
+		const k = sortKey;
+		const sign = sortDir === 'asc' ? 1 : -1;
+		return [...lines].sort((a, b) => {
+			const x = sortVal(a, k) ?? '';
+			const y = sortVal(b, k) ?? '';
+			return sign * (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y)));
+		});
+	});
+
+
 	// mirrors db.po_totals: the delivery cost is spread over the lines in
 	// proportion to their value, so every line scales by the same factor.
 	// Computed from `lines` rather than derived from po.total on purpose --
@@ -249,24 +278,37 @@
 					<table class="lines">
 						<thead>
 							<tr>
-								<th>Supplier part</th>
-								<th class="num">Qty</th>
-								<th class="num">Pack</th>
-								<th class="num">Unit price</th>
-								<th class="num">Line total</th>
-								<th class="num" title="Line total plus its share of the delivery cost">Landed</th>
-								<th class="num">Received</th>
+								{#each [['supplier_sku', 'Supplier part', ''], ['part_description', 'Part', ''], ['quantity', 'Qty', 'num'], ['pack_qty', 'Pack', 'num'], ['price', 'Unit price', 'num'], ['total', 'Line total', 'num'], ['landed', 'Landed', 'num'], ['received', 'Received', 'num']] as [key, header, cls] (key)}
+									<th
+										class={cls}
+										class:sorted={sortKey === key}
+										title={key === 'landed' ? 'Line total plus its share of the delivery cost' : ''}
+										onclick={() => sortBy(key as LineSort)}
+									>
+										{header}{sortKey === key ? (sortDir === 'asc' ? ' \u25b2' : ' \u25bc') : ''}
+									</th>
+								{/each}
 								{#if !locked}<th></th>{/if}
 							</tr>
 						</thead>
 						<tbody>
-							{#each lines as line (line.id)}
+							{#each sorted as line (line.id)}
 								<tr>
 									<td>
 										<a class="mono" href={`/supplier-parts/${line.supplier_part_id}`}
 											>{line.supplier_sku || line.supplier_part_id}</a
 										>
+										{#if line.hyperlink}
+											<a
+												class="shop"
+												href={line.hyperlink}
+												target="_blank"
+												rel="noreferrer"
+												title="Open at the supplier">&#128279;</a
+											>
+										{/if}
 									</td>
+									<td><a href={`/parts/${line.part_id}`}>{line.part_description}</a></td>
 									<td class="num">
 										{#if locked}
 											{line.quantity}
@@ -324,17 +366,17 @@
 						</tbody>
 						<tfoot>
 							<tr>
-								<td colspan="4">Goods</td>
+								<td colspan="5">Goods</td>
 								<td class="num">{goods.toFixed(2)}</td>
 								<td colspan={locked ? 2 : 3}></td>
 							</tr>
 							<tr>
-								<td colspan="4">Delivery</td>
+								<td colspan="5">Delivery</td>
 								<td class="num">{delivery.toFixed(2)}</td>
 								<td colspan={locked ? 2 : 3}></td>
 							</tr>
 							<tr>
-								<td colspan="4">Total</td>
+								<td colspan="5">Total</td>
 								<td class="num">{(goods + delivery).toFixed(2)}</td>
 								<td colspan={locked ? 2 : 3}></td>
 							</tr>
@@ -396,6 +438,14 @@
 		font-size: 12px;
 		color: var(--ink-soft);
 		font-weight: 500;
+		cursor: pointer;
+		user-select: none;
+	}
+	table.lines th.sorted {
+		color: var(--ink);
+	}
+	.shop {
+		margin-left: 6px;
 	}
 	table.lines .num {
 		text-align: right;
