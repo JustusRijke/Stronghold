@@ -6,7 +6,14 @@
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
 	import Picker from '$lib/components/Picker.svelte';
-	import type { Part, SalesOrder, SalesOrderLine, SalesShortage, StockItem } from '$lib/types';
+	import type {
+		Part,
+		ProductSku,
+		SalesOrder,
+		SalesOrderLine,
+		SalesShortage,
+		StockItem
+	} from '$lib/types';
 	import { CREATED_COLUMN, soStatusLabel } from '$lib/status';
 	import { STATUS_OPTIONS as STOCK_STATUS_OPTIONS } from '$lib/validators';
 
@@ -41,13 +48,15 @@
 			return;
 		}
 		salesOrderTabs.open(id, so.reference);
-		const [ls, stock, allParts, shorts] = await Promise.all([
+		const [ls, stock, allParts, shorts, maps] = await Promise.all([
 			api.salesOrderLines(id),
 			api.salesOrderStock(id),
 			api.parts(),
-			api.salesOrderShortages(id)
+			api.salesOrderShortages(id),
+			api.productSkus()
 		]);
 		lines = ls;
+		mappings = maps;
 		consumed = stock;
 		// virtual parts (labour) are offered too: a sale can consume them, and
 		// the backend records the cost without drawing any stock down
@@ -75,6 +84,41 @@
 	}
 	async function removePart(linkId: number) {
 		if (await toast.run(() => api.removeLinePart(linkId))) load();
+	}
+	const linkCount = (ls: SalesOrderLine[]) => ls.reduce((n, l) => n + l.parts.length, 0);
+	async function prefill() {
+		const before = linkCount(lines);
+		let filled: SalesOrderLine[] = [];
+		if (!(await toast.run(async () => (filled = await api.prefillSalesOrder(id))))) return;
+		const added = linkCount(filled) - before;
+		lines = filled;
+		toast.show(
+			added
+				? `Filled in ${added} part link(s) from the product SKU mappings`
+				: 'Nothing to fill in: no line has a mapped SKU that is still without parts'
+		);
+	}
+
+	// saving a line's parts as its sku's mapping. An existing mapping is named
+	// in a confirm step before being replaced -- other orders prefill from it,
+	// so a silent overwrite would change what they get with no warning.
+	let mappings = $state<ProductSku[]>([]);
+	let saveLine = $state<SalesOrderLine | null>(null);
+	const mappingFor = (sku: string) => mappings.find((m) => m.sku === sku) ?? null;
+
+	async function saveMapping(line: SalesOrderLine) {
+		if (mappingFor(line.sku)) {
+			saveLine = line; // ask first: something already maps this sku
+			return;
+		}
+		await doSaveMapping(line);
+	}
+	async function doSaveMapping(line: SalesOrderLine) {
+		const ok = await toast.run(async () => {
+			mappings = await api.saveProductSkuFromLine({ sku: line.sku, line_id: line.id });
+		});
+		saveLine = null;
+		if (ok) toast.show(`${line.sku} now maps to ${line.parts.length} part(s)`);
 	}
 
 	// book popup
@@ -194,15 +238,22 @@
 					<h2 class="h2">Line items</h2>
 					<!-- bookable while unbooked, and again once parts have been added
 					     to an order already booked (booking consumes the delta) -->
-					{#if !so.booked || so.unbooked_parts > 0}
-						<button class="btn" onclick={() => dialog?.showModal()}>
-							{so.booked ? 'Book added parts' : 'Book order'}
-						</button>
-					{/if}
+					<div class="actions">
+						{#if !so.booked}
+							<button class="btn ghost" onclick={prefill}>Prefill from SKUs</button>
+						{/if}
+						{#if !so.booked || so.unbooked_parts > 0}
+							<button class="btn" onclick={() => dialog?.showModal()}>
+								{so.booked ? 'Book added parts' : 'Book order'}
+							</button>
+						{/if}
+					</div>
 				</div>
 				<p class="muted">
 					What WooCommerce sold, and the parts each line consumes. WooCommerce does not
-					know what a product is made of, so the parts are linked by hand.
+					know what a product is made of. Map a sold SKU to a part on the
+					<a href="/sales-orders/product-skus">product SKUs</a> page and it prefills these lines
+					(on import, or with the button above); anything unmapped is linked by hand.
 				</p>
 				{#if lines.length === 0}
 					<p class="muted">This order has no line items.</p>
@@ -217,6 +268,17 @@
 							<div class="mono nums">
 								{line.quantity} &times; {money(line.unit_price)} = {money(line.line_total)}
 							</div>
+							{#if line.sku && line.parts.length}
+								<button
+									class="btn ghost small"
+									title={mappingFor(line.sku)
+										? `Replace what ${line.sku} maps to with these parts`
+										: `Make ${line.sku} map to these parts, for every future order`}
+									onclick={() => saveMapping(line)}
+								>
+									{mappingFor(line.sku) ? 'Update' : 'Save as'} SKU mapping
+								</button>
+							{/if}
 						</div>
 						<table class="parts">
 							<thead>
@@ -316,6 +378,26 @@
 		</div>
 	</div>
 
+	{#if saveLine}
+		{@const existing = mappingFor(saveLine.sku)}
+		{@const line = saveLine}
+		<div class="modal">
+			<div class="card">
+				<h2 class="h2">Update the mapping for {line.sku}?</h2>
+				<p class="muted">
+					It already maps to {existing?.parts.length} part(s):
+					{existing?.parts.map((p) => `${p.quantity}x ${p.part_description}`).join(', ')}.
+					Saving replaces that with what this line consumes. Orders already filled in
+					keep what they have; future ones get the new list.
+				</p>
+				<div class="actions">
+					<button class="btn ghost" onclick={() => (saveLine = null)}>Cancel</button>
+					<button class="btn" onclick={() => doSaveMapping(line)}>Replace it</button>
+				</div>
+			</div>
+		</div>
+	{/if}
+
 	<dialog bind:this={dialog} class="book">
 		<h2 class="h2">{so.booked ? 'Book the added parts?' : 'Book this order?'}</h2>
 		<p class="muted">
@@ -366,6 +448,32 @@
 	dialog.book::backdrop {
 		background: rgba(0, 0, 0, 0.4);
 	}
+	.modal {
+		position: fixed;
+		inset: 0;
+		z-index: 40;
+		display: grid;
+		place-items: center;
+		background: rgba(0, 0, 0, 0.4);
+	}
+	.modal .card {
+		background: var(--card);
+		color: var(--ink);
+		border: 1px solid var(--line);
+		border-radius: 8px;
+		padding: 20px;
+		max-width: 520px;
+	}
+	.modal .actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+		margin-top: 16px;
+	}
+	.head .actions {
+		display: flex;
+		gap: 8px;
+	}
 	dialog.book .actions {
 		display: flex;
 		justify-content: flex-end;
@@ -390,10 +498,14 @@
 	}
 	.linehead {
 		display: flex;
-		justify-content: space-between;
 		align-items: baseline;
 		gap: 12px;
 		margin-bottom: 6px;
+	}
+	/* the description takes the slack, so the numbers and the mapping button
+	   stay together at the right edge however long the name is */
+	.linehead > :first-child {
+		flex: 1;
 	}
 	.sku {
 		margin-right: 6px;

@@ -38,6 +38,7 @@ from models import (
     POLine,
     POStatus,
     PriceBasis,
+    ProductSkuPart,
     PurchaseOrder,
     SalesOrder,
     SalesOrderLine,
@@ -430,6 +431,8 @@ _MIGRATIONS = {
     # 6 only added a nullable column -- see the note on step 4.
     6: lambda s: None,
     7: _to_v7,
+    # 8 only added a table -- see the note on step 4.
+    8: lambda s: None,
 }
 
 
@@ -557,6 +560,11 @@ def export(force: bool = False) -> None:
     Only files whose content actually changed are rewritten, so a stock edit
     leaves parts.sql alone and git shows a one-file diff.
 
+    A file for a table the models no longer declare is deleted. Both the replay
+    and this loop walk the declared tables, so such a file is otherwise never
+    read and never rewritten -- it would sit in the data directory (and its git
+    history) forever, looking like current data.
+
     `force` writes even while a bulk load has export suspended -- that is how
     the loader persists its result at the end."""
     if not _export_enabled and not force:
@@ -566,7 +574,17 @@ def export(force: bool = False) -> None:
         conn = s.connection()
         for table in Base.metadata.sorted_tables:
             _write_table(conn, table)
+    _drop_stale_files()
     _commit_export()
+
+
+def _drop_stale_files() -> None:
+    """Remove exported files for tables that no longer exist in the models."""
+    current = {f"{table.name}.sql" for table in Base.metadata.sorted_tables}
+    for path in _export_dir.glob("*.sql"):
+        if path.name not in current:
+            _log.info("removing %s: its table is no longer part of the schema", path)
+            path.unlink()
 
 
 def _write_table(conn, table) -> None:
@@ -3132,6 +3150,256 @@ def remove_line_part(s: Session, link_id: int) -> None:
         f"{label}: no longer uses {part.description}",
         [("sales-order", so.id, label), ("part", part.id, part.sku)],
     )
+
+
+# -- product skus -----------------------------------------------------------
+#
+# The map from what WooCommerce sells to what it is made of. A sales line
+# carries a sku; a sku maps to a list of (part, quantity) -- the same shape as
+# the line's own parts, so prefill is a straight copy. Many-to-many both ways: a
+# sku may name several parts, and several skus may name one part (a door-left
+# and a door-right variant are the same build).
+
+
+def product_skus(s: Session) -> list:
+    """(id, sku, part_id, part_sku, part_description, quantity, part_assembly)
+    for every mapping row, grouped by sku."""
+    return list(
+        s.execute(
+            select(
+                ProductSkuPart.id,
+                ProductSkuPart.sku,
+                Part.id,
+                Part.sku,
+                Part.description,
+                ProductSkuPart.quantity,
+                Part.assembly,
+            )
+            .join(Part, ProductSkuPart.part_id == Part.id)
+            .order_by(ProductSkuPart.sku, ProductSkuPart.id)
+        )
+    )
+
+
+def next_product_sku_part_id() -> int:
+    # ponytail: max+1 id generation; fine while one process owns the db
+    with session() as s:
+        return (s.scalar(select(func.max(ProductSkuPart.id))) or 0) + 1
+
+
+def sold_skus(s: Session) -> list[tuple[str, str, int, bool]]:
+    """(sku, an example description, how many lines carry it, already mapped)
+    for every non-blank sku the imported sales orders actually use.
+
+    What the mapping page offers instead of a free-text box: these skus are
+    WooCommerce's, so typing one by hand is a chance to typo a key that then
+    silently matches nothing. The description is whichever line's it happens to
+    be -- the same sku sells under a tidied-up name sometimes, and any of them
+    identifies it well enough to pick from a list."""
+    mapped = set(s.scalars(select(ProductSkuPart.sku)))
+    rows = s.execute(
+        select(
+            SalesOrderLine.sku,
+            func.min(SalesOrderLine.description),
+            func.count(),
+        )
+        .where(SalesOrderLine.sku != "")
+        .group_by(SalesOrderLine.sku)
+        .order_by(func.count().desc(), SalesOrderLine.sku)
+    )
+    return [(sku, desc, n, sku in mapped) for sku, desc, n in rows]
+
+
+def get_product_sku_part(s: Session, link_id: int) -> ProductSkuPart:
+    row = s.get(ProductSkuPart, link_id)
+    if row is None:
+        raise InventoryError(f"no product sku part {link_id}")
+    return row
+
+
+@_write
+def add_product_sku_part(
+    s: Session, link_id: int, sku: str, part_id: int, quantity: float
+) -> None:
+    """Add a part to what a sold sku consumes, or top up the one already there.
+
+    Adding a part the sku already lists **adds to** it rather than being
+    rejected, the same way add_line_part does: one mapping holds one quantity of
+    a given part, and "two more of those" is how a correction is phrased."""
+    sku = sku.strip()
+    if not sku:
+        raise InventoryError("sku is required")
+    if quantity <= 0:
+        raise InventoryError("quantity must be positive")
+    part = get_part(s, part_id)
+    existing = s.scalar(
+        select(ProductSkuPart).where(
+            ProductSkuPart.sku == sku, ProductSkuPart.part_id == part_id
+        )
+    )
+    if existing is not None:
+        was = existing.quantity
+        existing.quantity = was + quantity
+        _activity(
+            s,
+            "add_product_sku_part",
+            f"Product sku {sku} now uses {existing.quantity:g}x "
+            f"{part.description} (was {was:g})",
+            [("part", part_id, part.sku)],
+        )
+        return
+    s.add(ProductSkuPart(id=link_id, sku=sku, part_id=part_id, quantity=quantity))
+    _activity(
+        s,
+        "add_product_sku_part",
+        f"Product sku {sku} uses {quantity:g}x {part.description}",
+        [("part", part_id, part.sku)],
+    )
+
+
+@_write
+def edit_product_sku_part(s: Session, link_id: int, quantity: float) -> None:
+    if quantity <= 0:
+        raise InventoryError("quantity must be positive")
+    row = get_product_sku_part(s, link_id)
+    if quantity == row.quantity:
+        return  # a no-op patch should not manufacture an activity row
+    part = get_part(s, row.part_id)
+    _activity(
+        s,
+        "edit_product_sku_part",
+        f"Product sku {row.sku}: {part.description} quantity "
+        f"{row.quantity:g} -> {quantity:g}",
+        [("part", part.id, part.sku)],
+    )
+    row.quantity = quantity
+
+
+@_write
+def remove_product_sku_part(s: Session, link_id: int) -> None:
+    # ponytail: a prefill lookup table, plain delete (orders keep their lines)
+    row = get_product_sku_part(s, link_id)
+    part = get_part(s, row.part_id)
+    s.delete(row)
+    _activity(
+        s,
+        "remove_product_sku_part",
+        f"Product sku {row.sku} no longer uses {part.description}",
+        [("part", part.id, part.sku)],
+    )
+
+
+@_write
+def set_product_sku_from_line(s: Session, sku: str, line_id: int) -> None:
+    """Make a sold sku map to exactly what one sales order line consumes.
+
+    The button on the order page: link the parts on the line until they are
+    right, then save that list as the mapping. Replaces the sku's rows outright
+    rather than merging -- the line is the intended answer, so a part it no
+    longer lists is one the mapping should no longer carry either."""
+    sku = sku.strip()
+    if not sku:
+        raise InventoryError("sku is required")
+    line = _get_so_line(s, line_id)
+    wanted = list(
+        s.execute(
+            select(SalesOrderLinePart.part_id, SalesOrderLinePart.quantity)
+            .where(SalesOrderLinePart.line_id == line_id)
+            .order_by(SalesOrderLinePart.id)
+        )
+    )
+    if not wanted:
+        raise InventoryError(
+            f"line {line.description or line.sku} has no parts linked; there is "
+            f"nothing to save as a mapping"
+        )
+    had = s.scalars(select(ProductSkuPart).where(ProductSkuPart.sku == sku)).all()
+    before = {(r.part_id, r.quantity) for r in had}
+    if before == set(wanted):
+        return  # a no-op should not manufacture an activity row
+    for row in had:
+        s.delete(row)
+    s.flush()  # the delete must land before the unique (sku, part) rows go back
+    link_id = (s.scalar(select(func.max(ProductSkuPart.id))) or 0) + 1
+    for part_id, quantity in wanted:
+        s.add(ProductSkuPart(id=link_id, sku=sku, part_id=part_id, quantity=quantity))
+        link_id += 1
+    _activity(
+        s,
+        "set_product_sku_from_line",
+        f"Product sku {sku} {'now uses' if had else 'uses'} "
+        f"{len(wanted)} part(s), saved from {so_ref(line.so_id)}",
+        [("sales-order", line.so_id, so_ref(line.so_id))],
+    )
+
+
+@_write
+def prefill_so_parts(s: Session, so_id: int) -> None:
+    """The manual "prefill from SKUs" write, logging what it filled in. The
+    importer calls _prefill_so_parts directly instead: it prefills every order
+    it touches and logs one row for the whole run.
+
+    Returns nothing, like every other @_write (the decorator commits and
+    re-exports around the call, and drops what fn returns); the route re-reads
+    the lines to show what changed."""
+    filled, lines = _prefill_so_parts(s, so_id)
+    if filled:
+        label = so_ref(so_id)
+        _activity(
+            s,
+            "prefill_so_parts",
+            f"{label}: filled in {filled} part link(s) on {lines} line(s) from "
+            f"the product sku mappings",
+            [("sales-order", so_id, label)],
+        )
+
+
+def _prefill_so_parts(s: Session, so_id: int) -> tuple[int, int]:
+    """Fill in the parts of every line whose sku has a mapping. Returns (links
+    written, lines filled); the caller logs.
+
+    A mapping's rows are copied verbatim -- what it lists is exactly what the
+    line gets, with no expansion in between. An assembly is copied like any
+    other part, so a sku mapped to one consumes one of that assembly off the
+    shelf (built by a build order), which is what selling a built product does.
+
+    Only lines that have no parts yet are touched: once the user has edited a
+    line, the mapping is a starting point they already moved on from. A booked
+    order is skipped for the same reason add_line_part is allowed on one --
+    adding is safe, but there is nothing to add to a line that already has its
+    parts, and a booked order's lines all do."""
+    so = get_so(s, so_id)
+    link_id = (s.scalar(select(func.max(SalesOrderLinePart.id))) or 0) + 1
+    filled = 0
+    lines = 0
+    for line in so_lines_for(s, so.id):
+        if not line.sku:
+            continue
+        if s.scalar(
+            select(func.count())
+            .select_from(SalesOrderLinePart)
+            .where(SalesOrderLinePart.line_id == line.id)
+        ):
+            continue
+        wanted = list(
+            s.execute(
+                select(ProductSkuPart.part_id, ProductSkuPart.quantity)
+                .where(ProductSkuPart.sku == line.sku)
+                .order_by(ProductSkuPart.id)
+            )
+        )
+        if not wanted:
+            continue
+        for part_id, quantity in wanted:
+            s.add(
+                SalesOrderLinePart(
+                    id=link_id, line_id=line.id, part_id=part_id, quantity=quantity
+                )
+            )
+            link_id += 1
+            filled += 1
+        lines += 1
+    return filled, lines
 
 
 def so_needs(s: Session, so_id: int) -> dict[int, float]:

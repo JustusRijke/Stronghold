@@ -4,4 +4,9 @@
 	let { children } = $props();
 </script>
 
-<TabStrip base="/sales-orders" tabs={salesOrderTabs} {children} />
+<TabStrip
+	base="/sales-orders"
+	tabs={salesOrderTabs}
+	fixed={[{ slug: 'product-skus', label: 'Product SKUs' }]}
+	{children}
+/>

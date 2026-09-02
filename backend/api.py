@@ -497,7 +497,54 @@ class ImportResultOut(BaseModel):
     imported: int
     updated: int
     skipped: int
+    prefilled: int  # part links filled in from the product sku mappings
     notes: list[str]
+
+
+class ProductSkuPartOut(BaseModel):
+    """One part a sold sku consumes, per unit sold."""
+
+    id: int
+    part_id: int
+    part_sku: str
+    part_description: str
+    part_assembly: bool
+    quantity: float
+
+
+class ProductSkuOut(BaseModel):
+    """A sold sku and everything it is made of."""
+
+    sku: str
+    parts: list[ProductSkuPartOut]
+
+
+class SoldSkuOut(BaseModel):
+    """A sku the imported sales orders actually use, for the mapping picker."""
+
+    sku: str
+    description: str
+    lines: int  # how many sold line items carry it
+    mapped: bool
+
+
+# quantity is unconstrained here for the same reason LinePartIn's is: the db
+# write rejects a non-positive one with a message worth reading.
+class ProductSkuPartIn(BaseModel):
+    sku: str
+    part_id: int
+    quantity: float = 1.0
+
+
+class ProductSkuQtyPatch(BaseModel):
+    quantity: float
+
+
+class ProductSkuFromLineIn(BaseModel):
+    """Save what one sales order line consumes as the mapping for its sku."""
+
+    sku: str
+    line_id: int
 
 
 class SettingOut(BaseModel):
@@ -1917,6 +1964,81 @@ def list_sales_order_stock(so_id: int) -> list[StockItemOut]:
                 _STOCK_SELECT.where(StockItem.consumed_by_so_id == so_id)
             )
         ]
+
+
+@router.post("/sales-orders/{so_id}/prefill", response_model=list[SalesOrderLineOut])
+def prefill_sales_order_parts(so_id: int) -> list[SalesOrderLineOut]:
+    """Fill in each line's parts from the BOM its sku maps to. Lines that
+    already have parts are left alone."""
+    _guard(db.prefill_so_parts, so_id)
+    return list_sales_order_lines(so_id)
+
+
+@router.get("/product-skus", response_model=list[ProductSkuOut])
+def list_product_skus() -> list[ProductSkuOut]:
+    """Every mapping, one entry per sku with the parts it consumes. db returns
+    one flat row per part, already ordered by sku, so this just groups them."""
+    out: list[ProductSkuOut] = []
+    with db.session() as s:
+        for link_id, sku, part_id, part_sku, desc, qty, assembly in db.product_skus(s):
+            if not out or out[-1].sku != sku:
+                out.append(ProductSkuOut(sku=sku, parts=[]))
+            out[-1].parts.append(
+                ProductSkuPartOut(
+                    id=link_id,
+                    part_id=part_id,
+                    part_sku=part_sku or "",
+                    part_description=desc,
+                    part_assembly=assembly,
+                    quantity=qty,
+                )
+            )
+    return out
+
+
+@router.get("/product-skus/sold", response_model=list[SoldSkuOut])
+def list_sold_skus() -> list[SoldSkuOut]:
+    """The skus WooCommerce has actually sold, most-used first. What the mapping
+    page offers to pick from, so a key is never typed in by hand."""
+    with db.session() as s:
+        return [
+            SoldSkuOut(sku=sku, description=desc, lines=n, mapped=mapped)
+            for sku, desc, n, mapped in db.sold_skus(s)
+        ]
+
+
+@router.post("/product-skus", response_model=list[ProductSkuOut], status_code=201)
+def add_product_sku_part(body: ProductSkuPartIn) -> list[ProductSkuOut]:
+    """Add a part to what a sold sku consumes. Adding one it already lists tops
+    up that quantity rather than failing."""
+    _guard(
+        db.add_product_sku_part,
+        db.next_product_sku_part_id(),
+        body.sku,
+        body.part_id,
+        body.quantity,
+    )
+    return list_product_skus()
+
+
+@router.patch("/product-skus/parts/{link_id}", response_model=OkOut)
+def patch_product_sku_part(link_id: int, body: ProductSkuQtyPatch) -> OkOut:
+    _guard(db.edit_product_sku_part, link_id, body.quantity)
+    return OkOut(ok=True)
+
+
+@router.delete("/product-skus/parts/{link_id}", response_model=OkOut)
+def delete_product_sku_part(link_id: int) -> OkOut:
+    _guard(db.remove_product_sku_part, link_id)
+    return OkOut(ok=True)
+
+
+@router.put("/product-skus/from-line", response_model=list[ProductSkuOut])
+def put_product_sku_from_line(body: ProductSkuFromLineIn) -> list[ProductSkuOut]:
+    """Save what a sales order line consumes as its sku's mapping, replacing
+    whatever that sku mapped to before. The button on the order page."""
+    _guard(db.set_product_sku_from_line, body.sku, body.line_id)
+    return list_product_skus()
 
 
 @router.post("/sales-orders/import", response_model=ImportResultOut)

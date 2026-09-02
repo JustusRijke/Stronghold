@@ -6,11 +6,27 @@
 
 	// Second-level tab strip: an Overview tab plus one tab per opened detail
 	// record. Shared by every entity; `base` is the route root (e.g. "/stock")
-	// and `tabs` its persisted store.
-	let { base, tabs, children }: { base: string; tabs: Tabs; children: Snippet } = $props();
+	// and `tabs` its persisted store. `fixed` adds section pages that are always
+	// there and never close (slug relative to base), sitting after Overview.
+	let {
+		base,
+		tabs,
+		fixed = [],
+		children
+	}: {
+		base: string;
+		tabs: Tabs;
+		fixed?: { slug: string; label: string }[];
+		children: Snippet;
+	} = $props();
 
 	// active tab: the detail id on /{base}/{id}, else Overview (/{base}, /{base}/new)
+	// -- a fixed page has no id param, so it leaves activeId null and is matched
+	// on the path instead
 	const activeId = $derived($page.params.id ? Number($page.params.id) : null);
+	const activeSlug = $derived(
+		fixed.find((f) => $page.url.pathname === `${base}/${f.slug}`)?.slug ?? null
+	);
 
 	function closeTab(e: MouseEvent, id: number) {
 		e.preventDefault();
@@ -35,7 +51,10 @@
 </script>
 
 <nav class="subtabs">
-	<a href={base} class:active={activeId === null}>Overview</a>
+	<a href={base} class:active={activeId === null && activeSlug === null}>Overview</a>
+	{#each fixed as f (f.slug)}
+		<a href={`${base}/${f.slug}`} class:active={activeSlug === f.slug}>{f.label}</a>
+	{/each}
 	{#each tabs.list as t (t.id)}
 		<a
 			href={`${base}/${t.id}`}

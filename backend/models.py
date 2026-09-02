@@ -515,6 +515,36 @@ class SalesOrderLinePart(Base):
     quantity: Mapped[float]
 
 
+class ProductSkuPart(Base):
+    """One part a sold sku consumes, and how many per unit sold.
+
+    The mapping side of SalesOrderLinePart, and deliberately the same shape: a
+    sku maps to a *list* of (part, quantity), so one sold product may be made of
+    several parts without inventing an assembly to hold them. Prefill copies
+    these rows onto a sales line verbatim -- what the mapping says is exactly
+    what the line gets, with no expansion step in between.
+
+    That includes an assembly: map a sku to one and the line consumes one of
+    that assembly, drawn from the stock a build order produced, which is what
+    selling a built product actually does.
+
+    Many skus may share a part (a door-left and a door-right variant are the
+    same build), and a sku may name several parts, so the key is the pair.
+
+    It only prefills: copying it onto a sales line writes ordinary
+    SalesOrderLinePart rows, which the user is then free to edit. Changing a
+    mapping never rewrites an order already filled in.
+    """
+
+    __tablename__ = "product_sku_parts"
+    __table_args__ = (UniqueConstraint("sku", "part_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sku: Mapped[str]
+    part_id: Mapped[int] = mapped_column(ForeignKey(Part.id))
+    quantity: Mapped[float]
+
+
 class Booking(Base):
     """Links a stock item created by booking a PO line back to that line, so
     pricing and provenance stay queryable."""

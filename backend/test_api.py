@@ -1249,7 +1249,7 @@ def test_stock_log_reconstructs_deleted_production(client):
     assert sum(e["quantity"] for e in produced()) == 10.0
 
 
-def _seed_sale(client, so_id=1, wc_order_id=101, qty=1.0):
+def _seed_sale(client, so_id=1, wc_order_id=101, qty=1.0, sku=""):
     """A sales order as the WooCommerce import leaves it. There is no create
     route -- WooCommerce owns the order; the app only maps parts onto it."""
     with db.session() as s:
@@ -1270,7 +1270,7 @@ def _seed_sale(client, so_id=1, wc_order_id=101, qty=1.0):
                 id=so_id,
                 so_id=so_id,
                 wc_line_id=so_id * 10,
-                sku="",
+                sku=sku,
                 description="A Product",
                 unit_price=50.0,
                 quantity=qty,
@@ -1325,6 +1325,79 @@ def test_sales_order_flow(client):
     # search finds it by its derived code and by who bought it
     assert client.get("/api/search?q=SO-0001").json()[0]["type"] == "sales_order"
     assert client.get("/api/search?q=Buyer").json()[0]["id"] == so_id
+
+
+def test_product_sku_prefill_over_the_api(client):
+    bolt = client.post("/api/parts", json={"sku": "B1", "description": "Bolt"}).json()
+    nut = client.post("/api/parts", json={"sku": "N1", "description": "Nut"}).json()
+
+    # a sku maps to a list of parts; the two sold variants share one mapping
+    for sku in ("HBT-H-DL", "HBT-H-DR"):
+        for part, qty in ((bolt, 4), (nut, 2)):
+            assert (
+                client.post(
+                    "/api/product-skus",
+                    json={"sku": sku, "part_id": part["id"], "quantity": qty},
+                ).status_code
+                == 201
+            )
+    listed = client.get("/api/product-skus").json()
+    assert [
+        (r["sku"], [(p["part_sku"], p["quantity"]) for p in r["parts"]]) for r in listed
+    ] == [
+        ("HBT-H-DL", [("B1", 4.0), ("N1", 2.0)]),
+        ("HBT-H-DR", [("B1", 4.0), ("N1", 2.0)]),
+    ]
+
+    so_id = _seed_sale(client, qty=2.0, sku="HBT-H-DR")
+    # the add box offers what the orders actually sold, mapped ones flagged so
+    # the page can drop them from the picker
+    assert [
+        (r["sku"], r["lines"], r["mapped"])
+        for r in client.get("/api/product-skus/sold").json()
+    ] == [("HBT-H-DR", 1, True)]
+
+    lines = client.post(f"/api/sales-orders/{so_id}/prefill").json()
+    assert [(p["sku"], p["quantity"], p["required"]) for p in lines[0]["parts"]] == [
+        ("B1", 4.0, 8.0),
+        ("N1", 2.0, 4.0),
+    ]
+
+    # save a line's parts as its sku's mapping -- the button on the order page
+    plain = _seed_sale(client, so_id=2, wc_order_id=102, qty=3.0, sku="B1-SINGLE")
+    # an unmapped sku is exactly what the picker exists to offer
+    assert [
+        (r["sku"], r["mapped"]) for r in client.get("/api/product-skus/sold").json()
+    ] == [("B1-SINGLE", False), ("HBT-H-DR", True)]
+    line_id = client.get(f"/api/sales-orders/{plain}/lines").json()[0]["id"]
+    client.post(
+        f"/api/sales-orders/{plain}/lines/{line_id}/parts",
+        json={"part_id": bolt["id"], "quantity": 1},
+    )
+    saved = client.put(
+        "/api/product-skus/from-line", json={"sku": "B1-SINGLE", "line_id": line_id}
+    ).json()
+    assert [(p["part_sku"], p["quantity"]) for p in saved[0]["parts"]] == [("B1", 1.0)]
+
+    # patch one mapping row, and drop another
+    dl = next(
+        r for r in client.get("/api/product-skus").json() if r["sku"] == "HBT-H-DL"
+    )
+    assert (
+        client.patch(
+            f"/api/product-skus/parts/{dl['parts'][0]['id']}", json={"quantity": 9}
+        ).status_code
+        == 200
+    )
+    assert (
+        client.delete(f"/api/product-skus/parts/{dl['parts'][1]['id']}").status_code
+        == 200
+    )
+    dl = next(
+        r for r in client.get("/api/product-skus").json() if r["sku"] == "HBT-H-DL"
+    )
+    assert [(p["part_sku"], p["quantity"]) for p in dl["parts"]] == [("B1", 9.0)]
+    assert client.delete("/api/product-skus/parts/9999").status_code == 400
 
 
 def test_sales_order_margin_from_purchased_stock(client):

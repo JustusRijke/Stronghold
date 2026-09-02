@@ -14,13 +14,33 @@ once, so they are load-bearing:
 """
 
 import base64
+import html
 import json
+import re
 import ssl
 import urllib.request
 from datetime import date
 from urllib.parse import urlencode
 
 _PAGE = 100
+_TAG = re.compile(r"<[^>]*>")
+_SPACE = re.compile(r"\s+")
+
+
+def _text(value) -> str:
+    """Plain text out of a WooCommerce field that may carry markup.
+
+    A variable product's line name arrives as
+    `Hayfall<span> - </span>Met starterspakket` -- the store's own formatting of
+    "product, then which variant". We display it as text, so the tags would show
+    up literally. Dropping tags and unescaping entities is the whole job: these
+    are short one-line labels, not documents, so a parser would be more moving
+    parts than the problem has.
+
+    A tag becomes a space rather than nothing, so a `<br>` between two words
+    does not weld them together; runs of whitespace then collapse, which is what
+    the surrounding `<span> - </span>` needs to come out as a single " - "."""
+    return _SPACE.sub(" ", html.unescape(_TAG.sub(" ", value or ""))).strip()
 
 
 def _money(value) -> float:
@@ -67,7 +87,7 @@ def _map_order(o: dict) -> dict:
             {
                 "wc_line_id": li["id"],
                 "sku": li.get("sku") or "",  # often empty; never matched on
-                "description": li.get("name") or "",
+                "description": _text(li.get("name")),
                 "unit_price": _money(li.get("price")),
                 "quantity": float(li.get("quantity") or 0),
             }
