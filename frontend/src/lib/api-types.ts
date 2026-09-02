@@ -839,15 +839,19 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Product Skus */
-        get: operations["list_product_skus_api_product_skus_get"];
         /**
-         * Put Product Sku
-         * @description Point a sold sku at an assembly part. An upsert: the sku is the key, so
-         *     re-entering one repoints it rather than failing.
+         * List Product Skus
+         * @description Every mapping, one entry per sku with the parts it consumes. db returns
+         *     one flat row per part, already ordered by sku, so this just groups them.
          */
-        put: operations["put_product_sku_api_product_skus_put"];
-        post?: never;
+        get: operations["list_product_skus_api_product_skus_get"];
+        put?: never;
+        /**
+         * Add Product Sku Part
+         * @description Add a part to what a sold sku consumes. Adding one it already lists tops
+         *     up that quantity rather than failing.
+         */
+        post: operations["add_product_sku_part_api_product_skus_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -875,7 +879,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/product-skus/{sku}": {
+    "/api/product-skus/parts/{link_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -885,8 +889,30 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Delete Product Sku */
-        delete: operations["delete_product_sku_api_product_skus__sku__delete"];
+        /** Delete Product Sku Part */
+        delete: operations["delete_product_sku_part_api_product_skus_parts__link_id__delete"];
+        options?: never;
+        head?: never;
+        /** Patch Product Sku Part */
+        patch: operations["patch_product_sku_part_api_product_skus_parts__link_id__patch"];
+        trace?: never;
+    };
+    "/api/product-skus/from-line": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Product Sku From Line
+         * @description Save what a sales order line consumes as its sku's mapping, replacing
+         *     whatever that sku mapped to before. The button on the order page.
+         */
+        put: operations["put_product_sku_from_line_api_product_skus_from_line_put"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1584,26 +1610,60 @@ export interface components {
             /** Quantity */
             quantity: number;
         };
-        /** ProductSkuIn */
-        ProductSkuIn: {
+        /**
+         * ProductSkuFromLineIn
+         * @description Save what one sales order line consumes as the mapping for its sku.
+         */
+        ProductSkuFromLineIn: {
             /** Sku */
             sku: string;
-            /** Part Id */
-            part_id: number;
+            /** Line Id */
+            line_id: number;
         };
         /**
          * ProductSkuOut
-         * @description A sold sku and the assembly part its BOM prefills sales lines from.
+         * @description A sold sku and everything it is made of.
          */
         ProductSkuOut: {
             /** Sku */
             sku: string;
+            /** Parts */
+            parts: components["schemas"]["ProductSkuPartOut"][];
+        };
+        /** ProductSkuPartIn */
+        ProductSkuPartIn: {
+            /** Sku */
+            sku: string;
+            /** Part Id */
+            part_id: number;
+            /**
+             * Quantity
+             * @default 1
+             */
+            quantity: number;
+        };
+        /**
+         * ProductSkuPartOut
+         * @description One part a sold sku consumes, per unit sold.
+         */
+        ProductSkuPartOut: {
+            /** Id */
+            id: number;
             /** Part Id */
             part_id: number;
             /** Part Sku */
             part_sku: string;
             /** Part Description */
             part_description: string;
+            /** Part Assembly */
+            part_assembly: boolean;
+            /** Quantity */
+            quantity: number;
+        };
+        /** ProductSkuQtyPatch */
+        ProductSkuQtyPatch: {
+            /** Quantity */
+            quantity: number;
         };
         /** PurchaseOrderIn */
         PurchaseOrderIn: {
@@ -3990,7 +4050,7 @@ export interface operations {
             };
         };
     };
-    put_product_sku_api_product_skus_put: {
+    add_product_sku_part_api_product_skus_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -3999,17 +4059,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ProductSkuIn"];
+                "application/json": components["schemas"]["ProductSkuPartIn"];
             };
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OkOut"];
+                    "application/json": components["schemas"]["ProductSkuOut"][];
                 };
             };
             /** @description Validation Error */
@@ -4043,12 +4103,12 @@ export interface operations {
             };
         };
     };
-    delete_product_sku_api_product_skus__sku__delete: {
+    delete_product_sku_part_api_product_skus_parts__link_id__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                sku: string;
+                link_id: number;
             };
             cookie?: never;
         };
@@ -4061,6 +4121,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_product_sku_part_api_product_skus_parts__link_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                link_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductSkuQtyPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_product_sku_from_line_api_product_skus_from_line_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductSkuFromLineIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductSkuOut"][];
                 };
             };
             /** @description Validation Error */

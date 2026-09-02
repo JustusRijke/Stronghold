@@ -1506,7 +1506,7 @@ def test_sales_order_flow(database):
     assert "INSERT INTO sales_orders" in _exported(database)
 
 
-def test_product_sku_prefills_a_sales_line_from_the_bom(database):
+def test_product_sku_maps_a_sold_sku_to_several_parts(database):
     bolt = db.next_part_id()
     db.create_part(bolt, "B1", "Bolt")
     nut = db.next_part_id()
@@ -1515,20 +1515,18 @@ def test_product_sku_prefills_a_sales_line_from_the_bom(database):
     db.create_part(product, "HBT-H", "Haybutler")
     db.set_part_assembly(product, True)
     db.add_bomline(db.next_bomline_id(), product, bolt, 4.0)
-    db.add_bomline(db.next_bomline_id(), product, nut, 4.0)
 
-    # two sold variants, one build: door left and door right are the same BOM
-    db.set_product_sku("HBT-H-DL", product)
-    db.set_product_sku("HBT-H-DR", product)
-    # a plain part is a product too: it maps to one of itself, no BOM needed
-    db.set_product_sku("BOLT-SINGLE", bolt)
+    # a sku maps to a list of parts, no assembly needed to hold them
+    for sku in ("HBT-H-DL", "HBT-H-DR"):  # variants share one mapping
+        db.add_product_sku_part(db.next_product_sku_part_id(), sku, bolt, 4.0)
+        db.add_product_sku_part(db.next_product_sku_part_id(), sku, nut, 4.0)
 
     so_id, _ = _seed_sale(qty=2.0, sku="HBT-H-DR")
     db.prefill_so_parts(so_id)
     with db.session() as s:
         assert db.so_needs(s, so_id) == {bolt: 8.0, nut: 8.0}  # 2 sold x 4 each
 
-    # prefilling again leaves an edited line alone -- the BOM is a starting
+    # prefilling again leaves an edited line alone -- the mapping is a starting
     # point, not a thing that keeps rewriting the order
     link_id = db.next_line_part_id() - 1
     db.edit_line_part(link_id, 9.0)
@@ -1536,18 +1534,77 @@ def test_product_sku_prefills_a_sales_line_from_the_bom(database):
     with db.session() as s:
         assert db.so_needs(s, so_id)[nut] == 18.0
 
-    # a plain part's line consumes one of it per unit sold
-    plain_so, _ = _seed_sale(so_id=2, wc_order_id=102, qty=3.0, sku="BOLT-SINGLE")
-    db.prefill_so_parts(plain_so)
+    # an assembly is copied like any other part: the line consumes one of it
+    # off the shelf, NOT its components
+    db.add_product_sku_part(db.next_product_sku_part_id(), "HBT-BUILT", product, 1.0)
+    built, _ = _seed_sale(so_id=2, wc_order_id=102, qty=3.0, sku="HBT-BUILT")
+    db.prefill_so_parts(built)
     with db.session() as s:
-        assert db.so_needs(s, plain_so) == {bolt: 3.0}
+        assert db.so_needs(s, built) == {product: 3.0}
 
-    # repointing the sku does not disturb the order already filled in
-    db.set_product_sku("HBT-H-DR", product)  # no-op, no activity row
-    db.remove_product_sku("HBT-H-DL")
+    # adding a part the sku already lists tops it up rather than being rejected
+    db.add_product_sku_part(db.next_product_sku_part_id(), "HBT-H-DL", nut, 2.0)
     with db.session() as s:
-        assert [r[0] for r in db.product_skus(s)] == ["BOLT-SINGLE", "HBT-H-DR"]
+        rows = {(r[1], r[4], r[5]) for r in db.product_skus(s)}
+    assert ("HBT-H-DL", "Nut", 6.0) in rows
+
+    # editing and removing a mapping row leaves orders already filled in alone
+    dl_bolt = next(
+        r[0]
+        for r in db.product_skus(db.session())
+        if r[1] == "HBT-H-DL" and r[2] == bolt
+    )
+    db.edit_product_sku_part(dl_bolt, 7.0)
+    db.remove_product_sku_part(dl_bolt)
+    with db.session() as s:
+        assert {r[1] for r in db.product_skus(s)} == {
+            "HBT-H-DL",
+            "HBT-H-DR",
+            "HBT-BUILT",
+        }
         assert db.so_needs(s, so_id) == {bolt: 8.0, nut: 18.0}
+
+
+def test_export_removes_a_file_whose_table_is_gone(database):
+    """A dropped table's .sql is read by nothing and rewritten by nothing (both
+    loops walk the declared tables), so without this it sits in the data
+    directory for good, looking like current data."""
+    stale = db._export_dir / "product_skus.sql"
+    stale.write_text("INSERT INTO product_skus VALUES ('X', 1);", encoding="utf-8")
+    db.export(force=True)
+    assert not stale.exists()
+    assert (db._export_dir / "parts.sql").exists()  # a live table is untouched
+
+
+def test_product_sku_saved_from_a_sales_order_line(database):
+    """The button on the order page: get the line's parts right, then save that
+    list as the mapping for its sku."""
+    bolt = db.next_part_id()
+    db.create_part(bolt, "B1", "Bolt")
+    nut = db.next_part_id()
+    db.create_part(nut, "N1", "Nut")
+
+    _, line_id = _seed_sale(qty=2.0, sku="HBT-W-DR")
+    # a line with nothing linked has nothing to save
+    with pytest.raises(db.InventoryError):
+        db.set_product_sku_from_line("HBT-W-DR", line_id)
+
+    db.add_line_part(db.next_line_part_id(), line_id, bolt, 4.0)
+    db.add_line_part(db.next_line_part_id(), line_id, nut, 2.0)
+    db.set_product_sku_from_line("HBT-W-DR", line_id)
+    with db.session() as s:
+        assert [(r[2], r[5]) for r in db.product_skus(s)] == [(bolt, 4.0), (nut, 2.0)]
+
+    # saving again with the line unchanged is a no-op, not a duplicate row
+    db.set_product_sku_from_line("HBT-W-DR", line_id)
+    with db.session() as s:
+        assert len(db.product_skus(s)) == 2
+
+    # it REPLACES rather than merges: a part the line dropped leaves the mapping
+    db.remove_line_part(db.next_line_part_id() - 1)
+    db.set_product_sku_from_line("HBT-W-DR", line_id)
+    with db.session() as s:
+        assert [(r[2], r[5]) for r in db.product_skus(s)] == [(bolt, 4.0)]
 
 
 def test_sales_order_short_debt_settled_by_purchase(database):

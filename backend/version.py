@@ -30,7 +30,7 @@ from importlib.metadata import PackageNotFoundError, version
 # 7 added stock_items.created_at. Additive, but NOT NULL, so unlike 4 and 6 it
 # is not a no-op: replayed rows would all read as "created today". The step
 # backfills them from the order that created them (db._to_v7).
-# 8 added product_skus, the sales-sku -> assembly-part map the line-part
+# 8 added product_sku_parts, the sales-sku -> (part, quantity) map the line-part
 # prefill reads. Purely additive, like 4 and 6.
 SCHEMA_VERSION = 8
 

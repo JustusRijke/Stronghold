@@ -1329,26 +1329,24 @@ def test_sales_order_flow(client):
 
 def test_product_sku_prefill_over_the_api(client):
     bolt = client.post("/api/parts", json={"sku": "B1", "description": "Bolt"}).json()
-    product = client.post(
-        "/api/parts", json={"sku": "HBT-H", "description": "Haybutler"}
-    ).json()
-    client.patch(f"/api/parts/{product['id']}", json={"assembly": True})
-    client.post(
-        f"/api/parts/{product['id']}/bom",
-        json={"component_part_id": bolt["id"], "quantity": 4},
-    )
+    nut = client.post("/api/parts", json={"sku": "N1", "description": "Nut"}).json()
 
-    for sku in ("HBT-H-DL", "HBT-H-DR"):  # two sold variants, one BOM
-        assert (
-            client.put(
-                "/api/product-skus", json={"sku": sku, "part_id": product["id"]}
-            ).status_code
-            == 200
-        )
+    # a sku maps to a list of parts; the two sold variants share one mapping
+    for sku in ("HBT-H-DL", "HBT-H-DR"):
+        for part, qty in ((bolt, 4), (nut, 2)):
+            assert (
+                client.post(
+                    "/api/product-skus",
+                    json={"sku": sku, "part_id": part["id"], "quantity": qty},
+                ).status_code
+                == 201
+            )
     listed = client.get("/api/product-skus").json()
-    assert [(r["sku"], r["part_description"]) for r in listed] == [
-        ("HBT-H-DL", "Haybutler"),
-        ("HBT-H-DR", "Haybutler"),
+    assert [
+        (r["sku"], [(p["part_sku"], p["quantity"]) for p in r["parts"]]) for r in listed
+    ] == [
+        ("HBT-H-DL", [("B1", 4.0), ("N1", 2.0)]),
+        ("HBT-H-DR", [("B1", 4.0), ("N1", 2.0)]),
     ]
 
     so_id = _seed_sale(client, qty=2.0, sku="HBT-H-DR")
@@ -1361,27 +1359,45 @@ def test_product_sku_prefill_over_the_api(client):
 
     lines = client.post(f"/api/sales-orders/{so_id}/prefill").json()
     assert [(p["sku"], p["quantity"], p["required"]) for p in lines[0]["parts"]] == [
-        ("B1", 4.0, 8.0)
+        ("B1", 4.0, 8.0),
+        ("N1", 2.0, 4.0),
     ]
 
-    # a plain part maps too, to one of itself
+    # save a line's parts as its sku's mapping -- the button on the order page
     plain = _seed_sale(client, so_id=2, wc_order_id=102, qty=3.0, sku="B1-SINGLE")
     # an unmapped sku is exactly what the picker exists to offer
     assert [
         (r["sku"], r["mapped"]) for r in client.get("/api/product-skus/sold").json()
     ] == [("B1-SINGLE", False), ("HBT-H-DR", True)]
-    client.put("/api/product-skus", json={"sku": "B1-SINGLE", "part_id": bolt["id"]})
-    lines = client.post(f"/api/sales-orders/{plain}/prefill").json()
-    assert [(p["sku"], p["quantity"], p["required"]) for p in lines[0]["parts"]] == [
-        ("B1", 1.0, 3.0)
-    ]
+    line_id = client.get(f"/api/sales-orders/{plain}/lines").json()[0]["id"]
+    client.post(
+        f"/api/sales-orders/{plain}/lines/{line_id}/parts",
+        json={"part_id": bolt["id"], "quantity": 1},
+    )
+    saved = client.put(
+        "/api/product-skus/from-line", json={"sku": "B1-SINGLE", "line_id": line_id}
+    ).json()
+    assert [(p["part_sku"], p["quantity"]) for p in saved[0]["parts"]] == [("B1", 1.0)]
 
-    assert client.delete("/api/product-skus/HBT-H-DL").status_code == 200
-    assert [r["sku"] for r in client.get("/api/product-skus").json()] == [
-        "B1-SINGLE",
-        "HBT-H-DR",
-    ]
-    assert client.delete("/api/product-skus/HBT-H-DL").status_code == 400
+    # patch one mapping row, and drop another
+    dl = next(
+        r for r in client.get("/api/product-skus").json() if r["sku"] == "HBT-H-DL"
+    )
+    assert (
+        client.patch(
+            f"/api/product-skus/parts/{dl['parts'][0]['id']}", json={"quantity": 9}
+        ).status_code
+        == 200
+    )
+    assert (
+        client.delete(f"/api/product-skus/parts/{dl['parts'][1]['id']}").status_code
+        == 200
+    )
+    dl = next(
+        r for r in client.get("/api/product-skus").json() if r["sku"] == "HBT-H-DL"
+    )
+    assert [(p["part_sku"], p["quantity"]) for p in dl["parts"]] == [("B1", 9.0)]
+    assert client.delete("/api/product-skus/parts/9999").status_code == 400
 
 
 def test_sales_order_margin_from_purchased_stock(client):

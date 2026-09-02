@@ -73,9 +73,17 @@ export const PartPatch = v.object({
 export const ProduceIn = v.object({
 	quantity: v.pipe(v.number(), v.integer(), v.gtValue(0, 'must be greater than 0')),
 	});
-export const ProductSkuIn = v.object({
+export const ProductSkuFromLineIn = v.object({
+	sku: v.string(),
+	line_id: v.pipe(v.number(), v.integer()),
+	});
+export const ProductSkuPartIn = v.object({
 	sku: v.string(),
 	part_id: v.pipe(v.number(), v.integer()),
+	quantity: v.optional(v.number()),
+	});
+export const ProductSkuQtyPatch = v.object({
+	quantity: v.number(),
 	});
 export const PurchaseOrderIn = v.object({
 	supplier_id: v.pipe(v.number(), v.integer()),

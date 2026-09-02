@@ -515,23 +515,34 @@ class SalesOrderLinePart(Base):
     quantity: Mapped[float]
 
 
-class ProductSku(Base):
-    """The sku WooCommerce sells, mapped to the assembly Part it is made of.
+class ProductSkuPart(Base):
+    """One part a sold sku consumes, and how many per unit sold.
 
-    Many skus to one part on purpose: a haybutler with the door on the left
-    (HBT-H-DL) and one on the right (HBT-H-DR) are the same bill of materials,
-    so both rows point at the same assembly. The sku is the pk -- it is the
-    thing WooCommerce sends and the only key a sales line has to match on.
+    The mapping side of SalesOrderLinePart, and deliberately the same shape: a
+    sku maps to a *list* of (part, quantity), so one sold product may be made of
+    several parts without inventing an assembly to hold them. Prefill copies
+    these rows onto a sales line verbatim -- what the mapping says is exactly
+    what the line gets, with no expansion step in between.
 
-    It only prefills: copying the part's BOM onto a sales line writes ordinary
+    That includes an assembly: map a sku to one and the line consumes one of
+    that assembly, drawn from the stock a build order produced, which is what
+    selling a built product actually does.
+
+    Many skus may share a part (a door-left and a door-right variant are the
+    same build), and a sku may name several parts, so the key is the pair.
+
+    It only prefills: copying it onto a sales line writes ordinary
     SalesOrderLinePart rows, which the user is then free to edit. Changing a
-    mapping (or the BOM behind it) never rewrites an order already filled in.
+    mapping never rewrites an order already filled in.
     """
 
-    __tablename__ = "product_skus"
+    __tablename__ = "product_sku_parts"
+    __table_args__ = (UniqueConstraint("sku", "part_id"),)
 
-    sku: Mapped[str] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sku: Mapped[str]
     part_id: Mapped[int] = mapped_column(ForeignKey(Part.id))
+    quantity: Mapped[float]
 
 
 class Booking(Base):
