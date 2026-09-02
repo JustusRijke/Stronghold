@@ -228,9 +228,14 @@ export const api = {
 	// product skus: the sold-sku -> assembly map the prefill reads
 	productSkus: () => get<ProductSku[]>('/product-skus'),
 	soldSkus: () => get<SoldSku[]>('/product-skus/sold'),
-	setProductSku: (b: { sku: string; part_id: number }) => put<{ ok: boolean }>('/product-skus', b),
-	removeProductSku: (sku: string) =>
-		del<{ ok: boolean }>(`/product-skus/${encodeURIComponent(sku)}`),
+	addProductSkuPart: (b: { sku: string; part_id: number; quantity: number }) =>
+		post<ProductSku[]>('/product-skus', b),
+	editProductSkuPart: (linkId: number, quantity: number) =>
+		patch<{ ok: boolean }>(`/product-skus/parts/${linkId}`, { quantity }),
+	removeProductSkuPart: (linkId: number) =>
+		del<{ ok: boolean }>(`/product-skus/parts/${linkId}`),
+	saveProductSkuFromLine: (b: { sku: string; line_id: number }) =>
+		put<ProductSku[]>('/product-skus/from-line', b),
 
 	// settings
 	settings: () => get<Setting[]>('/settings'),
