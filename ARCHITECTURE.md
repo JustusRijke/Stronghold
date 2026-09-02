@@ -251,13 +251,14 @@ step when one is actually needed.
   (its `sku` is plain text, often empty, and never matched against `Part.sku`).
   `SalesOrderLinePart(id, line_id, part_id, quantity)` is the mapping -- one of
   the two sales tables the user writes to -- quantity being per sold unit, like
-  `BomLine`. `ProductSku(sku, part_id)` is the other: the sold SKU mapped to the
-  `Part` it is made of, many SKUs to one part (variants share a build), which is
-  why the sku is the pk. **Any** part maps -- an assembly contributes its whole
-  BOM, anything else one link of itself at quantity 1, since a line selling a
-  single bolt has no BOM to copy and requiring one would leave exactly that case
-  to be hand-linked forever. It only ever *prefills*:
-  `db._prefill_so_parts` writes ordinary `SalesOrderLinePart` rows
+  `BomLine`. `ProductSkuPart(id, sku, part_id, quantity)` is the other: what a sold
+  SKU is made of, deliberately the **same shape as `SalesOrderLinePart`** so
+  prefill is a straight copy. Many-to-many both ways -- a SKU may name several
+  parts, several SKUs may name one part (variants share a build) -- so the key is
+  the `(sku, part_id)` pair, not the sku. An assembly is copied like any other
+  part (the line consumes one of it off the shelf); there is no BOM expansion,
+  which is what keeps the mapping honest about what the line will get. It only
+  ever *prefills*: `db._prefill_so_parts` writes ordinary `SalesOrderLinePart` rows
   on a line that has none yet -- run per order by `prefill_so_parts` (POST
   `/sales-orders/{id}/prefill`, which logs) and for every order the WooCommerce
   import touches (which logs once for the run). Never on a line the user has
@@ -401,8 +402,8 @@ Known ceilings, with their upgrade paths, deferred until they actually hurt
   every version in turn), 5 made `parts.sku` optional and unique, 6 added the
   optional `bom_lines.note` (additive, so a no-op step like 4), 7 added
   `stock_items.created_at` (additive but NOT NULL, so its step backfills from
-  the order that created each row), 8 added `product_skus` (additive, a no-op
-  step). See "Data versioning".
+  the order that created each row), 8 added `product_sku_parts` (additive, a
+  no-op step). See "Data versioning".
 - Step 5 needed the mirror image of the `_DROPPED_COLUMNS` scaffold: an older
   file may hold rows that *violate* a constraint the current schema has (many
   parts sharing an empty sku), so the replay would fail before `_migrate` could

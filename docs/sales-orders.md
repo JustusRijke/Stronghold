@@ -57,12 +57,14 @@ order would be the same work every week. The **Product SKUs** tab, next to
 Overview on the sales orders page, is where that mapping lives instead: it points
 a sold SKU at the part it is made of.
 
-What gets copied onto the line depends on which part you map:
+A mapping is a **list of parts and quantities** -- the same shape as the parts on
+a sales order line, and copied onto it verbatim. What the mapping says is exactly
+what the line gets, with nothing expanded in between.
 
-| You map | The line gets |
-| --- | --- |
-| An **assembly** | Its whole bill of materials, one link per component, at the BOM quantities |
-| **Any other part** | One link to that part, quantity 1 -- a line selling a single bolt consumes one bolt |
+That includes an assembly: map a SKU to one and the line consumes *one of that
+assembly*, taken off the shelf where a build order put it, which is what selling
+a built product actually does. Map loose parts instead and the line consumes
+those.
 
 The **Sold SKU** box suggests the SKUs your imported orders actually use, most-
 sold first, and drops each one from the list as you map it -- so the key is
@@ -70,14 +72,26 @@ picked rather than typed. A SKU that has not been sold yet can still be typed in
 by hand. The count in brackets is how many sold line items carry it, which is a
 fair guide to what is worth mapping first.
 
-Several SKUs may point at the same part, which is the usual case for variants --
+Several SKUs may map to the same parts, which is the usual case for variants --
 a haybutler with the door on the left (`HBT-H-DL`) and one with it on the right
-(`HBT-H-DR`) are the same build, so both rows name the same assembly.
+(`HBT-H-DR`) are the same build.
 
 With a SKU mapped, it is applied to matching line items:
 
 - automatically, whenever an order is imported, and
 - on demand, with **Prefill from SKUs** on a sales order.
+
+## Saving a mapping from an order
+
+The mapping does not have to be built on the Product SKUs tab. Link the parts on
+a sales order line until they are right, then press **Save as SKU mapping** on
+that line: its SKU is mapped to exactly those parts and quantities, ready for
+every future order that sells it.
+
+If the SKU already maps to something, the button reads **Update SKU mapping** and
+names what it currently points at before replacing it -- other orders prefill
+from that mapping, so it is never overwritten silently. Replacing is a straight
+swap, not a merge: a part the line no longer lists leaves the mapping too.
 
 Either way, it is a *starting point* -- ordinary part links are written and you
 are then free to edit them. Two rules keep it from ever undoing your work:

@@ -185,12 +185,15 @@ Open-source inventory/stock tracking for small and medium businesses.
 - Import sales orders from a WooCommerce shop and book what they consumed.
   WooCommerce stays the authority on the sale itself (customer, status, prices,
   line items -- all read-only here); what it cannot know is which *parts* a sold
-  product is made of. Map a sold SKU to a part on the **Product SKUs** tab of the
-  sales orders page -- an assembly contributes its whole BOM, any other part one
-  of itself, and several SKUs may share one part, since a door-left and a
+  product is made of. Map a sold SKU to a list of parts on the **Product SKUs**
+  tab of the sales orders page -- the same shape as a line's own parts, copied
+  onto it verbatim, so a product may be several loose parts or one assembly taken
+  off the shelf; several SKUs may share a mapping, since a door-left and a
   door-right variant are the same build -- and importing an order fills those
   parts in for you; there is a **Prefill from SKUs** button on each order too,
-  and anything unmapped you link by hand, per unit sold. Prefilling
+  and a **Save as SKU mapping** button on each line that turns the parts you just
+  linked into the mapping for its SKU. Anything unmapped you link by hand, per
+  unit sold. Prefilling
   only ever touches a line that has no parts yet, so it never overwrites your
   own edits, and changing a mapping leaves orders already filled in alone.
   Booking an order
