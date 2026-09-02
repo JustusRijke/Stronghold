@@ -329,6 +329,9 @@ class POLineOut(BaseModel):
     po_id: int
     supplier_part_id: int
     supplier_sku: str
+    part_id: int
+    part_description: str
+    hyperlink: str  # the supplier part's webshop URL, blank if none
     pack_qty: int
     quantity: int
     received: float  # ordered units received into stock so far
@@ -1509,8 +1512,16 @@ def patch_po(po_id: int, body: PurchaseOrderPatch) -> PurchaseOrderOut:
 def _po_lines(po_id: int) -> list[POLineOut]:
     with db.session() as s:
         rows = s.execute(
-            select(POLine, SupplierPart.sku, SupplierPart.pack_qty)
+            select(
+                POLine,
+                SupplierPart.sku,
+                SupplierPart.pack_qty,
+                SupplierPart.part_id,
+                SupplierPart.hyperlink,
+                Part.description,
+            )
             .join(SupplierPart, POLine.supplier_part_id == SupplierPart.id)
+            .join(Part, SupplierPart.part_id == Part.id)
             .where(POLine.po_id == po_id)
             .order_by(POLine.id)
         ).all()
@@ -1520,12 +1531,15 @@ def _po_lines(po_id: int) -> list[POLineOut]:
             po_id=line.po_id,
             supplier_part_id=line.supplier_part_id,
             supplier_sku=sku or "",
+            part_id=part_id,
+            part_description=part_description,
+            hyperlink=hyperlink,
             pack_qty=pack_qty,
             quantity=line.quantity,
             received=line.received,
             price=line.price,
         )
-        for line, sku, pack_qty in rows
+        for line, sku, pack_qty, part_id, hyperlink, part_description in rows
     ]
 
 

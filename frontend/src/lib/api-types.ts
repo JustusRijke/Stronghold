@@ -1416,6 +1416,12 @@ export interface components {
             supplier_part_id: number;
             /** Supplier Sku */
             supplier_sku: string;
+            /** Part Id */
+            part_id: number;
+            /** Part Description */
+            part_description: string;
+            /** Hyperlink */
+            hyperlink: string;
             /** Pack Qty */
             pack_qty: number;
             /** Quantity */
