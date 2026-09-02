@@ -38,9 +38,13 @@ Open-source inventory/stock tracking for small and medium businesses.
   (the line price divided by the pack size, to 4 decimals) and the date of that
   order, so the cheapest source is visible at a glance. The 🛒 button on a row
   purchases from that supplier specifically, using the same dialog
-- A purchase order's lines are a full table (quantity, pack size, unit price,
-  line total, landed total, received, and a Goods / Delivery / Total summary):
-  edit a line's quantity or price in place and the part's estimated price --
+- A purchase order's lines are a full table (supplier part, part, quantity, pack
+  size, unit price, line total, landed total, received, and a Goods / Delivery /
+  Total summary), sortable by clicking any column header (click again to
+  reverse, a third time to go back to order). The supplier part links to its
+  page, a 🔗 next to it opens the supplier's own web shop page for it when one
+  is set, and the part name links to the part. Edit a line's quantity or price
+  in place and the part's estimated price --
   plus any stock already booked against that line -- is revalued to match. Lines
   lock once the order is completed or cancelled
 - An order's delivery cost is split over its lines in proportion to their value,
