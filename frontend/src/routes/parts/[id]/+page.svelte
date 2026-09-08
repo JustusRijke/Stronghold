@@ -510,13 +510,17 @@
 					<input value={part.description} onchange={(e) => saveDescription(e.currentTarget.value)} />
 				</label>
 				{#if !part.virtual}
-					<p class="muted stockline">
-						<span>
-							In stock: <strong>{part.in_stock}</strong> &middot; needed for builds:
-							<strong>{part.needed}</strong>
-							&middot; on order: <strong>{part.incoming}</strong> &middot; suggested to order:
-							<strong>{part.suggested_order}</strong>
-						</span>
+					<table class="stocktable">
+						<tbody>
+							<tr><th>In stock</th><td>{part.in_stock}</td></tr>
+							<tr><th>Needed for builds</th><td>{part.needed_builds}</td></tr>
+							<tr><th>Needed for sales orders</th><td>{part.needed_sales}</td></tr>
+							<tr><th>Freely available</th><td>{part.free_stock}</td></tr>
+							<tr><th>On order</th><td>{part.incoming}</td></tr>
+							<tr><th>Suggested to order</th><td>{part.suggested_order}</td></tr>
+						</tbody>
+					</table>
+					<p class="stockline">
 						<button class="btn ghost" type="button" onclick={() => (stocktakeOpen = true)}>
 							Stocktake
 						</button>
@@ -759,7 +763,8 @@
 		<h2 class="h2">Purchase this part</h2>
 		{#if part}
 			<p class="muted">
-				In stock {part.in_stock} &middot; needed {part.needed} &middot; on order {part.incoming}
+				In stock {part.in_stock} &middot; needed {part.needed_builds + part.needed_sales} &middot; on
+				order {part.incoming}
 				&middot; <strong>suggested {part.suggested_order}</strong>
 			</p>
 		{/if}
@@ -849,6 +854,20 @@
 {/if}
 
 <style>
+	.stocktable {
+		border-collapse: collapse;
+		margin: 4px 0;
+	}
+	.stocktable th {
+		text-align: left;
+		font-weight: normal;
+		color: var(--ink-faint);
+		padding: 2px 16px 2px 0;
+	}
+	.stocktable td {
+		font-variant-numeric: tabular-nums;
+		font-weight: 600;
+	}
 	.stockline {
 		display: flex;
 		align-items: center;

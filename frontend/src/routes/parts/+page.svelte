@@ -18,7 +18,9 @@
 		{ key: 'sku', header: 'SKU', mono: true, width: '160px' },
 		{ key: 'description', header: 'Description', truncate: true },
 		{ key: 'in_stock', header: 'In stock', mono: true, width: '100px' },
-		{ key: 'needed', header: 'Needed', mono: true, width: '100px' },
+		{ key: 'free_stock', header: 'Free', mono: true, width: '100px' },
+		{ key: 'needed_builds', header: 'For builds', mono: true, width: '110px' },
+		{ key: 'needed_sales', header: 'For sales', mono: true, width: '110px' },
 		{ key: 'incoming', header: 'On order', mono: true, width: '100px' },
 		{ key: 'suggested_order', header: 'To order', mono: true, width: '100px' },
 		{

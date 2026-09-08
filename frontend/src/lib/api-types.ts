@@ -1513,8 +1513,12 @@ export interface components {
             in_stock: number;
             /** Owed */
             owed: number;
-            /** Needed */
-            needed: number;
+            /** Needed Builds */
+            needed_builds: number;
+            /** Needed Sales */
+            needed_sales: number;
+            /** Free Stock */
+            free_stock: number;
             /** Incoming */
             incoming: number;
             /** Suggested Order */

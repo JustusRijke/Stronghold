@@ -1148,15 +1148,17 @@ def test_part_demand_and_suggested_order(client):
     ).json()
     # a Draft build is a scratchpad and asks for nothing yet
     assert build["status"] == "Draft"
-    assert client.get(f"/api/parts/{comp}").json()["needed"] == 0
+    assert client.get(f"/api/parts/{comp}").json()["needed_builds"] == 0
     # planning it (Pending) already books the demand, before production starts
     client.patch(f"/api/build-orders/{build['id']}", json={"status": "Pending"})
-    assert client.get(f"/api/parts/{comp}").json()["needed"] == 8
+    assert client.get(f"/api/parts/{comp}").json()["needed_builds"] == 8
     client.patch(f"/api/build-orders/{build['id']}", json={"status": "Production"})
 
     # 4 units x 2 each = 8 needed, 3 in stock, nothing on order
     row = client.get(f"/api/parts/{comp}").json()
-    assert (row["needed"], row["in_stock"], row["incoming"]) == (8, 3, 0)
+    assert (row["needed_builds"], row["in_stock"], row["incoming"]) == (8, 3, 0)
+    # nothing is free while builds have claimed it all
+    assert (row["needed_sales"], row["free_stock"]) == (0, -5)
     assert row["suggested_order"] == 5
 
     # order 2 packs of 2 -> 4 incoming, suggestion drops to 1
@@ -1184,7 +1186,7 @@ def test_part_demand_and_suggested_order(client):
     # producing 1 unit consumes 2 and drops the remaining need to 6
     client.post(f"/api/build-orders/{build['id']}/produce", json={"quantity": 1})
     row = client.get(f"/api/parts/{comp}").json()
-    assert (row["needed"], row["in_stock"]) == (6, 1)
+    assert (row["needed_builds"], row["in_stock"]) == (6, 1)
     assert row["suggested_order"] == 1
 
 

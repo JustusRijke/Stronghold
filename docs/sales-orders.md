@@ -134,8 +134,8 @@ consumed row at the part's rate and it counts in the cost and margin, exactly
 the way a build records labour.
 
 Until an order is booked, its parts count as **demand**: they show up in the
-"Needed" column on the part page and feed the suggested order quantity, the same
-way a planned build does. Cancelled, refunded and failed orders ask for nothing.
+"For sales" column on the parts list (and "Needed for sales orders" on the part
+page) and feed the suggested order quantity, the same way a planned build does. Cancelled, refunded and failed orders ask for nothing.
 
 ## Booking
 

@@ -86,7 +86,9 @@ class PartOut(BaseModel):
     price_partial: bool  # an assembly whose BOM has unpriced components
     in_stock: float  # Available stock on hand (debt rows net out)
     owed: float  # what builds are owed, negative (0 if none); a stocktake's floor
-    needed: float  # units builds in production still have to consume
+    needed_builds: float  # units planned builds still have to consume
+    needed_sales: float  # units unbooked sales orders still have to consume
+    free_stock: float  # in_stock minus what builds and sales have claimed
     incoming: float  # units still to be received on open POs
     suggested_order: float  # max(0, needed - in_stock - incoming)
 
@@ -612,11 +614,12 @@ def _owed(s) -> dict[int, float]:
 def _part_out(
     p: Part,
     on_hand: dict[int, float],
-    demand: dict[int, tuple[float, float]],
+    demand: dict[int, tuple[float, float, float]],
     owed: dict[int, float],
 ) -> PartOut:
     stock = on_hand.get(p.id, 0.0)
-    needed, incoming = demand.get(p.id, (0.0, 0.0))
+    builds, sales, incoming = demand.get(p.id, (0.0, 0.0, 0.0))
+    needed = builds + sales
     return PartOut(
         id=p.id,
         sku=p.sku,
@@ -629,7 +632,9 @@ def _part_out(
         price_partial=p.price_partial,
         in_stock=stock,
         owed=owed.get(p.id, 0.0),
-        needed=needed,
+        needed_builds=builds,
+        needed_sales=sales,
+        free_stock=stock - needed,
         incoming=incoming,
         suggested_order=max(0.0, needed - stock - incoming),
     )
