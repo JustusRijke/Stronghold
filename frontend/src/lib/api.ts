@@ -212,6 +212,8 @@ export const api = {
 	salesOrders: () => get<SalesOrder[]>('/sales-orders'),
 	salesOrder: (id: number) => get<SalesOrder>(`/sales-orders/${id}`),
 	salesOrderLines: (id: number) => get<SalesOrderLine[]>(`/sales-orders/${id}/lines`),
+	editSalesOrder: (id: number, b: { actual_shipping_cost: number | null }) =>
+		patch<SalesOrder>(`/sales-orders/${id}`, b),
 	addLinePart: (id: number, lineId: number, b: { part_id: number; quantity: number }) =>
 		post<SalesOrderLine[]>(`/sales-orders/${id}/lines/${lineId}/parts`, b),
 	editLinePart: (linkId: number, quantity: number) =>

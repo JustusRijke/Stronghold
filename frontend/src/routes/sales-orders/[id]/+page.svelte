@@ -130,6 +130,11 @@
 		}
 	}
 
+	async function saveActualShipping(raw: string) {
+		const cost = raw.trim() === '' ? null : Number(raw);
+		if (await toast.run(() => api.editSalesOrder(id, { actual_shipping_cost: cost }))) load();
+	}
+
 	const money = (v: number | null | undefined) => (v == null ? '--' : Number(v).toFixed(2));
 	// margin over revenue; null whenever the cost is unknown or revenue is zero
 	const pct = (v: number | null | undefined) => (v == null ? '--' : `${Number(v).toFixed(1)}%`);
@@ -192,14 +197,35 @@
 					<dt>Shipping charged</dt>
 					<dd class="mono">{money(so.shipping_cost)}</dd>
 				</dl>
+				<label class="field">
+					<span>Shipping actually paid</span>
+					<input
+						type="number"
+						step="0.01"
+						min="0"
+						value={so.actual_shipping_cost ?? ''}
+						placeholder="not entered"
+						onchange={(e) => saveActualShipping(e.currentTarget.value)} />
+				</label>
+				<p class="muted">
+					Ours to fill in, not WooCommerce's. Leave it empty while the carrier bill is
+					unknown &mdash; empty is not zero, and the margin then leaves shipping out
+					entirely.
+				</p>
 			</section>
 
 			<section id="margin">
 				<h2 class="h2">Margin</h2>
 				<p class="muted">
 					Estimated is what the linked parts are currently worth; realised is what the
-					stock this sale actually consumed cost. Shipping is excluded &mdash; it is a
-					pass-through, not margin on the goods.
+					stock this sale actually consumed cost.
+					{#if so.shipping_in_margin}
+						Shipping counts on both sides: the {money(so.shipping_cost)} charged is in
+						revenue, the {money(so.actual_shipping_cost)} paid is in cost.
+					{:else}
+						Shipping is left out on both sides until the shipping actually paid is filled
+						in &mdash; counting only what the customer paid would inflate the margin.
+					{/if}
 				</p>
 				<table class="margin">
 					<thead>
