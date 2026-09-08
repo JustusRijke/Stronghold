@@ -8,7 +8,6 @@
 	type Row = {
 		id: number;
 		reference: string;
-		wc_number: string;
 		date_created: string;
 		customer_name: string;
 		shipping_country: string;
@@ -30,7 +29,6 @@
 		rows = (await api.salesOrders()).map((so) => ({
 			id: so.id,
 			reference: so.reference,
-			wc_number: so.wc_number,
 			date_created: so.date_created ?? '',
 			customer_name: so.customer_name,
 			shipping_country: so.shipping_country,
@@ -65,8 +63,7 @@
 	const money = (v: number | null) => (v === null ? '' : v.toFixed(2));
 
 	const columns: Column<Row>[] = $derived([
-		{ key: 'reference', header: 'Sale', mono: true, width: '110px' },
-		{ key: 'wc_number', header: 'WooCommerce', mono: true, width: '130px' },
+		{ key: 'reference', header: 'SO', mono: true, width: '110px' },
 		{ key: 'date_created', header: 'Date', width: '120px' },
 		{ key: 'customer_name', header: 'Customer', truncate: true },
 		{ key: 'shipping_country', header: 'Country', width: '90px' },
