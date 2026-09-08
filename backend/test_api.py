@@ -57,6 +57,32 @@ def test_parts_crud_and_bom(client):
     assert "itself" in bad.json()["detail"]
 
 
+def test_clone_part(client):
+    """A clone copies the basics and the BOM, and nothing that identifies the
+    original: no sku, no supplier parts."""
+    asm = client.post("/api/parts", json={"sku": "ASM2", "description": "frame"}).json()
+    comp = client.post("/api/parts", json={"sku": "C9", "description": "tube"}).json()
+    client.patch(f"/api/parts/{asm['id']}", json={"assembly": True})
+    client.post(
+        f"/api/parts/{asm['id']}/bom",
+        json={"component_part_id": comp["id"], "quantity": 3},
+    )
+
+    clone = client.post(
+        f"/api/parts/{asm['id']}/clone", json={"description": "frame mk2"}
+    )
+    assert clone.status_code == 201
+    clone = clone.json()
+    assert clone["id"] != asm["id"]
+    assert clone["description"] == "frame mk2"
+    assert clone["sku"] is None and clone["assembly"] is True
+    bom = client.get(f"/api/parts/{clone['id']}/bom").json()
+    assert len(bom) == 1
+    assert bom[0]["component_part_id"] == comp["id"] and bom[0]["quantity"] == 3
+    # the original keeps its own bom
+    assert len(client.get(f"/api/parts/{asm['id']}/bom").json()) == 1
+
+
 def test_stock_flow(client):
     pid = client.post("/api/parts", json={"sku": "BOLT", "description": "bolt"}).json()[
         "id"

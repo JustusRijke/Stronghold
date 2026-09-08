@@ -93,6 +93,8 @@ export const api = {
 	partStockLog: (id: number) => get<StockLogEntry[]>(`/parts/${id}/stock-log`),
 	createPart: (b: { sku?: string | null; description: string; virtual?: boolean }) =>
 		post<Part>('/parts', b),
+	clonePart: (id: number, description: string) =>
+		post<Part>(`/parts/${id}/clone`, { description }),
 	patchPart: (
 		id: number,
 		b: Partial<
