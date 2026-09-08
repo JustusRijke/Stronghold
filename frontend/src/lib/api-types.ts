@@ -1607,8 +1607,6 @@ export interface components {
             id: number;
             /** Reference */
             reference: string;
-            /** Wc Order Id */
-            wc_order_id: number;
             /** Wc Number */
             wc_number: string;
             /** Customer Name */
@@ -1807,8 +1805,6 @@ export interface components {
             id: number;
             /** Reference */
             reference: string;
-            /** Wc Order Id */
-            wc_order_id: number;
             /** Wc Number */
             wc_number: string;
             /** Customer Name */

@@ -38,7 +38,11 @@ from importlib.metadata import PackageNotFoundError, version
 # EnumCode int: a store's statuses are not a closed set, so plugin statuses
 # (order-proposal, checkout-draft, ...) had no code and imported blank. The step
 # maps the old codes back to slugs (db._to_v10).
-SCHEMA_VERSION = 10
+# 11 makes sales_orders.id the WooCommerce order id and drops wc_order_id: the
+# two were one-to-one, so a local pk was only a second number to show the user.
+# Nothing had been imported yet, so the step empties the sales tables rather
+# than renumbering them -- a re-import brings the orders back (db._to_v11).
+SCHEMA_VERSION = 11
 
 try:
     APP_VERSION = version("stronghold")

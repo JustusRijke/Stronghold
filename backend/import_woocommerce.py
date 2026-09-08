@@ -62,9 +62,9 @@ def _new_result() -> dict:
 @db._write
 def _import(s, orders: list[dict], labels: dict[str, str], result: dict) -> None:
     notes: list[str] = result["notes"]
-    next_so_id = (s.scalar(db.select(db.func.max(SalesOrder.id))) or 0) + 1
     for row in orders:
-        so = db.get_so_by_wc_id(s, row["wc_order_id"])
+        # our pk IS the WooCommerce order id, so the lookup is a plain get
+        so = s.get(SalesOrder, row["wc_order_id"])
         if so is not None and so.booked:
             # booking consumed stock against these lines; rewriting them would
             # leave that consumption describing something else
@@ -75,9 +75,8 @@ def _import(s, orders: list[dict], labels: dict[str, str], result: dict) -> None
         # every order already imported in this run, not just this one
         created = row["date_created"]
         if so is None:
-            so = SalesOrder(id=next_so_id, wc_order_id=row["wc_order_id"])
+            so = SalesOrder(id=row["wc_order_id"])
             s.add(so)
-            next_so_id += 1
             result["imported"] += 1
         else:
             result["updated"] += 1

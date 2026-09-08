@@ -418,9 +418,8 @@ class SalesOrderOut(BaseModel):
     entered. Until then both sides leave shipping out (`shipping_in_margin`
     says which is happening)."""
 
-    id: int
+    id: int  # the WooCommerce order id, copied verbatim on import
     reference: str  # derived from the id (SO-0042), not stored and not settable
-    wc_order_id: int
     wc_number: str
     customer_name: str
     shipping_country: str
@@ -1862,7 +1861,6 @@ def _so_out(s, so: SalesOrder, totals: tuple[dict, dict, dict, dict] | None = No
     return SalesOrderOut(
         id=so.id,
         reference=so_ref(so.id),
-        wc_order_id=so.wc_order_id,
         wc_number=so.wc_number,
         customer_name=so.customer_name,
         shipping_country=so.shipping_country,

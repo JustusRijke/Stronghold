@@ -1416,17 +1416,14 @@ def test_set_count_cannot_cross_zero(database):
         db.set_count(debt.id, 5)
 
 
-def _seed_sale(
-    so_id=1, wc_order_id=101, status=SalesOrderStatus.PROCESSING, qty=1.0, sku=""
-):
+def _seed_sale(so_id=1, status=SalesOrderStatus.PROCESSING, qty=1.0, sku=""):
     """A sales order with one line, as the WooCommerce import would have left it.
     There is no create route: WooCommerce owns the order, we only map parts to it."""
     with db.session() as s:
         s.add(
             SalesOrder(
                 id=so_id,
-                wc_order_id=wc_order_id,
-                wc_number=str(wc_order_id),
+                wc_number=str(so_id),
                 customer_name="A Buyer",
                 shipping_country="NL",
                 shipping_cost=5.0,
@@ -1537,7 +1534,7 @@ def test_product_sku_maps_a_sold_sku_to_several_parts(database):
     # an assembly is copied like any other part: the line consumes one of it
     # off the shelf, NOT its components
     db.add_product_sku_part(db.next_product_sku_part_id(), "HBT-BUILT", product, 1.0)
-    built, _ = _seed_sale(so_id=2, wc_order_id=102, qty=3.0, sku="HBT-BUILT")
+    built, _ = _seed_sale(so_id=2, qty=3.0, sku="HBT-BUILT")
     db.prefill_so_parts(built)
     with db.session() as s:
         assert db.so_needs(s, built) == {product: 3.0}
@@ -1663,10 +1660,8 @@ def test_sales_order_short_debt_settled_by_purchase(database):
 def test_cancelled_sales_orders_raise_no_demand(database):
     part_id = db.next_part_id()
     db.create_part(part_id, "W1", "Widget")
-    _, live_line = _seed_sale(so_id=1, wc_order_id=101)
-    _, dead_line = _seed_sale(
-        so_id=2, wc_order_id=102, status=SalesOrderStatus.CANCELLED
-    )
+    _, live_line = _seed_sale(so_id=1)
+    _, dead_line = _seed_sale(so_id=2, status=SalesOrderStatus.CANCELLED)
     db.add_line_part(db.next_line_part_id(), live_line, part_id, 3.0)
     db.add_line_part(db.next_line_part_id(), dead_line, part_id, 99.0)
     with db.session() as s:
@@ -1747,7 +1742,7 @@ def test_import_survives_orders_it_cannot_fully_understand(database):
     assert result["imported"] == 3  # the good ones are NOT lost with the odd ones
     with db.session() as s:
         orders = s.scalars(select(SalesOrder).order_by(SalesOrder.id)).all()
-        assert [o.wc_order_id for o in orders] == [1, 2, 3]
+        assert [o.id for o in orders] == [1, 2, 3]  # WooCommerce's ids, verbatim
         # kept verbatim: the slug is the store's own identifier for its state
         assert orders[1].status == "checkout-draft"
         assert orders[2].date_created is None

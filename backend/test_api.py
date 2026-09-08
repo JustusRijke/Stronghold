@@ -1252,15 +1252,14 @@ def test_stock_log_reconstructs_deleted_production(client):
     assert sum(e["quantity"] for e in produced()) == 10.0
 
 
-def _seed_sale(client, so_id=1, wc_order_id=101, qty=1.0, sku=""):
+def _seed_sale(client, so_id=1, qty=1.0, sku=""):
     """A sales order as the WooCommerce import leaves it. There is no create
     route -- WooCommerce owns the order; the app only maps parts onto it."""
     with db.session() as s:
         s.add(
             SalesOrder(
                 id=so_id,
-                wc_order_id=wc_order_id,
-                wc_number=str(wc_order_id),
+                wc_number=str(so_id),
                 customer_name="A Buyer",
                 shipping_country="NL",
                 shipping_cost=5.0,
@@ -1367,7 +1366,7 @@ def test_product_sku_prefill_over_the_api(client):
     ]
 
     # save a line's parts as its sku's mapping -- the button on the order page
-    plain = _seed_sale(client, so_id=2, wc_order_id=102, qty=3.0, sku="B1-SINGLE")
+    plain = _seed_sale(client, so_id=2, qty=3.0, sku="B1-SINGLE")
     # an unmapped sku is exactly what the picker exists to offer
     assert [
         (r["sku"], r["mapped"]) for r in client.get("/api/product-skus/sold").json()
@@ -1646,9 +1645,7 @@ def test_plugin_order_statuses_survive_the_import(client):
         rows, {"order-proposal": "Offerte"}, import_woocommerce._new_result()
     )
 
-    so = next(
-        o for o in client.get("/api/sales-orders").json() if o["wc_order_id"] == 900
-    )
+    so = next(o for o in client.get("/api/sales-orders").json() if o["id"] == 900)
     assert so["status"] == "order-proposal"
     statuses = client.get("/api/sales-orders/statuses").json()
     assert {"slug": "order-proposal", "label": "Offerte"} in statuses
@@ -1688,9 +1685,7 @@ def test_a_store_status_can_be_marked_as_raising_no_demand(client):
         }
     ]
     import_woocommerce._import(rows, {}, import_woocommerce._new_result())
-    so = next(
-        o for o in client.get("/api/sales-orders").json() if o["wc_order_id"] == 901
-    )
+    so = next(o for o in client.get("/api/sales-orders").json() if o["id"] == 901)
     line = client.get(f"/api/sales-orders/{so['id']}/lines").json()[0]["id"]
     client.post(
         f"/api/sales-orders/{so['id']}/lines/{line}/parts",

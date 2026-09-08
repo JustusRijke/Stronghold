@@ -467,16 +467,14 @@ class SalesOrder(Base):
     facts (customer, status, prices) and Stronghold owns only what it cannot
     know -- which parts a sold product consumes (SalesOrderLinePart).
 
-    The id is a local max+1, NOT the WooCommerce id: unlike the one-shot
-    InvenTree migration this import runs repeatedly into a non-empty database,
-    so WooCommerce ids would collide with ours. wc_order_id keeps the link and
-    is the key re-import matches on. The human code (SO-0042) is derived from
-    the id by models.so_ref, not stored."""
+    The id IS the WooCommerce order id, copied verbatim (like the InvenTree
+    migration copies its pks): the orders are one-to-one, so a second id was
+    only a second thing to show. It is what re-import matches on. The human
+    code (SO-0042) is derived from the id by models.so_ref, not stored."""
 
     __tablename__ = "sales_orders"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    wc_order_id: Mapped[int] = mapped_column(unique=True)
     wc_number: Mapped[str] = mapped_column(default="")  # WooCommerce's own code
     customer_name: Mapped[str] = mapped_column(default="")
     shipping_country: Mapped[str] = mapped_column(default="")
