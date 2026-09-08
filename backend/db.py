@@ -278,6 +278,7 @@ _DROPPED_COLUMNS = {
         ("purchase_orders", "reference", "VARCHAR"),
         ("build_orders", "reference", "VARCHAR"),
     ],
+    11: [("sales_orders", "wc_order_id", "INTEGER")],
 }
 
 
@@ -464,6 +465,21 @@ def _to_v10(s: Session) -> None:
         _log.warning("sales order statuses left unmapped: %s", sorted(left))
 
 
+def _to_v11(s: Session) -> None:
+    """sales_orders.id became the WooCommerce order id (was a local max+1 with
+    wc_order_id alongside). The orders are one-to-one, so the second id was only
+    a second number to show.
+
+    No old order is renumbered: nothing had been imported when this landed, so
+    the sales tables are simply emptied and re-imported from WooCommerce. If a
+    file ever turns up with orders in it, they come back on the next import --
+    only the manual part links are lost with them."""
+    s.execute(text("DELETE FROM sales_order_line_parts"))
+    s.execute(text("DELETE FROM sales_order_lines"))
+    s.execute(text("DELETE FROM sales_orders"))
+    s.execute(text("UPDATE stock_items SET consumed_by_so_id = NULL"))
+
+
 _MIGRATIONS = {
     2: lambda s: _drop_columns(s, 2),
     3: _to_v3,
@@ -481,6 +497,7 @@ _MIGRATIONS = {
     # 9 only added a nullable column -- see the note on step 4.
     9: lambda s: None,
     10: _to_v10,
+    11: lambda s: (_to_v11(s), _drop_columns(s, 11)),
 }
 
 
@@ -3054,22 +3071,10 @@ def get_so(s: Session, so_id: int) -> SalesOrder:
     return so
 
 
-def next_so_id() -> int:
-    # ponytail: max+1 id generation; fine while one process owns the db
-    with session() as s:
-        return (s.scalar(select(func.max(SalesOrder.id))) or 0) + 1
-
-
 def next_line_part_id() -> int:
     # ponytail: max+1 id generation; fine while one process owns the db
     with session() as s:
         return (s.scalar(select(func.max(SalesOrderLinePart.id))) or 0) + 1
-
-
-def get_so_by_wc_id(s: Session, wc_order_id: int) -> SalesOrder | None:
-    """The order a WooCommerce id maps to, if we have imported it. The key
-    re-import matches on -- our own pk is local and says nothing about them."""
-    return s.scalar(select(SalesOrder).where(SalesOrder.wc_order_id == wc_order_id))
 
 
 def so_lines_for(s: Session, so_id: int) -> list[SalesOrderLine]:

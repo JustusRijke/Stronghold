@@ -1607,8 +1607,6 @@ export interface components {
             id: number;
             /** Reference */
             reference: string;
-            /** Wc Order Id */
-            wc_order_id: number;
             /** Wc Number */
             wc_number: string;
             /** Customer Name */
@@ -1617,6 +1615,8 @@ export interface components {
             shipping_country: string;
             /** Shipping Cost */
             shipping_cost: number;
+            /** Fee Total */
+            fee_total: number;
             /** Actual Shipping Cost */
             actual_shipping_cost: number | null;
             /** Shipping In Margin */
@@ -1807,8 +1807,6 @@ export interface components {
             id: number;
             /** Reference */
             reference: string;
-            /** Wc Order Id */
-            wc_order_id: number;
             /** Wc Number */
             wc_number: string;
             /** Customer Name */
@@ -1817,6 +1815,8 @@ export interface components {
             shipping_country: string;
             /** Shipping Cost */
             shipping_cost: number;
+            /** Fee Total */
+            fee_total: number;
             /** Actual Shipping Cost */
             actual_shipping_cost: number | null;
             /** Shipping In Margin */

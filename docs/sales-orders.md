@@ -29,17 +29,19 @@ repeat:
 | --- | --- |
 | New | Creates it, with its line items |
 | Already here, not booked | Updates the customer, status, prices and lines from WooCommerce |
-| Already here and **booked** | Leaves it completely alone |
+| Already here and **booked** | Refreshes the order itself (status, customer, shipping, fees) but leaves its line items alone |
 
-Booked orders are skipped because booking already moved stock. Rewriting the
-lines underneath a completed stock movement would leave the consumption
-describing something that no longer exists.
+A booked order's *lines* are left alone because booking already moved stock:
+rewriting them underneath a completed stock movement would leave the
+consumption describing something that no longer exists. The order's own
+commercial facts are not what was consumed, so a discount or status added in
+the shop after picking still arrives.
 
 A variable product's line name arrives from WooCommerce wrapped in the store's
 own markup (`Hayfall<span> - </span>Met starterspakket`). The import strips it,
 so what you see is plain text. Lines imported before that was fixed keep the
-tags until the order is imported again -- and a **booked** order never is, by
-the rule above, so those keep them for good.
+tags until the order's lines are imported again -- and a **booked** order's
+never are, by the rule above, so those keep them for good.
 
 Your part mapping survives a re-import: links are matched to line items by their
 WooCommerce id, not by position. If a line disappears from the WooCommerce order
@@ -207,7 +209,13 @@ revenue -- a sale of 100.00 costing 22.00 reads 78% -- which is the usual retail
 sense of "margin", not markup over cost. The sales list shows the percentage,
 realised once the order is booked and the estimate before that.
 
-Revenue is the line items ex VAT. **Shipping counts only once you have entered
+Revenue is the line items ex VAT, plus **fees and discounts**. WooCommerce books
+both as fee lines -- a discount is simply a negative one -- and the order page
+shows their total just above the shipping charged. That is money that actually
+changed hands on this sale, so unlike shipping it always counts: a 386.47 order
+with a 299.92 discount reads 86.55 in revenue.
+
+**Shipping counts only once you have entered
 what it actually cost you.** WooCommerce knows what the customer was charged; it
 cannot know the carrier bill, so the order page has a "Shipping actually paid"
 field of your own. Leave it empty and shipping is left out of both sides --

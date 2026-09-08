@@ -238,15 +238,16 @@ step when one is actually needed.
   price of the day -- InvenTree keeps no historical rate per build, so that
   baseline is the best figure available. A null (a row written before the
   column existed) still falls back to the part's current estimate.
-- `SalesOrder(id, wc_order_id, wc_number, customer_name, shipping_country,
+- `SalesOrder(id, wc_number, customer_name, shipping_country,
   shipping_cost, actual_shipping_cost, status, date_created, booked)` -- a
   WooCommerce order, imported read-only. WooCommerce owns the commercial facts;
   Stronghold owns only what it cannot know: the parts behind a sold product, and
   what shipping actually cost (`actual_shipping_cost`, nullable and untouched by
-  re-import -- NULL means "not entered", which is not zero). Unlike every other master record
-  the `id` is **local** (max+1), not the source system's: this import runs
-  repeatedly into a non-empty database, so WooCommerce ids would collide.
-  `wc_order_id` (unique) carries the link and is what re-import matches on.
+  re-import -- NULL means "not entered", which is not zero). The `id` **is the
+  WooCommerce order id**, copied verbatim: the orders are one-to-one, so a local
+  pk was only a second number to show. It is what re-import matches on.
+  `wc_number` is the store's own displayed order number, which plugins may
+  format differently from the id.
   `status` holds WooCommerce's slug as plain text, not a coded enum: a store's
   statuses are whatever its plugins registered, so there is no closed set to
   key codes off (see db._to_v10, and db.SO_STATUS_LABELS_KEY for the labels). The
