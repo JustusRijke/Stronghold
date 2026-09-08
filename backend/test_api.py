@@ -1590,6 +1590,41 @@ def test_margin_is_reported_as_a_percentage(client):
     assert after["realised_margin_pct"] == 76.0
 
 
+def test_shipping_counts_in_the_margin_only_once_actual_cost_is_entered(client):
+    """Charged shipping alone would inflate the margin by the carrier bill
+    nobody entered, so it counts on neither side until the real cost is in."""
+    part = client.post("/api/parts", json={"sku": "W1", "description": "Widget"}).json()
+    client.patch(f"/api/parts/{part['id']}", json={"virtual": True})
+    client.patch(f"/api/parts/{part['id']}", json={"estimated_price": 10.0})
+    so_id = _seed_sale(client)  # one line, 50.00 x 1, 5.00 shipping charged
+    so_line = client.get(f"/api/sales-orders/{so_id}/lines").json()[0]["id"]
+    client.post(
+        f"/api/sales-orders/{so_id}/lines/{so_line}/parts",
+        json={"part_id": part["id"], "quantity": 1},
+    )
+    row = client.get(f"/api/sales-orders/{so_id}").json()
+    # shipping ignored: revenue is the goods alone, margin 50 - 10
+    assert (row["shipping_in_margin"], row["revenue"]) == (False, 50.0)
+    assert (row["estimated_cost"], row["estimated_margin"]) == (10.0, 40.0)
+
+    # 8.00 paid on 5.00 charged: both sides now count it, margin drops by 3
+    row = client.patch(
+        f"/api/sales-orders/{so_id}", json={"actual_shipping_cost": 8.0}
+    ).json()
+    assert (row["shipping_in_margin"], row["revenue"]) == (True, 55.0)
+    assert (row["estimated_cost"], row["estimated_margin"]) == (18.0, 37.0)
+
+    # zero is a real answer (free carriage), null is "not entered"
+    row = client.patch(
+        f"/api/sales-orders/{so_id}", json={"actual_shipping_cost": 0.0}
+    ).json()
+    assert (row["shipping_in_margin"], row["estimated_margin"]) == (True, 45.0)
+    row = client.patch(
+        f"/api/sales-orders/{so_id}", json={"actual_shipping_cost": None}
+    ).json()
+    assert (row["shipping_in_margin"], row["estimated_margin"]) == (False, 40.0)
+
+
 def test_booking_stays_available_while_parts_are_outstanding(client):
     """unbooked_parts is what the page uses to offer 'Book added parts'."""
     part = client.post("/api/parts", json={"sku": "W1", "description": "Widget"}).json()

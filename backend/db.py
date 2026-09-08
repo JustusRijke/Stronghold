@@ -433,6 +433,8 @@ _MIGRATIONS = {
     7: _to_v7,
     # 8 only added a table -- see the note on step 4.
     8: lambda s: None,
+    # 9 only added a nullable column -- see the note on step 4.
+    9: lambda s: None,
 }
 
 
@@ -3472,6 +3474,24 @@ def so_shortages(s: Session, so_id: int) -> list[tuple[int, str, float, float]]:
         if need > have + 1e-9:
             out.append((part_id, get_part(s, part_id).description, need, have))
     return out
+
+
+@_write
+def set_so_actual_shipping(s: Session, so_id: int, cost: float | None) -> None:
+    """What shipping really cost us. None means unknown, which is not zero: the
+    margin then leaves shipping out altogether (see api._so_out)."""
+    so = get_so(s, so_id)
+    old = so.actual_shipping_cost
+    so.actual_shipping_cost = cost
+    if cost != old:
+        label = so_ref(so_id)
+        _activity(
+            s,
+            "set_so_actual_shipping",
+            f"{label} actual shipping {old if old is not None else '-'} -> "
+            f"{cost if cost is not None else '-'}",
+            [("sales-order", so_id, label)],
+        )
 
 
 @_write

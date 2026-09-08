@@ -474,6 +474,10 @@ class SalesOrder(Base):
     customer_name: Mapped[str] = mapped_column(default="")
     shipping_country: Mapped[str] = mapped_column(default="")
     shipping_cost: Mapped[float] = mapped_column(default=0.0)
+    # what shipping actually cost us. Ours, not WooCommerce's, and NULL until
+    # entered -- unknown is not zero, so the margin ignores shipping entirely
+    # until it is filled in (see api._so_out).
+    actual_shipping_cost: Mapped[float | None] = mapped_column(default=None)
     status: Mapped[str] = mapped_column(
         EnumCode(SalesOrderStatus, SALES_ORDER_STATUS_CODES), default=""
     )

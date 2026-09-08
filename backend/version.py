@@ -32,7 +32,9 @@ from importlib.metadata import PackageNotFoundError, version
 # backfills them from the order that created them (db._to_v7).
 # 8 added product_sku_parts, the sales-sku -> (part, quantity) map the line-part
 # prefill reads. Purely additive, like 4 and 6.
-SCHEMA_VERSION = 8
+# 9 added the optional sales_orders.actual_shipping_cost. Purely additive,
+# like 4, 6 and 8.
+SCHEMA_VERSION = 9
 
 try:
     APP_VERSION = version("stronghold")
