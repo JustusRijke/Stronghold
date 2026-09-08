@@ -976,6 +976,47 @@ def create_part(
 
 
 @_write
+def clone_part(s: Session, part_id: int, new_id: int, description: str) -> None:
+    """Copy a part's basics onto a new one: description, the assembly/virtual/
+    purchasable flags, a hand-set price and the BOM. Nothing that identifies the
+    original or its history -- no sku, supplier parts, stock or orders."""
+    src = get_part(s, part_id)
+    if s.get(Part, new_id) is not None:
+        raise InventoryError(f"part id {new_id} already exists")
+    s.add(
+        Part(
+            id=new_id,
+            sku=None,
+            description=description,
+            assembly=src.assembly,
+            virtual=src.virtual,
+            purchasable=src.purchasable,
+            estimated_price=src.estimated_price if src.virtual else None,
+        )
+    )
+    line_id = (s.scalar(select(func.max(BomLine.id))) or 0) + 1
+    for line in s.scalars(select(BomLine).where(BomLine.parent_part_id == part_id)):
+        s.add(
+            BomLine(
+                id=line_id,
+                parent_part_id=new_id,
+                component_part_id=line.component_part_id,
+                quantity=line.quantity,
+                note=line.note,
+            )
+        )
+        line_id += 1
+    s.flush()
+    refresh_part_price(s, new_id)
+    _activity(
+        s,
+        "clone_part",
+        f"Cloned part {src.description} as {description}",
+        [("part", part_id, src.sku or ""), ("part", new_id, "")],
+    )
+
+
+@_write
 def edit_part(s: Session, part_id: int, description: str) -> None:
     part = get_part(s, part_id)
     changes = _field_changes(part, description=description)

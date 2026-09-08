@@ -441,6 +441,16 @@
 	async function saveDescription(v: string) {
 		if (await toast.run(() => api.patchPart(id, { description: v }))) load();
 	}
+	async function clonePart() {
+		const name = prompt('Description for the copy', `${part?.description ?? ''} (copy)`);
+		if (name === null) return;
+		try {
+			const clone = await api.clonePart(id, name);
+			goto(`/parts/${clone.id}`);
+		} catch (e) {
+			toast.show(e instanceof Error ? e.message : String(e), 'err');
+		}
+	}
 	async function savePrice(v: string) {
 		// blank clears the price (back to "not set"), rather than meaning zero
 		const price = v.trim() === '' ? null : Number(v);
@@ -494,6 +504,9 @@
 			<div class="head">
 				<h1 class="h1">{part.description || part.sku || `Part ${part.id}`}</h1>
 				{#if !part.active}<span class="badge">inactive</span>{/if}
+				<button class="btn ghost" type="button" onclick={clonePart} title="New part with this one's description, flags and BOM">
+					Clone
+				</button>
 			</div>
 
 			<section id="details">

@@ -674,6 +674,15 @@ def create_part(body: PartIn) -> PartOut:
     return get_part(new_id)
 
 
+@router.post("/parts/{part_id}/clone", response_model=PartOut, status_code=201)
+def clone_part(part_id: int, body: PartIn) -> PartOut:
+    """New part with the source's description, flags and BOM -- no sku,
+    supplier parts, stock or orders."""
+    new_id = db.next_part_id()
+    _guard(db.clone_part, part_id, new_id, body.description)
+    return get_part(new_id)
+
+
 @router.patch("/parts/{part_id}", response_model=PartOut)
 def patch_part(part_id: int, body: PartPatch) -> PartOut:
     if "sku" in body.model_fields_set:  # explicit null clears it

@@ -124,6 +124,10 @@ Open-source inventory/stock tracking for small and medium businesses.
   its purchase or build order, not the moment the stock actually moved. Only a
   stocktake records the exact time. An incoming row later eaten by a build shows
   what is left of it, marked "(left)"
+- **Clone** on the part page starts a new part from this one: the description
+  you type, plus the assembly/virtual/purchasable flags and the whole BOM. It
+  copies nothing that identifies the original -- no SKU, no supplier parts, no
+  stock and no orders
 - Correct a counted quantity with **Stocktake** on the part page. Every
   stocktake needs a reason: click one of the suggestions or type your own. The
   suggestions differ by direction -- finding stock (Found, Refurbished/repaired,
