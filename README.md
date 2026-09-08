@@ -210,8 +210,10 @@ Open-source inventory/stock tracking for small and medium businesses.
   purchase order settles, repricing the sale at what you really paid. Each order
   page shows margin two ways -- estimated (from the parts' current prices) and,
   once booked, realised (from what the stock cost) -- as both an amount and a
-  percentage of revenue, with shipping shown but excluded, being a pass-through
-  rather than margin on the goods. Booking is also how a sale is marked handled:
+  percentage of revenue. Shipping counts only once you fill in what it actually
+  cost you (a field of your own, next to what WooCommerce says the customer was
+  charged); left empty it is excluded from both sides, since counting the
+  postage charged alone would book all of it as margin. Booking is also how a sale is marked handled:
   an order with no parts linked books fine and simply consumes nothing. Parts
   can still be linked after booking -- booking again takes only the new ones,
   while existing links are frozen (their stock has already gone out). Unbooked sales

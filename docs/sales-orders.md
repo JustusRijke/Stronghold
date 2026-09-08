@@ -191,8 +191,14 @@ revenue -- a sale of 100.00 costing 22.00 reads 78% -- which is the usual retail
 sense of "margin", not markup over cost. The sales list shows the percentage,
 realised once the order is booked and the estimate before that.
 
-Revenue is the line items ex VAT. **Shipping is shown but excluded from margin**:
-what the customer paid for postage is a pass-through, not margin on the goods.
+Revenue is the line items ex VAT. **Shipping counts only once you have entered
+what it actually cost you.** WooCommerce knows what the customer was charged; it
+cannot know the carrier bill, so the order page has a "Shipping actually paid"
+field of your own. Leave it empty and shipping is left out of both sides --
+counting the postage charged alone would book the whole of it as margin. Fill it
+in and both sides count: the charged amount joins revenue, the paid amount joins
+cost. Empty is not zero: **0.00 means free carriage** and counts like any other
+figure.
 
 The two figures differ when the stock you shipped was bought for something other
 than the current estimate -- an old lot bought cheaper, or a shortfall that was
