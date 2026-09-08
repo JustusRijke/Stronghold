@@ -1466,7 +1466,7 @@ def test_sales_order_flow(database):
         assert db.so_needs(s, so_id) == {part_id: 8.0}
         assert db.so_shortages(s, so_id) == []
         # an unbooked sale is demand: the parts have not left the shelf yet
-        assert db.part_demand(s)[part_id][0] == 8.0
+        assert db.part_demand(s)[part_id][1] == 8.0
 
     db.book_sales_order(so_id)
     with db.session() as s:
@@ -1671,7 +1671,7 @@ def test_cancelled_sales_orders_raise_no_demand(database):
     db.add_line_part(db.next_line_part_id(), dead_line, part_id, 99.0)
     with db.session() as s:
         # only the live order counts; a cancelled sale needs nothing bought
-        assert db.part_demand(s)[part_id][0] == 3.0
+        assert db.part_demand(s)[part_id][1] == 3.0
 
 
 def test_a_sale_can_consume_labour(database):

@@ -3573,10 +3573,10 @@ def so_cost(s: Session, so_id: int) -> tuple[float | None, float | None]:
 # -- demand -----------------------------------------------------------------
 
 
-def part_demand(s: Session) -> dict[int, tuple[float, float]]:
-    """Per part: (units still needed by planned builds and unbooked sales,
-    units still to be received on open POs). Three grouped queries, not one per
-    part.
+def part_demand(s: Session) -> dict[int, tuple[float, float, float]]:
+    """Per part: (units still needed by planned builds, units needed by unbooked
+    sales, units still to be received on open POs). Three grouped queries, not
+    one per part.
 
     A build counts once it is Pending -- planned is what you buy against; Draft
     is the scratchpad status and asks for nothing. Its need is its snapshot's
@@ -3585,7 +3585,7 @@ def part_demand(s: Session) -> dict[int, tuple[float, float]]:
     and not cancelled/refunded/failed: booking is what consumes the stock, so a
     booked order has already taken its parts and asks for nothing more. Virtual
     components hold no stock, so they are never needed."""
-    needed: dict[int, float] = {}
+    for_builds: dict[int, float] = {}
     for build_id, part_id, per_unit, qty in s.execute(
         select(
             BuildLine.build_id,
@@ -3604,8 +3604,9 @@ def part_demand(s: Session) -> dict[int, tuple[float, float]]:
         # Group stock by build_id if that stops being true.
         remaining = qty - produced_qty(s, build_id)
         if remaining > 0:
-            needed[part_id] = needed.get(part_id, 0.0) + per_unit * remaining
+            for_builds[part_id] = for_builds.get(part_id, 0.0) + per_unit * remaining
 
+    for_sales: dict[int, float] = {}
     for part_id, units in s.execute(
         select(
             SalesOrderLinePart.part_id,
@@ -3621,7 +3622,7 @@ def part_demand(s: Session) -> dict[int, tuple[float, float]]:
         )
         .group_by(SalesOrderLinePart.part_id)
     ):
-        needed[part_id] = needed.get(part_id, 0.0) + units
+        for_sales[part_id] = units
 
     incoming: dict[int, float] = {}
     for part_id, units in s.execute(
@@ -3647,6 +3648,6 @@ def part_demand(s: Session) -> dict[int, tuple[float, float]]:
         incoming[part_id] = units
 
     return {
-        pid: (needed.get(pid, 0.0), incoming.get(pid, 0.0))
-        for pid in set(needed) | set(incoming)
+        pid: (for_builds.get(pid, 0.0), for_sales.get(pid, 0.0), incoming.get(pid, 0.0))
+        for pid in set(for_builds) | set(for_sales) | set(incoming)
     }
