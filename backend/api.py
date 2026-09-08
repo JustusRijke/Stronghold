@@ -427,6 +427,9 @@ class SalesOrderOut(BaseModel):
     # WooCommerce's fee lines, summed and signed: negative is a discount. Part
     # of what was actually paid, so it is always in the revenue.
     fee_total: float
+    # what coupons took off, positive. Display only: WooCommerce's line prices
+    # already have it deducted, so it is NOT added to the revenue again.
+    coupon_total: float
     actual_shipping_cost: float | None  # what it cost us; None = not entered
     shipping_in_margin: bool  # whether the figures below include shipping
     # NOT a StockStatus/BuildStatus: sales statuses are WooCommerce's own. Typed
@@ -1881,6 +1884,7 @@ def _so_out(s, so: SalesOrder, totals: tuple[dict, dict, dict, dict] | None = No
         shipping_country=so.shipping_country,
         shipping_cost=so.shipping_cost,
         fee_total=so.fee_total,
+        coupon_total=so.coupon_total,
         actual_shipping_cost=so.actual_shipping_cost,
         shipping_in_margin=shipping,
         status=so.status,

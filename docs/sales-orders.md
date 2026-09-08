@@ -215,6 +215,11 @@ shows their total just above the shipping charged. That is money that actually
 changed hands on this sale, so unlike shipping it always counts: a 386.47 order
 with a 299.92 discount reads 86.55 in revenue.
 
+**Coupons are different.** WooCommerce reports each line's price *already net of*
+any coupon, so a coupon is in the revenue through the line items themselves.
+The order page shows the coupon total for reference -- marked as already off the
+line prices -- and does not deduct it a second time.
+
 **Shipping counts only once you have entered
 what it actually cost you.** WooCommerce knows what the customer was charged; it
 cannot know the carrier bill, so the order page has a "Shipping actually paid"

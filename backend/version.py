@@ -44,7 +44,9 @@ from importlib.metadata import PackageNotFoundError, version
 # than renumbering them -- a re-import brings the orders back (db._to_v11). It
 # also adds sales_orders.fee_total (WooCommerce's fee lines, summed): additive,
 # and filled by that same re-import.
-SCHEMA_VERSION = 11
+# 12 adds sales_orders.coupon_total (what coupons took off, for display only --
+# WooCommerce's line prices are already net of them). Purely additive.
+SCHEMA_VERSION = 12
 
 try:
     APP_VERSION = version("stronghold")

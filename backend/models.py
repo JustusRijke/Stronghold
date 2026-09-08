@@ -485,6 +485,11 @@ class SalesOrder(Base):
     # server_default so an older file, whose INSERTs have no such column,
     # replays into a NOT NULL column (see Part.purchasable)
     fee_total: Mapped[float] = mapped_column(default=0.0, server_default="0")
+    # WooCommerce's coupon lines summed, as a positive amount discounted. It is
+    # NOT in the revenue: WooCommerce reports line prices already net of its
+    # coupons, so the discount is in the line items we import. Stored only so
+    # the order page can say why the goods are cheaper than the list price.
+    coupon_total: Mapped[float] = mapped_column(default=0.0, server_default="0")
     # what shipping actually cost us. Ours, not WooCommerce's, and NULL until
     # entered -- unknown is not zero, so the margin ignores shipping entirely
     # until it is filled in (see api._so_out).
