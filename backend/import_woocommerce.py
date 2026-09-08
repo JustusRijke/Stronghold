@@ -3,8 +3,8 @@
 Unlike migrate_inventree.py this is a product feature, not a one-shot script:
 it runs repeatedly against a live data file, is idempotent, and only ever adds
 or updates. WooCommerce owns the commercial facts, so a re-import overwrites
-them -- except on a booked order, which has already consumed stock and is left
-alone.
+them -- except a booked order's line items, which have already been consumed
+against and are left alone (its order-level totals still refresh).
 """
 
 import db
@@ -65,19 +65,18 @@ def _import(s, orders: list[dict], labels: dict[str, str], result: dict) -> None
     for row in orders:
         # our pk IS the WooCommerce order id, so the lookup is a plain get
         so = s.get(SalesOrder, row["wc_order_id"])
-        if so is not None and so.booked:
-            # booking consumed stock against these lines; rewriting them would
-            # leave that consumption describing something else
-            result["skipped"] += 1
-            continue
-        # resolve everything that can reject the row BEFORE touching the
-        # session: this is one transaction, so a raise here would roll back
-        # every order already imported in this run, not just this one
+        # booking consumed stock against this order's lines; rewriting them
+        # would leave that consumption describing something else. The order's
+        # own commercial facts are not what was consumed, so they still refresh
+        # -- a discount entered after picking has nowhere else to arrive from
+        booked = so is not None and so.booked
         created = row["date_created"]
         if so is None:
             so = SalesOrder(id=row["wc_order_id"])
             s.add(so)
             result["imported"] += 1
+        elif booked:
+            result["skipped"] += 1
         else:
             result["updated"] += 1
         so.wc_number = row["wc_number"]
@@ -91,6 +90,8 @@ def _import(s, orders: list[dict], labels: dict[str, str], result: dict) -> None
         # _map_order falls back to "" when the order carries no date
         so.date_created = db.date.fromisoformat(created) if created else None
         s.flush()  # the order must exist before its lines reference it
+        if booked:
+            continue
         _apply_lines(s, so, row["lines"], notes)
         s.flush()  # ...and the lines must exist before the prefill reads them
         # fill in what the sku mapping knows: only lines with no parts yet, so

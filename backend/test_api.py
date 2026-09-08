@@ -1654,6 +1654,21 @@ def test_a_discount_reaches_the_revenue(client):
     assert so["fee_total"] == -299.92
     assert round(so["revenue"], 2) == 86.55  # 386.47 goods less the discount
 
+    # a discount entered in the shop after picking still arrives: booking locks
+    # the line items (stock moved against them), not the order's own totals
+    with db.session() as s:
+        s.get(SalesOrder, 9824).booked = True
+        s.commit()
+    order["fee_total"] = -100.0
+    order["lines"] = []  # would wipe the lines if booking did not protect them
+    result = import_woocommerce._new_result()
+    import_woocommerce._import([order], {}, result)
+
+    assert result["skipped"] == 1
+    so = client.get("/api/sales-orders/9824").json()
+    assert so["fee_total"] == -100.0
+    assert len(client.get("/api/sales-orders/9824/lines").json()) == 1
+
 
 def test_plugin_order_statuses_survive_the_import(client):
     """A store's statuses are whatever its plugins registered. The slug is kept
