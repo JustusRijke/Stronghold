@@ -6,6 +6,7 @@ from datetime import date
 import db
 import import_woocommerce
 import pytest
+import woocommerce
 from models import (
     SalesOrder,
     SalesOrderLine,
@@ -1625,6 +1626,35 @@ def test_shipping_counts_in_the_margin_only_once_actual_cost_is_entered(client):
     assert (row["shipping_in_margin"], row["estimated_margin"]) == (False, 40.0)
 
 
+def test_a_discount_reaches_the_revenue(client):
+    """WooCommerce books a discount as a negative fee line, which is money that
+    changed hands: the goods total alone would overstate what the sale brought
+    in (order 9824: 386.47 of goods, 299.92 discounted off)."""
+    order = woocommerce._map_order(
+        {
+            "id": 9824,
+            "number": "9824",
+            "status": "completed",
+            "shipping_total": "10.08",
+            "fee_lines": [{"id": 1, "name": "Rabatt", "total": "-299.92"}],
+            "line_items": [
+                {
+                    "id": 10,
+                    "sku": "HF-1",
+                    "name": "Hayfall",
+                    "price": 193.235,
+                    "quantity": 2,
+                }
+            ],
+        }
+    )
+    import_woocommerce._import([order], {}, import_woocommerce._new_result())
+
+    so = client.get("/api/sales-orders/9824").json()
+    assert so["fee_total"] == -299.92
+    assert round(so["revenue"], 2) == 86.55  # 386.47 goods less the discount
+
+
 def test_plugin_order_statuses_survive_the_import(client):
     """A store's statuses are whatever its plugins registered. The slug is kept
     verbatim and the store's own label comes with it, so an order-proposal
@@ -1638,6 +1668,7 @@ def test_plugin_order_statuses_survive_the_import(client):
             "customer_name": "A",
             "shipping_country": "NL",
             "shipping_cost": 0.0,
+            "fee_total": 0.0,
             "lines": [],
         }
     ]
@@ -1673,6 +1704,7 @@ def test_a_store_status_can_be_marked_as_raising_no_demand(client):
             "customer_name": "A",
             "shipping_country": "NL",
             "shipping_cost": 0.0,
+            "fee_total": 0.0,
             "lines": [
                 {
                     "wc_line_id": 9010,

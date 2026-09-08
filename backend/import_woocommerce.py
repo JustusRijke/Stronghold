@@ -87,6 +87,7 @@ def _import(s, orders: list[dict], labels: dict[str, str], result: dict) -> None
         so.customer_name = row["customer_name"]
         so.shipping_country = row["shipping_country"]
         so.shipping_cost = row["shipping_cost"]
+        so.fee_total = row["fee_total"]
         # _map_order falls back to "" when the order carries no date
         so.date_created = db.date.fromisoformat(created) if created else None
         s.flush()  # the order must exist before its lines reference it

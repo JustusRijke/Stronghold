@@ -479,6 +479,12 @@ class SalesOrder(Base):
     customer_name: Mapped[str] = mapped_column(default="")
     shipping_country: Mapped[str] = mapped_column(default="")
     shipping_cost: Mapped[float] = mapped_column(default=0.0)
+    # WooCommerce's fee lines summed, ex VAT: a discount is a negative fee, a
+    # surcharge a positive one. Part of what the customer paid, so unlike
+    # shipping it counts in the revenue unconditionally.
+    # server_default so an older file, whose INSERTs have no such column,
+    # replays into a NOT NULL column (see Part.purchasable)
+    fee_total: Mapped[float] = mapped_column(default=0.0, server_default="0")
     # what shipping actually cost us. Ours, not WooCommerce's, and NULL until
     # entered -- unknown is not zero, so the margin ignores shipping entirely
     # until it is filled in (see api._so_out).

@@ -41,7 +41,9 @@ from importlib.metadata import PackageNotFoundError, version
 # 11 makes sales_orders.id the WooCommerce order id and drops wc_order_id: the
 # two were one-to-one, so a local pk was only a second number to show the user.
 # Nothing had been imported yet, so the step empties the sales tables rather
-# than renumbering them -- a re-import brings the orders back (db._to_v11).
+# than renumbering them -- a re-import brings the orders back (db._to_v11). It
+# also adds sales_orders.fee_total (WooCommerce's fee lines, summed): additive,
+# and filled by that same re-import.
 SCHEMA_VERSION = 11
 
 try:

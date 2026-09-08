@@ -424,6 +424,9 @@ class SalesOrderOut(BaseModel):
     customer_name: str
     shipping_country: str
     shipping_cost: float  # what the customer was charged (WooCommerce)
+    # WooCommerce's fee lines, summed and signed: negative is a discount. Part
+    # of what was actually paid, so it is always in the revenue.
+    fee_total: float
     actual_shipping_cost: float | None  # what it cost us; None = not entered
     shipping_in_margin: bool  # whether the figures below include shipping
     # NOT a StockStatus/BuildStatus: sales statuses are WooCommerce's own. Typed
@@ -1845,6 +1848,9 @@ def _so_out(s, so: SalesOrder, totals: tuple[dict, dict, dict, dict] | None = No
         realised = realised_by.get(so.id) if so.booked else None
         outstanding = outstanding_by.get(so.id, 0)
 
+    # a fee is money that changed hands on this order (a discount is a negative
+    # one), so it counts whether or not shipping does
+    revenue += so.fee_total
     # unknown is not zero: without the carrier bill, counting the shipping the
     # customer paid would book it all as margin
     shipping = so.actual_shipping_cost is not None
@@ -1865,6 +1871,7 @@ def _so_out(s, so: SalesOrder, totals: tuple[dict, dict, dict, dict] | None = No
         customer_name=so.customer_name,
         shipping_country=so.shipping_country,
         shipping_cost=so.shipping_cost,
+        fee_total=so.fee_total,
         actual_shipping_cost=so.actual_shipping_cost,
         shipping_in_margin=shipping,
         status=so.status,

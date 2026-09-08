@@ -83,6 +83,9 @@ def _map_order(o: dict) -> dict:
         "customer_name": _name(shipping) or _name(billing),
         "shipping_country": shipping.get("country") or billing.get("country") or "",
         "shipping_cost": _money(o.get("shipping_total")),
+        # discounts and surcharges alike: a coupon that reached the order as a
+        # fee line is negative, so summing them signed is the whole job
+        "fee_total": sum(_money(f.get("total")) for f in o.get("fee_lines", [])),
         "lines": [
             {
                 "wc_line_id": li["id"],
