@@ -210,6 +210,7 @@ export const api = {
 
 	// sales orders
 	salesOrders: () => get<SalesOrder[]>('/sales-orders'),
+	salesOrderStatuses: () => get<{ slug: string; label: string }[]>('/sales-orders/statuses'),
 	salesOrder: (id: number) => get<SalesOrder>(`/sales-orders/${id}`),
 	salesOrderLines: (id: number) => get<SalesOrderLine[]>(`/sales-orders/${id}/lines`),
 	editSalesOrder: (id: number, b: { actual_shipping_cost: number | null }) =>

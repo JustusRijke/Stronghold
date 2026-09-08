@@ -22,30 +22,14 @@ export const BUILD_STATUS_OPTIONS = [
 // builds in a finished state, hidden by default wherever builds are listed
 export const BUILD_DONE = ["Complete", "Cancelled"];
 
-// Sales order status: WooCommerce's own labels, imported and never set here.
-// Hardcoded for the same reason as the two above -- a "status" field on any DTO
-// collapses into the one generated STATUS_OPTIONS.
-export const SO_STATUS_OPTIONS = [
-  "pending",
-  "processing",
-  "on-hold",
-  "completed",
-  "cancelled",
-  "refunded",
-  "failed",
-];
-// sales in a finished state, hidden by default wherever sales are listed
+// Sales order status: WooCommerce's own, imported and never set here. NOT a
+// fixed list -- a store's plugins register their own -- so the options and
+// their wording live in sales-status.svelte.ts, loaded from the store.
+
+// sales in a finished state, hidden by default wherever sales are listed. These
+// four are WooCommerce core and always exist; a plugin status is never assumed
+// to be finished, so it stays visible.
 export const SO_DONE = ["completed", "cancelled", "refunded", "failed"];
-const SO_STATUS_LABELS: Record<string, string> = {
-  pending: "Pending",
-  processing: "Processing",
-  "on-hold": "On hold",
-  completed: "Completed",
-  cancelled: "Cancelled",
-  refunded: "Refunded",
-  failed: "Failed",
-};
-export const soStatusLabel = (v: string) => SO_STATUS_LABELS[v] ?? v;
 
 // Stock status: the backend stores short codes (models.StockStatus), the user
 // sees these words. Keeping the two apart is why a rewording is not a data

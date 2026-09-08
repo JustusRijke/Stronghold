@@ -21,10 +21,9 @@
 		STOCK_CONSUMED,
 		stockStatusLabel,
 		STOCK_STATUS_OPTIONS,
-		SO_DONE,
-		SO_STATUS_OPTIONS,
-		soStatusLabel
+		SO_DONE
 	} from '$lib/status';
+	import { soStatusLabel, soStatusOptions } from '$lib/sales-status.svelte';
 
 	const id = $derived(Number($page.params.id));
 
@@ -414,7 +413,7 @@
 	const buildCols = $derived(buildColumns(!!part?.assembly));
 	const consumedByCols = $derived(buildColumns(false));
 
-	const salesCols: Column<PartSalesOrder>[] = [
+	const salesCols: Column<PartSalesOrder>[] = $derived([
 		{ key: 'reference', header: 'Sale', mono: true, width: '110px' },
 		{ key: 'date_created', header: 'Date', width: '120px' },
 		{ key: 'customer_name', header: 'Customer', truncate: true },
@@ -424,12 +423,12 @@
 			header: 'Status',
 			width: '120px',
 			statusFilter: true,
-			statusOptions: SO_STATUS_OPTIONS,
+			statusOptions: soStatusOptions(),
 			statusDefaultHide: SO_DONE,
 			statusLabel: soStatusLabel
 		},
 		{ key: 'booked', header: 'Booked', bool: true, width: '90px' }
-	];
+	]);
 	const usedInCols: Column<BomUsage>[] = [
 		{ key: 'parent_sku', header: 'Assembly', mono: true, width: '150px' },
 		{ key: 'parent_description', header: 'Description', truncate: true },
