@@ -1900,6 +1900,33 @@ def list_sales_orders() -> list[SalesOrderOut]:
         ]
 
 
+class SalesStatusOut(BaseModel):
+    """One order status the frontend can show and filter on."""
+
+    slug: str
+    label: str
+
+
+# MUST stay above /sales-orders/{so_id}: that route types so_id as an int, so a
+# literal path declared after it never matches -- "statuses" 422s instead.
+@router.get("/sales-orders/statuses", response_model=list[SalesStatusOut])
+def sales_order_statuses() -> list[SalesStatusOut]:
+    """Every status the sales list can show, in the store's own wording.
+
+    The set is the store's, not ours: plugins register their own, so it is
+    cached from WooCommerce at import (db.SO_STATUS_LABELS_KEY). Statuses
+    actually present on orders are unioned in, so a status still shows up (as
+    its bare slug) when the cache predates it -- data on screen must never
+    depend on a lookup table being current."""
+    labels = db.so_status_labels()
+    with db.session() as s:
+        used = {row for row in s.scalars(select(SalesOrder.status).distinct()) if row}
+    return [
+        SalesStatusOut(slug=slug, label=labels.get(slug) or slug)
+        for slug in list(labels) + sorted(used - set(labels))
+    ]
+
+
 @router.get("/sales-orders/{so_id}", response_model=SalesOrderOut)
 def get_sales_order(so_id: int) -> SalesOrderOut:
     with db.session() as s:

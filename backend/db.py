@@ -22,6 +22,7 @@ from models import (
     BUILD_STATUS_CODES,
     PO_STATUS_CODES,
     PRICE_BASIS_CODES,
+    SALES_ORDER_STATUS_CODES,
     SO_DEAD_STATUSES,
     STOCK_AVAILABLE,
     STOCK_CONSUMED,
@@ -75,6 +76,11 @@ DOMAIN_DEFAULTS = {
     # stock and losing it have little vocabulary in common.
     "stocktake.add_reasons": "Found,Refurbished/repaired,Returned by customer,Unknown",
     "stocktake.subtract_reasons": "Damaged,Warranty claim by customer,Lost,Unknown",
+    # extra order statuses that raise no demand, comma separated (slugs). The
+    # WooCommerce core dead statuses (models.SO_DEAD_STATUSES) always count as
+    # dead and are not listed here; this is for a store's own additions, e.g. a
+    # quote status from an order-proposal plugin.
+    "sales.no_demand_statuses": "",
     # "true" lifts the order status transition rules (so a cancelled order can
     # be un-cancelled) and lets stock counts be typed in directly.
     "expert.mode": "false",
@@ -105,6 +111,13 @@ def expert_mode() -> bool:
 # place a value survives the export/replay roundtrip, but they are app
 # metadata, not domain settings: not in DOMAIN_DEFAULTS, so get_setting /
 # set_setting reject them and they never appear on the settings page.
+# The store's order statuses, slug -> label, as JSON. Cached from WooCommerce on
+# every import (see import_woocommerce): the set is whatever the store's plugins
+# registered, so it cannot be hardcoded, and the labels are in the store's own
+# language. Not a DOMAIN_DEFAULTS setting -- it is imported data, not something
+# to hand-edit on the settings page.
+SO_STATUS_LABELS_KEY = "sales.status_labels"
+
 SCHEMA_VERSION_KEY = "schema.version"
 APP_VERSION_KEY = "app.version"
 VERSION_KEYS = frozenset({SCHEMA_VERSION_KEY, APP_VERSION_KEY})
@@ -419,6 +432,38 @@ def _to_v7(s: Session) -> None:
     )
 
 
+def _to_v10(s: Session) -> None:
+    """sales_orders.status went from an EnumCode int back to WooCommerce's slug.
+
+    A store's statuses are not a closed set -- plugins register their own -- so
+    the int codes could only ever hold the seven we hardcoded and every other
+    status imported blank. The replayed rows are still ints in what is now a
+    text column; this maps them back to slugs. An unmapped value is left alone
+    and logged: it is bad data, and blanking it would lose the order's state."""
+    for code, status in SALES_ORDER_STATUS_CODES.items():
+        s.execute(
+            text("UPDATE sales_orders SET status = :slug WHERE status = :code"),
+            {"slug": str(status), "code": code},
+        )
+    # EnumCode's reserved unset code: an order whose status we could not map
+    s.execute(
+        text("UPDATE sales_orders SET status = '' WHERE status = :unset"),
+        {"unset": EnumCode.UNSET},
+    )
+    left = (
+        s.execute(
+            text(
+                "SELECT DISTINCT status FROM sales_orders "
+                "WHERE typeof(status) != 'text'"
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if left:
+        _log.warning("sales order statuses left unmapped: %s", sorted(left))
+
+
 _MIGRATIONS = {
     2: lambda s: _drop_columns(s, 2),
     3: _to_v3,
@@ -435,6 +480,7 @@ _MIGRATIONS = {
     8: lambda s: None,
     # 9 only added a nullable column -- see the note on step 4.
     9: lambda s: None,
+    10: _to_v10,
 }
 
 
@@ -520,6 +566,37 @@ def _migrate() -> None:
         _log.info("migrating %s: schema %d -> %d", _export_dir, step - 1, step)
         with Session(_engine) as s, s.begin():
             _MIGRATIONS[step](s)
+
+
+def no_demand_statuses() -> tuple[str, ...]:
+    """Every status that asks nothing of purchasing: WooCommerce's own dead ones
+    plus whatever the user listed (a quote status, say). A plugin can invent any
+    status, so the extras are a setting rather than a constant."""
+    extra = [
+        v.strip()
+        for v in get_setting("sales.no_demand_statuses").split(",")
+        if v.strip()
+    ]
+    return tuple(SO_DEAD_STATUSES) + tuple(extra)
+
+
+def so_status_labels() -> dict[str, str]:
+    """The store's order statuses, slug -> label. Empty until the first import."""
+    with session() as s:
+        row = s.get(Setting, SO_STATUS_LABELS_KEY)
+    return json.loads(row.value) if row else {}
+
+
+def set_so_status_labels(s: Session, labels: dict[str, str]) -> None:
+    """Cache what the store calls each status. Called inside the import's own
+    transaction, so it logs nothing of its own -- the import's activity row
+    already says what happened."""
+    value = json.dumps(labels, sort_keys=True)
+    row = s.get(Setting, SO_STATUS_LABELS_KEY)
+    if row is None:
+        s.add(Setting(key=SO_STATUS_LABELS_KEY, value=value))
+    else:
+        row.value = value
 
 
 def _literal(value) -> str:
@@ -3637,7 +3714,7 @@ def part_demand(s: Session) -> dict[int, tuple[float, float, float]]:
         .join(Part, SalesOrderLinePart.part_id == Part.id)
         .where(
             SalesOrder.booked.is_(False),
-            SalesOrder.status.not_in(SO_DEAD_STATUSES),
+            SalesOrder.status.not_in(no_demand_statuses()),
             Part.virtual.is_(False),
         )
         .group_by(SalesOrderLinePart.part_id)

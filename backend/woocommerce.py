@@ -96,6 +96,18 @@ def _map_order(o: dict) -> dict:
     }
 
 
+def fetch_status_labels(base_url: str, key: str, secret: str) -> dict[str, str]:
+    """Every order status the store has registered, slug -> the store's own
+    label. WooCommerce reports these on the order totals report, which is what
+    makes plugin statuses knowable at all: the order payload carries only a
+    slug, and the set of valid slugs is whatever the store's plugins registered
+    (an order-proposal plugin adds "order-proposal", Blocks adds
+    "checkout-draft"). The labels come back in the store's own language."""
+    root = f"{base_url.rstrip('/')}/wp-json/wc/v3/reports/orders/totals"
+    rows, _ = _get(root, _auth_header(key, secret))
+    return {r["slug"]: r["name"] for r in rows if r.get("slug")}
+
+
 def fetch_orders(
     base_url: str, key: str, secret: str, after: date, before: date | None = None
 ) -> list[dict]:
