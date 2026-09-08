@@ -688,7 +688,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** Patch Sales Order */
+        patch: operations["patch_sales_order_api_sales_orders__so_id__patch"];
         trace?: never;
     };
     "/api/sales-orders/{so_id}/lines": {
@@ -1590,6 +1591,10 @@ export interface components {
             shipping_country: string;
             /** Shipping Cost */
             shipping_cost: number;
+            /** Actual Shipping Cost */
+            actual_shipping_cost: number | null;
+            /** Shipping In Margin */
+            shipping_in_margin: boolean;
             /** Status */
             status: string;
             /** Date Created */
@@ -1764,8 +1769,12 @@ export interface components {
          * SalesOrderOut
          * @description A sale, with both ways of costing it. `estimated_*` come from the linked
          *     parts' current estimates and exist before booking; `realised_*` come from
-         *     what the consumed stock actually cost and are null until booked. Shipping is
-         *     reported but excluded from margin -- it is a pass-through, not goods.
+         *     what the consumed stock actually cost and are null until booked.
+         *
+         *     Shipping counts in the margin only once `actual_shipping_cost` is filled in:
+         *     charged shipping alone would inflate the margin by the carrier bill nobody
+         *     entered. Until then both sides leave shipping out (`shipping_in_margin`
+         *     says which is happening).
          */
         SalesOrderOut: {
             /** Id */
@@ -1782,6 +1791,10 @@ export interface components {
             shipping_country: string;
             /** Shipping Cost */
             shipping_cost: number;
+            /** Actual Shipping Cost */
+            actual_shipping_cost: number | null;
+            /** Shipping In Margin */
+            shipping_in_margin: boolean;
             /** Status */
             status: string;
             /** Date Created */
@@ -1804,6 +1817,15 @@ export interface components {
             estimated_margin_pct: number | null;
             /** Realised Margin Pct */
             realised_margin_pct: number | null;
+        };
+        /**
+         * SalesOrderPatch
+         * @description The one sales-order field the user owns; everything else is
+         *     WooCommerce's and a re-import would overwrite it.
+         */
+        SalesOrderPatch: {
+            /** Actual Shipping Cost */
+            actual_shipping_cost?: number | null;
         };
         /**
          * SalesShortageOut
@@ -3762,6 +3784,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesOrderOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_sales_order_api_sales_orders__so_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                so_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SalesOrderPatch"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

@@ -102,6 +102,9 @@ export const PurchaseOrderPatch = v.object({
 	supplier_reference: v.optional(v.nullable(v.string())),
 	description: v.optional(v.nullable(v.string())),
 	});
+export const SalesOrderPatch = v.object({
+	actual_shipping_cost: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
+	});
 export const SettingIn = v.object({
 	value: v.string(),
 	});

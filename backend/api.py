@@ -411,8 +411,12 @@ class ProduceIn(BaseModel):
 class SalesOrderOut(BaseModel):
     """A sale, with both ways of costing it. `estimated_*` come from the linked
     parts' current estimates and exist before booking; `realised_*` come from
-    what the consumed stock actually cost and are null until booked. Shipping is
-    reported but excluded from margin -- it is a pass-through, not goods."""
+    what the consumed stock actually cost and are null until booked.
+
+    Shipping counts in the margin only once `actual_shipping_cost` is filled in:
+    charged shipping alone would inflate the margin by the carrier bill nobody
+    entered. Until then both sides leave shipping out (`shipping_in_margin`
+    says which is happening)."""
 
     id: int
     reference: str  # derived from the id (SO-0042), not stored and not settable
@@ -420,7 +424,9 @@ class SalesOrderOut(BaseModel):
     wc_number: str
     customer_name: str
     shipping_country: str
-    shipping_cost: float
+    shipping_cost: float  # what the customer was charged (WooCommerce)
+    actual_shipping_cost: float | None  # what it cost us; None = not entered
+    shipping_in_margin: bool  # whether the figures below include shipping
     # NOT a StockStatus/BuildStatus: sales statuses are WooCommerce's own. Typed
     # as a plain str so it cannot collide with the generated STATUS_OPTIONS.
     status: str
@@ -429,7 +435,7 @@ class SalesOrderOut(BaseModel):
     # parts mapped but not yet taken out of stock. Non-zero on a booked order
     # means parts were linked after booking; booking again consumes them.
     unbooked_parts: int
-    revenue: float  # ex VAT, excluding shipping
+    revenue: float  # ex VAT, plus shipping charged when shipping counts
     estimated_cost: float | None
     realised_cost: float | None
     estimated_margin: float | None
@@ -1840,6 +1846,14 @@ def _so_out(s, so: SalesOrder, totals: tuple[dict, dict, dict, dict] | None = No
         realised = realised_by.get(so.id) if so.booked else None
         outstanding = outstanding_by.get(so.id, 0)
 
+    # unknown is not zero: without the carrier bill, counting the shipping the
+    # customer paid would book it all as margin
+    shipping = so.actual_shipping_cost is not None
+    if shipping:
+        revenue += so.shipping_cost
+        estimated = None if estimated is None else estimated + so.actual_shipping_cost
+        realised = None if realised is None else realised + so.actual_shipping_cost
+
     def pct(cost):
         if cost is None or revenue == 0:
             return None
@@ -1853,6 +1867,8 @@ def _so_out(s, so: SalesOrder, totals: tuple[dict, dict, dict, dict] | None = No
         customer_name=so.customer_name,
         shipping_country=so.shipping_country,
         shipping_cost=so.shipping_cost,
+        actual_shipping_cost=so.actual_shipping_cost,
+        shipping_in_margin=shipping,
         status=so.status,
         date_created=so.date_created,
         booked=so.booked,
@@ -1886,6 +1902,23 @@ def list_sales_orders() -> list[SalesOrderOut]:
 
 @router.get("/sales-orders/{so_id}", response_model=SalesOrderOut)
 def get_sales_order(so_id: int) -> SalesOrderOut:
+    with db.session() as s:
+        return _so_out(s, _get_so_or_404(s, so_id))
+
+
+class SalesOrderPatch(BaseModel):
+    """The one sales-order field the user owns; everything else is
+    WooCommerce's and a re-import would overwrite it."""
+
+    actual_shipping_cost: float | None = Field(default=None, ge=0)
+
+
+@router.patch("/sales-orders/{so_id}", response_model=SalesOrderOut)
+def patch_sales_order(so_id: int, body: SalesOrderPatch) -> SalesOrderOut:
+    # model_fields_set, so an explicit null clears it back to "not entered"
+    # (which is not zero) while an absent one leaves it alone
+    if "actual_shipping_cost" in body.model_fields_set:
+        _guard(db.set_so_actual_shipping, so_id, body.actual_shipping_cost)
     with db.session() as s:
         return _so_out(s, _get_so_or_404(s, so_id))
 
