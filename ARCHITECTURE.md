@@ -246,7 +246,10 @@ step when one is actually needed.
   re-import -- NULL means "not entered", which is not zero). Unlike every other master record
   the `id` is **local** (max+1), not the source system's: this import runs
   repeatedly into a non-empty database, so WooCommerce ids would collide.
-  `wc_order_id` (unique) carries the link and is what re-import matches on. The
+  `wc_order_id` (unique) carries the link and is what re-import matches on.
+  `status` holds WooCommerce's slug as plain text, not a coded enum: a store's
+  statuses are whatever its plugins registered, so there is no closed set to
+  key codes off (see db._to_v10, and db.SO_STATUS_LABELS_KEY for the labels). The
   code (`SO-0042`) is derived from the pk like `po_ref`/`build_ref`.
   `SalesOrderLine(id, so_id, wc_line_id, sku, description, unit_price,
   quantity)` is one WooCommerce line item, replaced wholesale by a re-import

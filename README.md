@@ -217,7 +217,10 @@ Open-source inventory/stock tracking for small and medium businesses.
   an order with no parts linked books fine and simply consumes nothing. Parts
   can still be linked after booking -- booking again takes only the new ones,
   while existing links are frozen (their stock has already gone out). Unbooked sales
-  count as demand on the parts overview. The import is a button with a date
+  count as demand on the parts overview (statuses that should not raise demand --
+  a plugin's quote status, say -- are ticked on the settings page). Order
+  statuses come from the store, including any your plugins add, shown in the
+  store's own wording. The import is a button with a date
   range (last 7 days by default) and is safe to repeat: new orders are created,
   unbooked ones refreshed, booked ones left untouched. The connection is
   configured on the Settings page; the key and secret are stored **encrypted**
