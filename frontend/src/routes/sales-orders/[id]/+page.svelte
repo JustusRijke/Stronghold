@@ -197,6 +197,13 @@
 					<dd>{so.date_created ?? '--'}</dd>
 					<dt>Fees and discounts</dt>
 					<dd class="mono">{money(so.fee_total)}</dd>
+					{#if so.coupon_total}
+						<dt>Coupons</dt>
+						<dd class="mono">
+							-{money(so.coupon_total)}
+							<span class="muted">already off the line prices</span>
+						</dd>
+					{/if}
 					<dt>Shipping charged</dt>
 					<dd class="mono">{money(so.shipping_cost)}</dd>
 				</dl>
@@ -222,7 +229,9 @@
 				<p class="muted">
 					Estimated is what the linked parts are currently worth; realised is what the
 					stock this sale actually consumed cost. Fees and discounts are money that
-					changed hands, so they are always in the revenue.
+					changed hands, so they are always in the revenue. A coupon is already
+					deducted from the line prices WooCommerce reports, so it is shown for
+					reference only.
 					{#if so.shipping_in_margin}
 						Shipping counts on both sides: the {money(so.shipping_cost)} charged is in
 						revenue, the {money(so.actual_shipping_cost)} paid is in cost.

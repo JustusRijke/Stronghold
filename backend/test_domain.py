@@ -1713,6 +1713,7 @@ def test_import_survives_orders_it_cannot_fully_understand(database):
             "shipping_country": "NL",
             "shipping_cost": 0.0,
             "fee_total": 0.0,
+            "coupon_total": 0.0,
             "lines": [],
         },
         {
@@ -1724,6 +1725,7 @@ def test_import_survives_orders_it_cannot_fully_understand(database):
             "shipping_country": "NL",
             "shipping_cost": 0.0,
             "fee_total": 0.0,
+            "coupon_total": 0.0,
             "lines": [],
         },
         {
@@ -1735,6 +1737,7 @@ def test_import_survives_orders_it_cannot_fully_understand(database):
             "shipping_country": "NL",
             "shipping_cost": 0.0,
             "fee_total": 0.0,
+            "coupon_total": 0.0,
             "lines": [],
         },
     ]

@@ -1638,6 +1638,8 @@ export interface components {
             shipping_cost: number;
             /** Fee Total */
             fee_total: number;
+            /** Coupon Total */
+            coupon_total: number;
             /** Actual Shipping Cost */
             actual_shipping_cost: number | null;
             /** Shipping In Margin */
@@ -1838,6 +1840,8 @@ export interface components {
             shipping_cost: number;
             /** Fee Total */
             fee_total: number;
+            /** Coupon Total */
+            coupon_total: number;
             /** Actual Shipping Cost */
             actual_shipping_cost: number | null;
             /** Shipping In Margin */

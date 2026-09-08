@@ -86,6 +86,12 @@ def _map_order(o: dict) -> dict:
         # discounts and surcharges alike: a coupon that reached the order as a
         # fee line is negative, so summing them signed is the whole job
         "fee_total": sum(_money(f.get("total")) for f in o.get("fee_lines", [])),
+        # positive: what the coupons took off. Already reflected in each line's
+        # price (WooCommerce reports those net of coupons), so this is for
+        # display only -- adding it to the revenue would count it twice
+        "coupon_total": sum(
+            _money(c.get("discount")) for c in o.get("coupon_lines", [])
+        ),
         "lines": [
             {
                 "wc_line_id": li["id"],

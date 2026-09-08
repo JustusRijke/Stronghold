@@ -1696,6 +1696,37 @@ def test_a_discount_reaches_the_revenue(client):
     assert len(client.get("/api/sales-orders/9824/lines").json()) == 1
 
 
+def test_a_coupon_is_reported_but_not_deducted_twice(client):
+    """WooCommerce reports line prices already net of its coupons, so a coupon
+    is in the revenue via the line items. It is imported for display only --
+    counting it again would halve the sale (order 9828: 435.54 of goods, a
+    166.94 coupon, and a line price WooCommerce already reports as 268.60)."""
+    order = woocommerce._map_order(
+        {
+            "id": 9828,
+            "number": "9828",
+            "status": "processing",
+            "shipping_total": "7.02",
+            "coupon_lines": [{"id": 1, "code": "z7krfe4v", "discount": "166.94"}],
+            "line_items": [
+                {
+                    "id": 10,
+                    "sku": "HBT-DIY",
+                    "name": "DIY Haybutler",
+                    "price": 268.595041,
+                    "quantity": 1,
+                    "subtotal": "435.54",
+                }
+            ],
+        }
+    )
+    import_woocommerce._import([order], {}, import_woocommerce._new_result())
+
+    so = client.get("/api/sales-orders/9828").json()
+    assert so["coupon_total"] == 166.94
+    assert round(so["revenue"], 2) == 268.60  # the net line price, not 101.66
+
+
 def test_plugin_order_statuses_survive_the_import(client):
     """A store's statuses are whatever its plugins registered. The slug is kept
     verbatim and the store's own label comes with it, so an order-proposal
@@ -1710,6 +1741,7 @@ def test_plugin_order_statuses_survive_the_import(client):
             "shipping_country": "NL",
             "shipping_cost": 0.0,
             "fee_total": 0.0,
+            "coupon_total": 0.0,
             "lines": [],
         }
     ]
@@ -1746,6 +1778,7 @@ def test_a_store_status_can_be_marked_as_raising_no_demand(client):
             "shipping_country": "NL",
             "shipping_cost": 0.0,
             "fee_total": 0.0,
+            "coupon_total": 0.0,
             "lines": [
                 {
                     "wc_line_id": 9010,

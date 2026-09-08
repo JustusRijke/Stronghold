@@ -498,6 +498,8 @@ _MIGRATIONS = {
     9: lambda s: None,
     10: _to_v10,
     11: lambda s: (_to_v11(s), _drop_columns(s, 11)),
+    # 12 only added a column -- see the note on step 4.
+    12: lambda s: None,
 }
 
 
