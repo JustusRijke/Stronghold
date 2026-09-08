@@ -16,10 +16,12 @@ Open-source inventory/stock tracking for small and medium businesses.
   button; remove asks to confirm. The printer button opens the table as it is
   currently sorted, filtered and columned in a new tab, laid out for A4
   landscape, and raises the print dialog. The
-  parts list also shows each part's total stock on hand, how many units the
-  planned build orders still have to consume ("Needed"), how
-  many are still to be received on open purchase orders ("On order"), and the
-  resulting shortfall to buy ("To order" = needed - in stock - on order)
+  parts list also shows each part's total stock on hand, how much of it is not
+  yet claimed by an order ("Free"), how many units the planned build orders
+  ("For builds") and the unbooked sales orders ("For sales") still have to
+  consume, how many are still to be received on open purchase orders
+  ("On order"), and the resulting shortfall to buy ("To order" = needed - in
+  stock - on order)
 - Detail pages let you edit every user-facing field (a purchase order's status,
   dates, and costs, a supplier part's pack size, and so on); related records
   (a part's stock, supplier parts, and orders) appear as the same filterable,
@@ -33,7 +35,8 @@ Open-source inventory/stock tracking for small and medium businesses.
   prefilled from that supplier part's own last purchase price, else the part's
   estimate; the quantity prefilled with enough packs to cover the shortfall,
   rounded up per supplier part because pack sizes differ). The part page shows
-  the same in stock / needed / on order / suggested figures
+  the same figures as a small table: in stock, needed for builds, needed for
+  sales orders, freely available, on order and suggested to order
 - A part's supplier parts table shows what each supplier last charged per item
   (the line price divided by the pack size, to 4 decimals) and the date of that
   order, so the cheapest source is visible at a glance. The 🛒 button on a row
