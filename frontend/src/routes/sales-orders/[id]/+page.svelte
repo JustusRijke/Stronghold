@@ -14,7 +14,8 @@
 		SalesShortage,
 		StockItem
 	} from '$lib/types';
-	import { CREATED_COLUMN, soStatusLabel } from '$lib/status';
+	import { CREATED_COLUMN } from '$lib/status';
+	import { soStatusLabel } from '$lib/sales-status.svelte';
 	import { STATUS_OPTIONS as STOCK_STATUS_OPTIONS } from '$lib/validators';
 
 	const id = $derived(Number($page.params.id));

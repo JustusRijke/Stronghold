@@ -34,7 +34,11 @@ from importlib.metadata import PackageNotFoundError, version
 # prefill reads. Purely additive, like 4 and 6.
 # 9 added the optional sales_orders.actual_shipping_cost. Purely additive,
 # like 4, 6 and 8.
-SCHEMA_VERSION = 9
+# 10 stores sales_orders.status as WooCommerce's slug (text) instead of an
+# EnumCode int: a store's statuses are not a closed set, so plugin statuses
+# (order-proposal, checkout-draft, ...) had no code and imported blank. The step
+# maps the old codes back to slugs (db._to_v10).
+SCHEMA_VERSION = 10
 
 try:
     APP_VERSION = version("stronghold")

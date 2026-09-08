@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { api } from '$lib/api';
 	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
-	import { SO_DONE, SO_STATUS_OPTIONS, soStatusLabel } from '$lib/status';
+	import { SO_DONE } from '$lib/status';
+	import { soStatusLabel, soStatusOptions } from '$lib/sales-status.svelte';
 	import { toast } from '$lib/toast.svelte';
 
 	type Row = {
@@ -63,7 +64,7 @@
 
 	const money = (v: number | null) => (v === null ? '' : v.toFixed(2));
 
-	const columns: Column<Row>[] = [
+	const columns: Column<Row>[] = $derived([
 		{ key: 'reference', header: 'Sale', mono: true, width: '110px' },
 		{ key: 'wc_number', header: 'WooCommerce', mono: true, width: '130px' },
 		{ key: 'date_created', header: 'Date', width: '120px' },
@@ -74,7 +75,7 @@
 			header: 'Status',
 			width: '120px',
 			statusFilter: true,
-			statusOptions: SO_STATUS_OPTIONS,
+			statusOptions: soStatusOptions(),
 			statusDefaultHide: SO_DONE,
 			statusLabel: soStatusLabel
 		},
@@ -87,7 +88,7 @@
 			format: (v) => (v === null ? '' : `${(v as number).toFixed(1)}%`)
 		},
 		{ key: 'booked', header: 'Booked', bool: true, width: '90px' }
-	];
+	]);
 </script>
 
 <div class="content nosidebar">

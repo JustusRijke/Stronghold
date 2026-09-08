@@ -674,6 +674,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sales-orders/statuses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sales Order Statuses
+         * @description Every status the sales list can show, in the store's own wording.
+         *
+         *     The set is the store's, not ours: plugins register their own, so it is
+         *     cached from WooCommerce at import (db.SO_STATUS_LABELS_KEY). Statuses
+         *     actually present on orders are unioned in, so a status still shows up (as
+         *     its bare slug) when the cache predates it -- data on screen must never
+         *     depend on a lookup table being current.
+         */
+        get: operations["sales_order_statuses_api_sales_orders_statuses_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sales-orders/{so_id}": {
         parameters: {
             query?: never;
@@ -1841,6 +1867,16 @@ export interface components {
             required: number;
             /** In Stock */
             in_stock: number;
+        };
+        /**
+         * SalesStatusOut
+         * @description One order status the frontend can show and filter on.
+         */
+        SalesStatusOut: {
+            /** Slug */
+            slug: string;
+            /** Label */
+            label: string;
         };
         /** SearchResult */
         SearchResult: {
@@ -3770,6 +3806,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SalesOrderOut"][];
+                };
+            };
+        };
+    };
+    sales_order_statuses_api_sales_orders_statuses_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesStatusOut"][];
                 };
             };
         };

@@ -1705,7 +1705,9 @@ def test_a_sale_can_consume_labour(database):
 def test_import_survives_orders_it_cannot_fully_understand(database):
     """The import is one transaction, so a row it chokes on would roll back
     every order alongside it. Stores add their own statuses freely (Blocks
-    checkout writes 'checkout-draft'), and an order may carry no date."""
+    checkout writes 'checkout-draft', an order-proposal plugin its own), and an
+    order may carry no date. A plugin status is kept verbatim -- it is the
+    store's own state, not corruption -- and its label is cached alongside."""
     rows = [
         {
             "wc_order_id": 1,
@@ -1720,7 +1722,7 @@ def test_import_survives_orders_it_cannot_fully_understand(database):
         {
             "wc_order_id": 2,
             "wc_number": "2",
-            "status": "checkout-draft",  # not one of ours
+            "status": "checkout-draft",  # a store status we do not model
             "date_created": "2026-08-02",
             "customer_name": "B",
             "shipping_country": "NL",
@@ -1738,17 +1740,19 @@ def test_import_survives_orders_it_cannot_fully_understand(database):
             "lines": [],
         },
     ]
+    labels = {"processing": "In behandeling", "checkout-draft": "Concept"}
     result = import_woocommerce._new_result()
-    import_woocommerce._import(rows, result)
+    import_woocommerce._import(rows, labels, result)
 
     assert result["imported"] == 3  # the good ones are NOT lost with the odd ones
     with db.session() as s:
         orders = s.scalars(select(SalesOrder).order_by(SalesOrder.id)).all()
         assert [o.wc_order_id for o in orders] == [1, 2, 3]
-        assert orders[1].status == ""  # unknown status stored as unset
+        # kept verbatim: the slug is the store's own identifier for its state
+        assert orders[1].status == "checkout-draft"
         assert orders[2].date_created is None
-    # and the user is told why, rather than it happening silently
-    assert any("checkout-draft" in n for n in result["notes"])
+    # and the store's own wording came along, so the UI can name it
+    assert db.so_status_labels() == labels
 
 
 def test_woocommerce_line_names_arrive_as_plain_text():

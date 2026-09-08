@@ -135,7 +135,23 @@ the way a build records labour.
 
 Until an order is booked, its parts count as **demand**: they show up in the
 "For sales" column on the parts list (and "Needed for sales orders" on the part
-page) and feed the suggested order quantity, the same way a planned build does. Cancelled, refunded and failed orders ask for nothing.
+page) and feed the suggested order quantity, the same way a planned build does.
+Cancelled, refunded and failed orders ask for nothing.
+
+If your store has statuses of its own that should not raise demand -- a quote
+from an order-proposal plugin, say -- tick them under
+`sales.no_demand_statuses` on the settings page. The list offers whatever
+statuses your store actually has.
+
+## Order statuses
+
+A WooCommerce store's statuses are not a fixed set: plugins register their own
+(an order-proposal plugin adds a quote status, Blocks checkout adds a draft
+one). Stronghold stores whatever slug the order carries, and at every import it
+also caches what your store calls each status -- in your store's own language --
+from WooCommerce's order totals report. So the status column, its filter and the
+order page all show the same wording the shop admin does, and a new plugin needs
+no change here.
 
 ## Booking
 

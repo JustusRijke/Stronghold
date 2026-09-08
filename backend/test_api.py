@@ -4,6 +4,7 @@ tmp database. Complements test_domain.py (which exercises db directly)."""
 from datetime import date
 
 import db
+import import_woocommerce
 import pytest
 from models import (
     SalesOrder,
@@ -1623,6 +1624,85 @@ def test_shipping_counts_in_the_margin_only_once_actual_cost_is_entered(client):
         f"/api/sales-orders/{so_id}", json={"actual_shipping_cost": None}
     ).json()
     assert (row["shipping_in_margin"], row["estimated_margin"]) == (False, 40.0)
+
+
+def test_plugin_order_statuses_survive_the_import(client):
+    """A store's statuses are whatever its plugins registered. The slug is kept
+    verbatim and the store's own label comes with it, so an order-proposal
+    order reads 'Offerte' rather than blank."""
+    rows = [
+        {
+            "wc_order_id": 900,
+            "wc_number": "900",
+            "status": "order-proposal",  # an order-proposal plugin's own
+            "date_created": "2026-08-01",
+            "customer_name": "A",
+            "shipping_country": "NL",
+            "shipping_cost": 0.0,
+            "lines": [],
+        }
+    ]
+    import_woocommerce._import(
+        rows, {"order-proposal": "Offerte"}, import_woocommerce._new_result()
+    )
+
+    so = next(
+        o for o in client.get("/api/sales-orders").json() if o["wc_order_id"] == 900
+    )
+    assert so["status"] == "order-proposal"
+    statuses = client.get("/api/sales-orders/statuses").json()
+    assert {"slug": "order-proposal", "label": "Offerte"} in statuses
+
+    # a status on an order but missing from the cached labels still lists, as
+    # its bare slug -- the filter must never hide orders it has no label for
+    with db.session() as s:
+        db.set_so_status_labels(s, {"completed": "Afgerond"})
+        s.commit()
+    statuses = client.get("/api/sales-orders/statuses").json()
+    assert {"slug": "order-proposal", "label": "order-proposal"} in statuses
+
+
+def test_a_store_status_can_be_marked_as_raising_no_demand(client):
+    """A quote is unbooked and not cancelled, so it counts as demand by
+    default. Which of a store's own statuses are dead is the user's call --
+    a plugin can invent any status, so it is a setting, not a constant."""
+    part = client.post("/api/parts", json={"sku": "W1", "description": "Widget"}).json()
+    rows = [
+        {
+            "wc_order_id": 901,
+            "wc_number": "901",
+            "status": "order-proposal",
+            "date_created": "2026-08-01",
+            "customer_name": "A",
+            "shipping_country": "NL",
+            "shipping_cost": 0.0,
+            "lines": [
+                {
+                    "wc_line_id": 9010,
+                    "sku": "P",
+                    "description": "A Product",
+                    "unit_price": 10.0,
+                    "quantity": 2.0,
+                }
+            ],
+        }
+    ]
+    import_woocommerce._import(rows, {}, import_woocommerce._new_result())
+    so = next(
+        o for o in client.get("/api/sales-orders").json() if o["wc_order_id"] == 901
+    )
+    line = client.get(f"/api/sales-orders/{so['id']}/lines").json()[0]["id"]
+    client.post(
+        f"/api/sales-orders/{so['id']}/lines/{line}/parts",
+        json={"part_id": part["id"], "quantity": 3},
+    )
+    # 2 sold x 3 each: a quote asks for stock like any other open order
+    assert client.get(f"/api/parts/{part['id']}").json()["needed_sales"] == 6
+
+    client.put(
+        "/api/settings/sales.no_demand_statuses", json={"value": "order-proposal"}
+    )
+    assert client.get(f"/api/parts/{part['id']}").json()["needed_sales"] == 0
 
 
 def test_booking_stays_available_while_parts_are_outstanding(client):

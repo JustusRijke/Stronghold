@@ -2,9 +2,11 @@
 	import { api } from '$lib/api';
 	import { toast } from '$lib/toast.svelte';
 	import { loadExpertMode } from '$lib/expert.svelte';
+	import { soStatuses } from '$lib/sales-status.svelte';
 	import type { Setting } from '$lib/types';
 
 	const EXPERT_KEY = 'expert.mode';
+	const NO_DEMAND_KEY = 'sales.no_demand_statuses';
 	const WC_PREFIX = 'woocommerce.';
 
 	let settings = $state<Setting[]>([]);
@@ -45,6 +47,27 @@
 		}
 	}
 
+	// The no-demand statuses are stored as a comma-separated list of slugs, but
+	// typing slugs blind is no way to pick them: offer the store's own statuses
+	// as checkboxes instead. Core dead statuses (cancelled/refunded/failed) are
+	// always dead and not listed -- unticking them would promise something the
+	// backend does not honour.
+	const ALWAYS_DEAD = ['cancelled', 'refunded', 'failed'];
+	const noDemand = $derived(
+		(settings.find((s) => s.key === NO_DEMAND_KEY)?.value ?? '')
+			.split(',')
+			.map((v) => v.trim())
+			.filter(Boolean)
+	);
+	const choosableStatuses = $derived(
+		soStatuses.list.filter((s) => !ALWAYS_DEAD.includes(s.slug))
+	);
+	async function toggleNoDemand(slug: string, on: boolean) {
+		const next = on ? [...noDemand, slug] : noDemand.filter((v) => v !== slug);
+		await save(NO_DEMAND_KEY, next.join(','));
+		settings = await api.settings();
+	}
+
 	// woocommerce.* is shown as its own group; everything else is a plain list
 	const general = $derived(settings.filter((s) => !s.key.startsWith(WC_PREFIX)));
 	const wooCommerce = $derived(settings.filter((s) => s.key.startsWith(WC_PREFIX)));
@@ -67,6 +90,27 @@
 							Lift order status rules and edit stock counts directly
 						</span>
 					</label>
+				{:else if s.key === NO_DEMAND_KEY}
+					<div class="field" style="flex:1">
+						<span>{s.key}</span>
+						<p class="muted">
+							Open orders normally ask for stock. Tick a status whose orders should
+							not -- a quote, say. Cancelled, refunded and failed never count.
+						</p>
+						{#each choosableStatuses as st (st.slug)}
+							<span class="check">
+								<input
+									type="checkbox"
+									checked={noDemand.includes(st.slug)}
+									onchange={(e) => toggleNoDemand(st.slug, e.currentTarget.checked)}
+								/>
+								{st.label}
+							</span>
+						{/each}
+						{#if choosableStatuses.length === 0}
+							<p class="muted">Import sales orders once to see the store's statuses.</p>
+						{/if}
+					</div>
 				{:else}
 					<label class="field" style="flex:1">
 						<span>{s.key}</span>

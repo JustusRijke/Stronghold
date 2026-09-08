@@ -13,7 +13,6 @@ from models import (
     SalesOrder,
     SalesOrderLine,
     SalesOrderLinePart,
-    SalesOrderStatus,
     so_ref,
 )
 
@@ -56,31 +55,12 @@ def _apply_lines(s, so: SalesOrder, lines: list[dict], notes: list[str]) -> None
         s.delete(line)
 
 
-def _status(row: dict, notes: list[str]) -> str:
-    """The order's status, or "" if WooCommerce reports one we do not model.
-
-    Stores add statuses freely -- Blocks checkout writes `checkout-draft`, and
-    shipping/subscription plugins add their own -- so an unknown one is normal
-    data, not corruption. EnumCode stores "" as its unset code, so the order
-    still imports; refusing it would lose the whole batch over a label."""
-    value = row["status"]
-    try:
-        SalesOrderStatus(value)
-    except ValueError:
-        notes.append(
-            f"WooCommerce order {row['wc_order_id']}: unknown status {value!r}, "
-            f"imported without one"
-        )
-        return ""
-    return value
-
-
 def _new_result() -> dict:
     return {"imported": 0, "updated": 0, "skipped": 0, "prefilled": 0, "notes": []}
 
 
 @db._write
-def _import(s, orders: list[dict], result: dict) -> None:
+def _import(s, orders: list[dict], labels: dict[str, str], result: dict) -> None:
     notes: list[str] = result["notes"]
     next_so_id = (s.scalar(db.select(db.func.max(SalesOrder.id))) or 0) + 1
     for row in orders:
@@ -93,7 +73,6 @@ def _import(s, orders: list[dict], result: dict) -> None:
         # resolve everything that can reject the row BEFORE touching the
         # session: this is one transaction, so a raise here would roll back
         # every order already imported in this run, not just this one
-        status = _status(row, notes)
         created = row["date_created"]
         if so is None:
             so = SalesOrder(id=next_so_id, wc_order_id=row["wc_order_id"])
@@ -103,7 +82,9 @@ def _import(s, orders: list[dict], result: dict) -> None:
         else:
             result["updated"] += 1
         so.wc_number = row["wc_number"]
-        so.status = status
+        # WooCommerce's slug, verbatim: a store's statuses are whatever its
+        # plugins registered, so there is nothing to validate it against
+        so.status = row["status"]
         so.customer_name = row["customer_name"]
         so.shipping_country = row["shipping_country"]
         so.shipping_cost = row["shipping_cost"]
@@ -116,6 +97,8 @@ def _import(s, orders: list[dict], result: dict) -> None:
         # a re-import never overwrites the user's own work
         result["prefilled"] += db._prefill_so_parts(s, so.id)[0]
 
+    if labels:
+        db.set_so_status_labels(s, labels)
     db._activity(
         s,
         "import_woocommerce",
@@ -135,6 +118,9 @@ def import_orders(base_url, key, secret, after, before=None) -> dict:
             "the settings page"
         )
     orders = woocommerce.fetch_orders(base_url, key, secret, after, before)
+    # what the store calls each of its statuses, including the ones its plugins
+    # registered. Refreshed every import: a new plugin means new statuses
+    labels = woocommerce.fetch_status_labels(base_url, key, secret)
     result = _new_result()
-    _import(orders, result)
+    _import(orders, labels, result)
     return result

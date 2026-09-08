@@ -163,8 +163,13 @@ PO_STATUS_CODES = {
 
 
 class SalesOrderStatus(StrEnum):
-    """WooCommerce's own order statuses. Imported, never set in Stronghold --
-    WooCommerce owns the commercial lifecycle of a sale."""
+    """The WooCommerce statuses Stronghold reasons about (see SO_DEAD_STATUSES).
+
+    Imported, never set here -- WooCommerce owns the commercial lifecycle of a
+    sale. This is NOT the full set a store can have: plugins register their own
+    (an order-proposal plugin adds "order-proposal", Blocks checkout adds
+    "checkout-draft"), so SalesOrder.status stores WooCommerce's slug verbatim
+    as text and this enum is only the subset our own logic names."""
 
     PENDING = "pending"
     PROCESSING = "processing"
@@ -175,6 +180,8 @@ class SalesOrderStatus(StrEnum):
     FAILED = "failed"
 
 
+# Kept only to migrate data files written before schema 10, when the column was
+# an EnumCode int. Nothing writes these any more -- see db._to_v10.
 SALES_ORDER_STATUS_CODES = {
     1: SalesOrderStatus.PENDING,
     2: SalesOrderStatus.PROCESSING,
@@ -478,9 +485,11 @@ class SalesOrder(Base):
     # entered -- unknown is not zero, so the margin ignores shipping entirely
     # until it is filled in (see api._so_out).
     actual_shipping_cost: Mapped[float | None] = mapped_column(default=None)
-    status: Mapped[str] = mapped_column(
-        EnumCode(SalesOrderStatus, SALES_ORDER_STATUS_CODES), default=""
-    )
+    # WooCommerce's slug, verbatim and as text -- a store's statuses are not a
+    # closed set (plugins register their own), so there is no code map to key an
+    # int off. The slug is the store's own stable identifier; the display label
+    # is looked up separately (db.SO_STATUS_LABELS_KEY).
+    status: Mapped[str] = mapped_column(default="")
     date_created: Mapped[date | None] = mapped_column(default=None)
     # whether this order has consumed its parts from stock. One-way: booking is
     # a stock movement, so it is never silently undone by a re-import.

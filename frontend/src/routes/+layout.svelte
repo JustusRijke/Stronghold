@@ -5,11 +5,13 @@
 	import { toast } from '$lib/toast.svelte';
 	import { api } from '$lib/api';
 	import { loadExpertMode } from '$lib/expert.svelte';
+	import { loadSoStatuses } from '$lib/sales-status.svelte';
 	import type { SearchResult } from '$lib/types';
 
 	let { children } = $props();
 
 	loadExpertMode();
+	loadSoStatuses();
 
 	const NAV = [
 		['Home', '/'],
