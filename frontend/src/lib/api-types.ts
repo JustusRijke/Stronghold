@@ -780,6 +780,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sales-orders/{so_id}/extras": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Extra Part
+         * @description Link a part to the order itself, not to anything it sold -- the extra
+         *     cable or the bolts thrown in. It lands on a synthetic line item, so it
+         *     consumes stock and counts in the margin like any other linked part.
+         */
+        post: operations["add_extra_part_api_sales_orders__so_id__extras_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sales-orders/lines/parts/{link_id}": {
         parameters: {
             query?: never;
@@ -1801,6 +1823,8 @@ export interface components {
             id: number;
             /** Wc Line Id */
             wc_line_id: number;
+            /** Extras */
+            extras: boolean;
             /** Sku */
             sku: string;
             /** Description */
@@ -3994,6 +4018,41 @@ export interface operations {
             path: {
                 so_id: number;
                 line_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinePartIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesOrderLineOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_extra_part_api_sales_orders__so_id__extras_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                so_id: number;
             };
             cookie?: never;
         };

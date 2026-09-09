@@ -10,6 +10,7 @@ against and are left alone (its order-level totals still refresh).
 import db
 import woocommerce
 from models import (
+    EXTRAS_WC_LINE_ID,
     SalesOrder,
     SalesOrderLine,
     SalesOrderLinePart,
@@ -40,7 +41,9 @@ def _apply_lines(s, so: SalesOrder, lines: list[dict], notes: list[str]) -> None
         line.quantity = row["quantity"]
 
     for wc_line_id, line in existing.items():
-        if wc_line_id in seen:
+        # the extras line is ours, not WooCommerce's -- it is absent from every
+        # import and would otherwise be deleted as vanished on every run
+        if wc_line_id in seen or wc_line_id == EXTRAS_WC_LINE_ID:
             continue
         links = s.scalars(
             db.select(SalesOrderLinePart).where(SalesOrderLinePart.line_id == line.id)

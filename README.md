@@ -204,7 +204,9 @@ Open-source inventory/stock tracking for small and medium businesses.
   parts in for you; there is a **Prefill from SKUs** button on each order too,
   and a **Save as SKU mapping** button on each line that turns the parts you just
   linked into the mapping for its SKU. Anything unmapped you link by hand, per
-  unit sold. Prefilling
+  unit sold. Parts that were thrown in with the order rather than sold -- a
+  spare cable, a handful of bolts -- are linked to the order itself under
+  **Extras**, and are consumed and costed like any other linked part. Prefilling
   only ever touches a line that has no parts yet, so it never overwrites your
   own edits, and changing a mapping leaves orders already filled in alone.
   Booking an order

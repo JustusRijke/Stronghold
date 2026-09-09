@@ -18,6 +18,7 @@ from db import InventoryError
 from fastapi import APIRouter, HTTPException
 from models import (
     BUILD_PREFIX,
+    EXTRAS_WC_LINE_ID,
     PO_PREFIX,
     SO_PREFIX,
     STOCK_AVAILABLE,
@@ -473,6 +474,9 @@ class LinePartOut(BaseModel):
 class SalesOrderLineOut(BaseModel):
     id: int
     wc_line_id: int
+    # our own line, not WooCommerce's: parts thrown in with the order rather
+    # than sold as a product (see models.EXTRAS_WC_LINE_ID)
+    extras: bool
     sku: str  # WooCommerce's product code; often empty, never matched on
     description: str
     unit_price: float
@@ -1977,6 +1981,7 @@ def list_sales_order_lines(so_id: int) -> list[SalesOrderLineOut]:
             SalesOrderLineOut(
                 id=line.id,
                 wc_line_id=line.wc_line_id,
+                extras=line.wc_line_id == EXTRAS_WC_LINE_ID,
                 sku=line.sku,
                 description=line.description,
                 unit_price=line.unit_price,
@@ -2014,6 +2019,20 @@ def add_line_part(
     SKU it sold, not the parts behind it."""
     new_id = db.next_line_part_id()
     _guard(db.add_line_part, new_id, line_id, body.part_id, body.quantity)
+    return list_sales_order_lines(so_id)
+
+
+@router.post(
+    "/sales-orders/{so_id}/extras",
+    response_model=list[SalesOrderLineOut],
+    status_code=201,
+)
+def add_extra_part(so_id: int, body: LinePartIn) -> list[SalesOrderLineOut]:
+    """Link a part to the order itself, not to anything it sold -- the extra
+    cable or the bolts thrown in. It lands on a synthetic line item, so it
+    consumes stock and counts in the margin like any other linked part."""
+    new_id = db.next_line_part_id()
+    _guard(db.add_extra_part, new_id, so_id, body.part_id, body.quantity)
     return list_sales_order_lines(so_id)
 
 

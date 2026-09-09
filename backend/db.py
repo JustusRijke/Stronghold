@@ -20,6 +20,8 @@ from pathlib import Path
 import crypto
 from models import (
     BUILD_STATUS_CODES,
+    EXTRAS_DESCRIPTION,
+    EXTRAS_WC_LINE_ID,
     PO_STATUS_CODES,
     PRICE_BASIS_CODES,
     SALES_ORDER_STATUS_CODES,
@@ -3206,9 +3208,43 @@ def add_line_part(
     needs, and booking consumes the difference, so nothing already taken out of
     stock is disturbed -- unlike edit_line_part, which can lower a quantity and
     is therefore frozen once booked."""
+    _add_line_part(s, link_id, _get_so_line(s, line_id), part_id, quantity)
+
+
+@_write
+def add_extra_part(s: Session, link_id: int, so_id: int, part_id: int, quantity: float):
+    """Link a part to the order itself rather than to anything it sold -- the
+    cable or handful of bolts thrown in with the shipment.
+
+    It hangs off a synthetic zero-priced line item (models.EXTRAS_WC_LINE_ID),
+    created here on first use, so it is an ordinary SalesOrderLinePart: demand,
+    booking, costing and the margin pick it up with no code of their own."""
+    so = get_so(s, so_id)
+    line = s.scalar(
+        select(SalesOrderLine).where(
+            SalesOrderLine.so_id == so.id,
+            SalesOrderLine.wc_line_id == EXTRAS_WC_LINE_ID,
+        )
+    )
+    if line is None:
+        line = SalesOrderLine(
+            id=(s.scalar(select(func.max(SalesOrderLine.id))) or 0) + 1,
+            so_id=so.id,
+            wc_line_id=EXTRAS_WC_LINE_ID,
+            description=EXTRAS_DESCRIPTION,
+            quantity=1,
+        )
+        s.add(line)
+        s.flush()
+    _add_line_part(s, link_id, line, part_id, quantity)
+
+
+def _add_line_part(
+    s: Session, link_id: int, line: SalesOrderLine, part_id: int, quantity: float
+) -> None:
     if quantity <= 0:
         raise InventoryError("quantity must be positive")
-    line = _get_so_line(s, line_id)
+    line_id = line.id
     so = get_so(s, line.so_id)
     part = get_part(s, part_id)
     label = so_ref(so.id)

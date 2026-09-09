@@ -68,10 +68,13 @@
 		if (!Number.isNaN(id)) load();
 	});
 
+	// lineId 0 is the extras line: it may not exist yet, so the backend creates
+	// it (see db.add_extra_part) and we post to the order instead of a line
 	async function addPart(lineId: number) {
 		if (newPart === '') return;
+		const body = { part_id: Number(newPart), quantity: newQty };
 		const ok = await toast.run(() =>
-			api.addLinePart(id, lineId, { part_id: Number(newPart), quantity: newQty })
+			lineId === 0 ? api.addExtraPart(id, body) : api.addLinePart(id, lineId, body)
 		);
 		if (ok) {
 			addingTo = null;
@@ -304,9 +307,13 @@
 								{#if line.sku}<span class="mono sku">{line.sku}</span>{/if}
 								<strong>{line.description}</strong>
 							</div>
-							<div class="mono nums">
-								{line.quantity} &times; {money(line.unit_price)} = {money(line.line_total)}
-							</div>
+							{#if line.extras}
+								<div class="muted">not sold: thrown in with the order</div>
+							{:else}
+								<div class="mono nums">
+									{line.quantity} &times; {money(line.unit_price)} = {money(line.line_total)}
+								</div>
+							{/if}
 							{#if line.sku && line.parts.length}
 								<button
 									class="btn ghost small"
@@ -393,6 +400,46 @@
 						{/if}
 					</div>
 				{/each}
+				{#if !lines.some((l) => l.extras)}
+					<div class="line">
+						<div class="linehead">
+							<div><strong>Extras</strong></div>
+							<div class="muted">
+								Parts thrown in with the order rather than sold as a product &mdash; a
+								spare cable, a handful of bolts. They consume stock and count in the
+								margin like any other linked part.
+							</div>
+						</div>
+						{#if addingTo === 0}
+							<table class="parts">
+								<tbody>
+									<tr>
+										<td>
+											<Picker
+												bind:value={newPart}
+												rows={parts}
+												label={(p) => `${p.sku ? p.sku + ' - ' : ''}${p.description}`}
+												id="addpart-extras"
+												onenter={() => addPart(0)}
+												wide />
+										</td>
+										<td class="num">
+											<input type="number" min="0" step="any" bind:value={newQty} />
+										</td>
+										<td class="num">
+											<button class="link" onclick={() => addPart(0)}>add</button>
+											<button class="link" onclick={() => (addingTo = null)}>cancel</button>
+										</td>
+									</tr>
+								</tbody>
+							</table>
+						{:else}
+							<button class="btn ghost small" onclick={() => (addingTo = 0)}>
+								Add an extra part
+							</button>
+						{/if}
+					</div>
+				{/if}
 			</section>
 
 			<section id="consumed">
