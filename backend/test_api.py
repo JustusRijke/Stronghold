@@ -1913,3 +1913,73 @@ def test_supplier_part_sku_is_optional_but_unique_per_supplier(client):
         client.patch(f"/api/supplier-parts/{sp}", json={"sku": ""}).json()["sku"]
         is None
     )
+
+
+def test_extra_parts_thrown_in_with_an_order(client):
+    """A cable or a handful of bolts the seller threw in: linked to the order
+    itself, not to anything WooCommerce sold, but consumed and costed like any
+    other part."""
+    part = client.post("/api/parts", json={"sku": "C1", "description": "Cable"}).json()
+    supplier = client.post("/api/suppliers", json={"name": "Acme"}).json()
+    sp = client.post(
+        "/api/supplier-parts",
+        json={"supplier_id": supplier["id"], "part_id": part["id"], "pack_qty": 1},
+    ).json()
+    po = client.post(
+        "/api/purchase-orders", json={"supplier_id": supplier["id"], "description": "d"}
+    ).json()
+    client.post(
+        f"/api/purchase-orders/{po['id']}/lines",
+        json={"supplier_part_id": sp["id"], "quantity": 10, "price": 2.0},
+    )
+    po_line = client.get(f"/api/purchase-orders/{po['id']}/lines").json()[0]
+    client.post(f"/api/po-lines/{po_line['id']}/book", json={"quantity": 10})
+    so_id = _seed_sale(client, so_id=4242, qty=1.0)
+
+    lines = client.post(
+        f"/api/sales-orders/{so_id}/extras", json={"part_id": part["id"], "quantity": 3}
+    ).json()
+    extras = [line for line in lines if line["extras"]]
+    assert len(extras) == 1
+    assert [(p["quantity"], p["required"]) for p in extras[0]["parts"]] == [(3.0, 3.0)]
+
+    # it raises demand, and it is in the margin before booking too
+    assert client.get(f"/api/parts/{part['id']}").json()["needed_sales"] == 3.0
+    assert client.get(f"/api/sales-orders/{so_id}").json()["estimated_cost"] == 6.0
+
+    # a second extra lands on the same line rather than making another
+    lines = client.post(
+        f"/api/sales-orders/{so_id}/extras", json={"part_id": part["id"], "quantity": 1}
+    ).json()
+    assert len([line for line in lines if line["extras"]]) == 1
+
+    booked = client.post(f"/api/sales-orders/{so_id}/book").json()
+    assert booked["realised_cost"] == 8.0  # 4 cables at 2.00
+    assert [
+        (r["count"], r["status"])
+        for r in client.get(f"/api/sales-orders/{so_id}/stock").json()
+    ] == [(4.0, "consumed")]
+
+    # a re-import must not sweep the line away as one WooCommerce dropped
+    with db.session() as s:
+        s.get(SalesOrder, so_id).booked = False
+        s.commit()
+    order = woocommerce._map_order(
+        {
+            "id": so_id,
+            "number": str(so_id),
+            "status": "processing",
+            "line_items": [
+                {
+                    "id": so_id * 10,
+                    "sku": "",
+                    "name": "A Product",
+                    "price": 50.0,
+                    "quantity": 1,
+                }
+            ],
+        }
+    )
+    import_woocommerce._import([order], {}, import_woocommerce._new_result())
+    lines = client.get(f"/api/sales-orders/{so_id}/lines").json()
+    assert [line["parts"][0]["quantity"] for line in lines if line["extras"]] == [4.0]

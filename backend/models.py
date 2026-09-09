@@ -505,11 +505,26 @@ class SalesOrder(Base):
     booked: Mapped[bool] = mapped_column(default=False)
 
 
+# The wc_line_id of the one line an order may have that WooCommerce did not
+# sell: the extras line, holding parts thrown in with the order rather than
+# with any particular product (a spare cable, a handful of bolts). Real
+# WooCommerce line ids are positive, so 0 cannot collide, and re-import leaves
+# the line alone instead of deleting it as vanished (import_woocommerce).
+# It is a normal SalesOrderLine with quantity 1 and price 0, which is the whole
+# point: needs, demand, booking, costing and shortages all keep working
+# unchanged, because there is nothing new for them to know about.
+EXTRAS_WC_LINE_ID = 0
+EXTRAS_DESCRIPTION = "Extras (added by hand)"
+
+
 class SalesOrderLine(Base):
     """One WooCommerce line item. Owned by WooCommerce, so there is no edit
     path: a re-import replaces these. sku is the product's code as plain text
     and may be empty -- it is never matched against Part.sku (the part link is
-    manual, see SalesOrderLinePart)."""
+    manual, see SalesOrderLinePart).
+
+    The exception is the extras line (wc_line_id EXTRAS_WC_LINE_ID), which is
+    ours: see that constant."""
 
     __tablename__ = "sales_order_lines"
 
