@@ -219,6 +219,8 @@ export const api = {
 		patch<SalesOrder>(`/sales-orders/${id}`, b),
 	addLinePart: (id: number, lineId: number, b: { part_id: number; quantity: number }) =>
 		post<SalesOrderLine[]>(`/sales-orders/${id}/lines/${lineId}/parts`, b),
+	addExtraPart: (id: number, b: { part_id: number; quantity: number }) =>
+		post<SalesOrderLine[]>(`/sales-orders/${id}/extras`, b),
 	editLinePart: (linkId: number, quantity: number) =>
 		patch<{ ok: boolean }>(`/sales-orders/lines/parts/${linkId}`, { quantity }),
 	removeLinePart: (linkId: number) => del<{ ok: boolean }>(`/sales-orders/lines/parts/${linkId}`),
