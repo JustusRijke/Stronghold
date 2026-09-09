@@ -1591,6 +1591,8 @@ export interface components {
             free_stock: number;
             /** Incoming */
             incoming: number;
+            /** In Production */
+            in_production: number;
             /** Suggested Order */
             suggested_order: number;
         };

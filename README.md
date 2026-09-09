@@ -21,7 +21,9 @@ Open-source inventory/stock tracking for small and medium businesses.
   ("For builds") and the unbooked sales orders ("For sales") still have to
   consume, how many are still to be received on open purchase orders
   ("On order"), and the resulting shortfall to buy ("To order" = needed - in
-  stock - on order)
+  stock - on order - being built). An assembly's part page also shows how many
+  units the open build orders still have to produce ("Being built") -- the
+  made-rather-than-bought half of "On order"
 - Detail pages let you edit every user-facing field (a purchase order's status,
   dates, and costs, a supplier part's pack size, and so on); related records
   (a part's stock, supplier parts, and orders) appear as the same filterable,

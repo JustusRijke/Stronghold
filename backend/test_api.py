@@ -1217,6 +1217,12 @@ def test_part_demand_and_suggested_order(client):
     assert (row["needed_builds"], row["in_stock"]) == (6, 1)
     assert row["suggested_order"] == 1
 
+    # the assembly itself: 1 produced, 3 still being built by the open order
+    asm_row = client.get(f"/api/parts/{asm}").json()
+    assert (asm_row["in_stock"], asm_row["in_production"]) == (1, 3)
+    # a component is bought, never built
+    assert row["in_production"] == 0
+
 
 def test_order_references_are_derived_from_the_pk(client):
     """Both order types report a PO-/BO-<pk> code. It is computed from the id,

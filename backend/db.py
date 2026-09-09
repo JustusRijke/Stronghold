@@ -3754,10 +3754,13 @@ def so_cost(s: Session, so_id: int) -> tuple[float | None, float | None]:
 # -- demand -----------------------------------------------------------------
 
 
-def part_demand(s: Session) -> dict[int, tuple[float, float, float]]:
+def part_demand(s: Session) -> dict[int, tuple[float, float, float, float]]:
     """Per part: (units still needed by planned builds, units needed by unbooked
-    sales, units still to be received on open POs). Three grouped queries, not
-    one per part.
+    sales, units still to be received on open POs, units still to be produced by
+    open builds of this part). Four grouped queries, not one per part.
+
+    The last one is the assembly mirror of incoming: an open build order is
+    stock on its way in, just made rather than bought.
 
     A build counts once it is Pending -- planned is what you buy against; Draft
     is the scratchpad status and asks for nothing. Its need is its snapshot's
@@ -3828,7 +3831,22 @@ def part_demand(s: Session) -> dict[int, tuple[float, float, float]]:
     ):
         incoming[part_id] = units
 
+    in_production: dict[int, float] = {}
+    for build_id, part_id, qty in s.execute(
+        select(BuildOrder.id, BuildOrder.part_id, BuildOrder.quantity).where(
+            BuildOrder.status.in_((BuildStatus.PENDING, BuildStatus.PRODUCTION))
+        )
+    ):
+        remaining = qty - produced_qty(s, build_id)
+        if remaining > 0:
+            in_production[part_id] = in_production.get(part_id, 0.0) + remaining
+
     return {
-        pid: (for_builds.get(pid, 0.0), for_sales.get(pid, 0.0), incoming.get(pid, 0.0))
-        for pid in set(for_builds) | set(for_sales) | set(incoming)
+        pid: (
+            for_builds.get(pid, 0.0),
+            for_sales.get(pid, 0.0),
+            incoming.get(pid, 0.0),
+            in_production.get(pid, 0.0),
+        )
+        for pid in set(for_builds) | set(for_sales) | set(incoming) | set(in_production)
     }
