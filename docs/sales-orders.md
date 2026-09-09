@@ -130,6 +130,20 @@ Linking a part the line already lists **adds to** it rather than complaining:
 link two more of the same nut and the quantity goes from 2 to 4. A line holds
 one quantity per part, so there is never a second row for the same one.
 
+## Extras thrown in with an order
+
+Sometimes what goes in the box is not what the shop sold: a spare cable, a
+handful of bolts, a thank-you part. That belongs to the *order*, not to any line
+item, so it gets its own **Extras** block under the line items. **Add an extra
+part** links one, with a plain quantity (there is no "per unit sold" here --
+the order got what it got).
+
+From there on an extra is an ordinary linked part: it counts as demand while the
+order is unbooked, booking consumes it from stock oldest-first, it lands in the
+consumed rows at what that stock cost, and it is in both the estimated and the
+realised margin. A re-import leaves the extras alone -- WooCommerce does not
+know about them and never will.
+
 **Virtual parts (labour) can be linked too.** They hold no stock, so nothing is
 drawn down -- but the sale really did cost that time, so booking records it as a
 consumed row at the part's rate and it counts in the cost and margin, exactly
