@@ -8,6 +8,7 @@
 	import DetailSidebar from '$lib/components/DetailSidebar.svelte';
 	import StocktakeDialog from '$lib/components/StocktakeDialog.svelte';
 	import NegativeStockDialog from '$lib/components/NegativeStockDialog.svelte';
+	import Picker from '$lib/components/Picker.svelte';
 	import type { PartBuild, Part, BomLine, BomUsage, POLine, PartPurchaseOrder, PartSalesOrder, PurchaseOrder, StockItem, StockLogEntry, Supplier, SupplierPart } from '$lib/types';
 
 	type PartPO = PartPurchaseOrder & { supplier_name: string };
@@ -635,12 +636,15 @@
 						onRemove={(line) => removeLine(line.id)}
 					/>
 					<div class="bomrow add">
-						<select bind:value={newComp}>
-							<option value="" disabled>Component…</option>
-							{#each activeParts as p (p.id)}
-								<option value={p.id}>{label(p)}</option>
-							{/each}
-						</select>
+						<Picker
+							bind:value={newComp}
+							rows={activeParts}
+							{label}
+							id="bom-component"
+							placeholder="Type to search…"
+							onenter={addBomLine}
+							wide
+						/>
 						<input class="qty" type="number" min="0" step="any" bind:value={newQty} />
 						<input type="text" placeholder="Note (optional)" bind:value={newNote} />
 						<button class="btn" onclick={addBomLine}>Add component</button>
