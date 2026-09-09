@@ -91,7 +91,8 @@ class PartOut(BaseModel):
     needed_sales: float  # units unbooked sales orders still have to consume
     free_stock: float  # in_stock minus what builds and sales have claimed
     incoming: float  # units still to be received on open POs
-    suggested_order: float  # max(0, needed - in_stock - incoming)
+    in_production: float  # units still to be produced by open builds of this part
+    suggested_order: float  # max(0, needed - in_stock - incoming - in_production)
 
 
 class PartIn(BaseModel):
@@ -629,11 +630,11 @@ def _owed(s) -> dict[int, float]:
 def _part_out(
     p: Part,
     on_hand: dict[int, float],
-    demand: dict[int, tuple[float, float, float]],
+    demand: dict[int, tuple[float, float, float, float]],
     owed: dict[int, float],
 ) -> PartOut:
     stock = on_hand.get(p.id, 0.0)
-    builds, sales, incoming = demand.get(p.id, (0.0, 0.0, 0.0))
+    builds, sales, incoming, in_production = demand.get(p.id, (0.0, 0.0, 0.0, 0.0))
     needed = builds + sales
     return PartOut(
         id=p.id,
@@ -651,7 +652,8 @@ def _part_out(
         needed_sales=sales,
         free_stock=stock - needed,
         incoming=incoming,
-        suggested_order=max(0.0, needed - stock - incoming),
+        in_production=in_production,
+        suggested_order=max(0.0, needed - stock - incoming - in_production),
     )
 
 

@@ -530,6 +530,9 @@
 							<tr><th>Needed for sales orders</th><td>{part.needed_sales}</td></tr>
 							<tr><th>Freely available</th><td>{part.free_stock}</td></tr>
 							<tr><th>On order</th><td>{part.incoming}</td></tr>
+							{#if part.assembly}
+								<tr><th>Being built</th><td>{part.in_production}</td></tr>
+							{/if}
 							<tr><th>Suggested to order</th><td>{part.suggested_order}</td></tr>
 						</tbody>
 					</table>
@@ -781,6 +784,7 @@
 			<p class="muted">
 				In stock {part.in_stock} &middot; needed {part.needed_builds + part.needed_sales} &middot; on
 				order {part.incoming}
+				{#if part.assembly}&middot; being built {part.in_production}{/if}
 				&middot; <strong>suggested {part.suggested_order}</strong>
 			</p>
 		{/if}
