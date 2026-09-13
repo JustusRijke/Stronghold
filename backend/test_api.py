@@ -2052,3 +2052,27 @@ def test_extra_parts_thrown_in_with_an_order(client):
     import_woocommerce._import([order], {}, import_woocommerce._new_result())
     lines = client.get(f"/api/sales-orders/{so_id}/lines").json()
     assert [line["parts"][0]["quantity"] for line in lines if line["extras"]] == [4.0]
+
+
+def test_booking_without_consuming_leaves_stock_alone(client):
+    """Historical orders: the stock went out before Stronghold existed."""
+    part = client.post("/api/parts", json={"sku": "H1", "description": "Old"}).json()
+    item = client.post("/api/stock", json={"part_id": part["id"]}).json()
+    client.patch(f"/api/stock/{item['id']}", json={"count": 10})
+    so_id = _seed_sale(client, qty=2.0)
+    line_id = client.get(f"/api/sales-orders/{so_id}/lines").json()[0]["id"]
+    client.post(
+        f"/api/sales-orders/{so_id}/lines/{line_id}/parts",
+        json={"part_id": part["id"], "quantity": 3},
+    )
+
+    booked = client.post(
+        f"/api/sales-orders/{so_id}/book", json={"consume": False}
+    ).json()
+    assert booked["booked"]
+    assert client.get(f"/api/sales-orders/{so_id}/stock").json() == []
+    assert client.get(f"/api/parts/{part['id']}").json()["in_stock"] == 10.0
+    # the parts are still outstanding, so they can be consumed later after all
+    assert booked["unbooked_parts"] == 1
+    client.post(f"/api/sales-orders/{so_id}/book", json={"consume": True})
+    assert client.get(f"/api/parts/{part['id']}").json()["in_stock"] == 4.0

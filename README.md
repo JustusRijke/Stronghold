@@ -222,7 +222,9 @@ Open-source inventory/stock tracking for small and medium businesses.
   cost you (a field of your own, next to what WooCommerce says the customer was
   charged); left empty it is excluded from both sides, since counting the
   postage charged alone would book all of it as margin. Booking is also how a sale is marked handled:
-  an order with no parts linked books fine and simply consumes nothing. Parts
+  an order with no parts linked books fine and simply consumes nothing, and the book
+  dialog's **Consume stock** tick can be cleared to mark an order booked without touching
+  stock at all -- for old orders whose stock left the shelf before you used Stronghold. Parts
   can still be linked after booking -- booking again takes only the new ones,
   while existing links are frozen (their stock has already gone out). Unbooked sales
   count as demand on the parts overview (statuses that should not raise demand --

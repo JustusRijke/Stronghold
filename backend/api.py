@@ -2143,11 +2143,16 @@ def sales_order_shortages(so_id: int) -> list[SalesShortageOut]:
         ]
 
 
+class BookSalesOrderIn(BaseModel):
+    consume: bool = True
+
+
 @router.post("/sales-orders/{so_id}/book", response_model=SalesOrderOut)
-def book_sales_order(so_id: int) -> SalesOrderOut:
+def book_sales_order(so_id: int, body: BookSalesOrderIn | None = None) -> SalesOrderOut:
     """Consume the parts this sale used, FIFO. Shortages do not block: the
-    missing quantity becomes a debt a later PO receipt settles."""
-    _guard(db.book_sales_order, so_id)
+    missing quantity becomes a debt a later PO receipt settles. consume=false
+    marks the order booked without touching stock."""
+    _guard(db.book_sales_order, so_id, body.consume if body else True)
     return get_sales_order(so_id)
 
 

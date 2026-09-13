@@ -15,6 +15,9 @@ export const BomQtyPatch = v.object({
 export const BookIn = v.object({
 	quantity: v.pipe(v.number(), v.gtValue(0, 'must be greater than 0')),
 	});
+export const BookSalesOrderIn = v.object({
+	consume: v.optional(v.boolean()),
+	});
 export const BuildOrderIn = v.object({
 	part_id: v.pipe(v.number(), v.integer()),
 	quantity: v.pipe(v.number(), v.integer(), v.gtValue(0, 'must be greater than 0')),
