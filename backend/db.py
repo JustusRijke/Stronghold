@@ -3956,8 +3956,9 @@ def part_demand(s: Session) -> dict[int, tuple[float, float, float, float]]:
 
 
 def stock_shortages(s: Session) -> list[tuple[int, float, float]]:
-    """(part_id, in_stock, needed) for every non-assembly part the open sales
-    orders leave short, worst first.
+    """(part_id, in_stock, needed) for every non-assembly part that is short,
+    worst first -- either because the open sales orders ask for more than is on
+    the shelf, or because the count is already negative.
 
     A pure sales-vs-stock simulation: build orders are ignored entirely. An
     assembly that comes out short is exploded through its BOM as if it were
@@ -4003,7 +4004,10 @@ def stock_shortages(s: Session) -> list[tuple[int, float, float]]:
         state[part_id] = 2
         order.append(part_id)
 
-    for part_id in sorted(set(need) | set(bom) | set(parents)):
+    # stock is in the seed set too: a part already sitting at a negative count
+    # is short whether or not anything is asking for it (that is what a debt row
+    # from a short build or sale is), and would otherwise never be looked at
+    for part_id in sorted(set(need) | set(stock) | set(bom) | set(parents)):
         visit(part_id)
 
     out = []

@@ -229,7 +229,10 @@ Reports > Stock shortage. It answers "what do I need to buy to fulfil the
 orders I have?"
 
 It starts from the stock you actually have -- not free stock -- and takes off
-what the open sales orders need. A part that comes out negative is short.
+what the open sales orders need. A part that comes out negative is short. A part
+whose count is **already** negative is short on its own account, with nothing
+needing to ask for it: that is a debt row left by a short build or sale (see
+"Negative stock, and why it exists" above), and it appears here until settled.
 
 The useful part is what happens to **assemblies**. An assembly you are short of
 is exploded through its bill of materials, as if you were about to build it,

@@ -1388,6 +1388,7 @@ def test_stock_shortage_report(client):
     screw = part("SCREW")  # shared by both assemblies
     plate = part("PLATE")
     spare = part("SPARE")  # stocked well enough never to appear
+    lone = part("LONE")  # in no BOM and unsold, but already negative
     sub = part("SUB")
     assy = part("ASSY")
     client.patch(f"/api/parts/{sub['id']}", json={"assembly": True})
@@ -1401,6 +1402,18 @@ def test_stock_shortage_report(client):
     stock(sub["id"], 1)  # covers 1 of the 5 sold; 4 must be built
     stock(plate["id"], 2)
     stock(spare["id"], 100)
+    # a debt row, as a short build or sale leaves behind. Written directly:
+    # set_count rejects a negative by hand, the domain owns the only path to one
+    with db.session() as s:
+        s.add(
+            StockItem(
+                id=db.next_item_id(),
+                part_id=lone["id"],
+                count=-4.0,
+                status=StockStatus.AVAILABLE,
+            )
+        )
+        s.commit()
 
     so_id = _seed_sale(client, qty=5.0)
     line_id = client.get(f"/api/sales-orders/{so_id}/lines").json()[0]["id"]
@@ -1411,7 +1424,10 @@ def test_stock_shortage_report(client):
 
     rows = {r["sku"]: r for r in client.get("/api/reports/stock-shortage").json()}
     # assemblies are exploded away, and a well-stocked part is not short
-    assert set(rows) == {"SCREW", "PLATE"}
+    assert set(rows) == {"SCREW", "PLATE", "LONE"}
+    # already negative is short on its own: nothing needs to ask for it
+    assert (rows["LONE"]["in_stock"], rows["LONE"]["needed"]) == (-4.0, 0.0)
+    assert rows["LONE"]["shortage"] == -4.0
     # 5 ASSY needed, 0 in stock -> 5 short. SUB: 5*2 = 10 needed, 1 in stock ->
     # 9 short. SCREW is pulled by both: 5 direct from ASSY + 9*3 from SUB = 32.
     assert (rows["SCREW"]["needed"], rows["SCREW"]["in_stock"]) == (32.0, 0.0)
