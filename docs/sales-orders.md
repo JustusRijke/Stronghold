@@ -115,6 +115,10 @@ the SKU mapping above where there is one, and linked by hand where there is not.
 of a product consuming 2 brackets each needs `2`, and Stronghold works out that the order
 needs 6.
 
+The sales order list carries a **Linked** column, ticked once every line on the
+order maps to at least one part -- what still needs your attention before the
+order can be booked in full.
+
 One thing is rejected:
 
 - **Changing or removing a link once the order is booked.** Those units are

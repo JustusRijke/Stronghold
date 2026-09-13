@@ -1323,7 +1323,7 @@ def test_sales_order_flow(client):
 
     so = client.get(f"/api/sales-orders/{so_id}").json()
     assert so["reference"] == "SO-0001"
-    assert so["revenue"] == 100.0 and not so["booked"]
+    assert so["revenue"] == 100.0 and not so["booked"] and not so["linked"]
     assert client.get("/api/sales-orders/999").status_code == 404
 
     line_id = client.get(f"/api/sales-orders/{so_id}/lines").json()[0]["id"]
@@ -1342,6 +1342,9 @@ def test_sales_order_flow(client):
     # 2 sold x 3 per unit
     assert [(p["required"], p["in_stock"]) for p in lines[0]["parts"]] == [(6.0, 10.0)]
     assert client.get(f"/api/sales-orders/{so_id}/shortages").json() == []
+    # every line now maps to a part, on the detail route and the batched list
+    assert client.get(f"/api/sales-orders/{so_id}").json()["linked"]
+    assert client.get("/api/sales-orders").json()[0]["linked"]
     # the sale shows up under the part it consumes
     assert [
         s["reference"]
