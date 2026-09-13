@@ -34,7 +34,7 @@
 			reference: so.reference,
 			date_created: so.date_created ?? '',
 			customer_name: so.customer_name,
-			items: so.line_skus.join(', ') + (so.more_lines ? ', ...' : ''),
+			items: so.line_skus.join(', '),
 			shipping_country: so.shipping_country,
 			status: so.status,
 			revenue: so.revenue,
