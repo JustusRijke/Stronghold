@@ -138,8 +138,9 @@
 
 	// book popup
 	let dialog = $state<HTMLDialogElement | null>(null);
+	let consumeStock = $state(true);
 	async function doBook() {
-		if (await toast.run(() => api.bookSalesOrder(id))) {
+		if (await toast.run(() => api.bookSalesOrder(id, consumeStock))) {
 			dialog?.close();
 			// booking is the last thing done to an order -- back to the overview.
 			// The tab stays open, so the order is one click away.
@@ -538,7 +539,12 @@
 				itself; this only records what it took off the shelf.
 			{/if}
 		</p>
-		{#if shortages.length > 0}
+		<label class="consume">
+			<input type="checkbox" bind:checked={consumeStock} />
+			Consume stock
+			<span class="muted">-- off for orders whose stock was already taken off the shelf outside Stronghold.</span>
+		</label>
+		{#if shortages.length > 0 && consumeStock}
 			<div class="warn">
 				<p class="short"><strong>Short on {shortages.length} part(s):</strong></p>
 				<ul>
@@ -599,6 +605,10 @@
 	.head .actions {
 		display: flex;
 		gap: 8px;
+	}
+	dialog.book .consume {
+		display: block;
+		margin-bottom: 0.75rem;
 	}
 	dialog.book .actions {
 		display: flex;

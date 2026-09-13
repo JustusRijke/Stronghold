@@ -228,7 +228,8 @@ export const api = {
 	ignoreLine: (id: number, lineId: number) =>
 		post<SalesOrderLine[]>(`/sales-orders/${id}/lines/${lineId}/ignore`, {}),
 	salesOrderShortages: (id: number) => get<SalesShortage[]>(`/sales-orders/${id}/shortages`),
-	bookSalesOrder: (id: number) => post<SalesOrder>(`/sales-orders/${id}/book`, {}),
+	bookSalesOrder: (id: number, consume = true) =>
+		post<SalesOrder>(`/sales-orders/${id}/book`, { consume }),
 	salesOrderStock: (id: number) => get<StockItem[]>(`/sales-orders/${id}/stock`),
 	partSalesOrders: (id: number) => get<PartSalesOrder[]>(`/parts/${id}/sales-orders`),
 	importSalesOrders: (b: { after: string; before?: string | null }) =>

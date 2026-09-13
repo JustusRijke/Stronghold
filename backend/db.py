@@ -3754,20 +3754,23 @@ def set_so_actual_shipping(s: Session, so_id: int, cost: float | None) -> None:
 
 
 @_write
-def book_sales_order(s: Session, so_id: int) -> None:
+def book_sales_order(s: Session, so_id: int, consume: bool = True) -> None:
     """Consume the parts a sale used, FIFO, in one transaction.
 
     The build analogue is produce_build, and consumption is literally the same
     code (_consume_fifo) -- with two differences: the rows are stamped
     consumed_by_so_id, and nothing is produced. A sale ships stock out; there is
     no output to cost. Shortages do not block: the missing quantity becomes a
-    debt that a later PO receipt settles."""
+    debt that a later PO receipt settles.
+
+    consume=False books the order without touching stock -- for historical
+    orders whose stock was already taken off the shelf outside Stronghold."""
     so = get_so(s, so_id)
     # what is mapped but not yet taken. Booking an already-booked order is how
     # parts linked afterwards get consumed, so this is the delta, not the whole
     # mapping -- and an order with nothing outstanding is not an error.
-    needs = so_outstanding(s, so_id)
-    if so.booked and not needs:
+    needs = so_outstanding(s, so_id) if consume else {}
+    if so.booked and not needs and consume:
         raise InventoryError(f"sales order {so_id} has nothing left to book")
     next_id = (s.scalar(select(func.max(StockItem.id))) or 0) + 1
     for part_id, need in sorted(needs.items()):
@@ -3797,7 +3800,9 @@ def book_sales_order(s: Session, so_id: int) -> None:
     was_booked = so.booked
     so.booked = True
     label = so_ref(so_id)
-    if not needs:
+    if not consume:
+        message = f"Booked {label} without consuming stock"
+    elif not needs:
         # a sale that consumes nothing is still a sale: booking records that it
         # has been dealt with (services, digital goods, stock handled elsewhere)
         message = f"Booked {label}: no parts to consume"

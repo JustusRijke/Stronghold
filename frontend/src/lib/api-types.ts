@@ -874,7 +874,8 @@ export interface paths {
         /**
          * Book Sales Order
          * @description Consume the parts this sale used, FIFO. Shortages do not block: the
-         *     missing quantity becomes a debt a later PO receipt settles.
+         *     missing quantity becomes a debt a later PO receipt settles. consume=false
+         *     marks the order booked without touching stock.
          */
         post: operations["book_sales_order_api_sales_orders__so_id__book_post"];
         delete?: never;
@@ -1315,6 +1316,14 @@ export interface components {
         BookIn: {
             /** Quantity */
             quantity: number;
+        };
+        /** BookSalesOrderIn */
+        BookSalesOrderIn: {
+            /**
+             * Consume
+             * @default true
+             */
+            consume: boolean;
         };
         /**
          * BuildLineOut
@@ -4286,7 +4295,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["BookSalesOrderIn"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
