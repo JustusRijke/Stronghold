@@ -134,6 +134,27 @@ Linking a part the line already lists **adds to** it rather than complaining:
 link two more of the same nut and the quantity goes from 2 to 4. A line holds
 one quantity per part, so there is never a second row for the same one.
 
+### Lines that consume nothing
+
+Not every line takes something off the shelf: a shipping charge, a fee, a
+service, a digital product. **Ignore this line** marks one as consuming nothing.
+It then shows an *Ignored* badge, counts as linked, and is left out of demand,
+booking and cost -- so the Linked column stops nagging about work that does not
+exist.
+
+Ignoring is a decision, not a blank: it is stored as a real (part-less) link
+row, so an ignored line is visibly different from one nobody has got to yet.
+**Unignore** on the line undoes it.
+
+A line that already uses parts cannot be ignored, and an ignored line cannot be
+given parts -- remove the one before setting the other.
+
+Ignoring the same shipping line on every order would be the same work every
+week, so **Always ignore \<SKU\>** saves the decision against the sold SKU. It
+then lives on the Product SKUs tab as an ignored mapping, and every future order
+carrying that SKU prefills as ignored. Remove it there (**unignore**) to go back
+to linking by hand.
+
 ## Extras thrown in with an order
 
 Sometimes what goes in the box is not what the shop sold: a spare cable, a

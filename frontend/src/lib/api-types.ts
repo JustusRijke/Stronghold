@@ -802,6 +802,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sales-orders/{so_id}/lines/{line_id}/ignore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ignore Line
+         * @description Mark a sold line item as consuming nothing -- shipping, a fee, a service.
+         *     It then counts as linked. Undone by deleting the marker row this writes
+         *     (DELETE /sales-orders/lines/parts/{link_id}), like any other link.
+         */
+        post: operations["ignore_line_api_sales_orders__so_id__lines__line_id__ignore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sales-orders/lines/parts/{link_id}": {
         parameters: {
             query?: never;
@@ -943,6 +965,27 @@ export interface paths {
         get: operations["list_sold_skus_api_product_skus_sold_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/product-skus/ignore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ignore Product Sku
+         * @description Mark a sold sku as consuming nothing, so orders carrying it prefill as
+         *     ignored. Undone by deleting the marker row, like any other mapping row.
+         */
+        post: operations["ignore_product_sku_api_product_skus_ignore_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1710,6 +1753,11 @@ export interface components {
             /** Line Id */
             line_id: number;
         };
+        /** ProductSkuIgnoreIn */
+        ProductSkuIgnoreIn: {
+            /** Sku */
+            sku: string;
+        };
         /**
          * ProductSkuOut
          * @description A sold sku and everything it is made of.
@@ -1719,6 +1767,8 @@ export interface components {
             sku: string;
             /** Parts */
             parts: components["schemas"]["ProductSkuPartOut"][];
+            /** Ignored Id */
+            ignored_id: number | null;
         };
         /** ProductSkuPartIn */
         ProductSkuPartIn: {
@@ -1841,6 +1891,8 @@ export interface components {
             line_total: number;
             /** Parts */
             parts: components["schemas"]["LinePartOut"][];
+            /** Ignored Id */
+            ignored_id: number | null;
         };
         /**
          * SalesOrderOut
@@ -4088,6 +4140,38 @@ export interface operations {
             };
         };
     };
+    ignore_line_api_sales_orders__so_id__lines__line_id__ignore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                so_id: number;
+                line_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesOrderLineOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     delete_line_part_api_sales_orders_lines_parts__link_id__delete: {
         parameters: {
             query?: never;
@@ -4347,6 +4431,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SoldSkuOut"][];
+                };
+            };
+        };
+    };
+    ignore_product_sku_api_product_skus_ignore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductSkuIgnoreIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductSkuOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -485,6 +485,9 @@ class SalesOrderLineOut(BaseModel):
     quantity: float
     line_total: float
     parts: list[LinePartOut]
+    # the part-less marker row's id when this line is ignored, else None. The
+    # id is what un-ignoring deletes, so it has to travel with the flag.
+    ignored_id: int | None
 
 
 # quantity is deliberately unconstrained here: db.add_line_part and
@@ -539,6 +542,11 @@ class ProductSkuOut(BaseModel):
 
     sku: str
     parts: list[ProductSkuPartOut]
+    ignored_id: int | None  # as SalesOrderLineOut.ignored_id
+
+
+class ProductSkuIgnoreIn(BaseModel):
+    sku: str
 
 
 class SoldSkuOut(BaseModel):
@@ -1851,7 +1859,8 @@ def _so_totals(s) -> tuple[dict, dict, dict, dict, dict]:
     for so_id, part_id, units in mapped:
         if units - taken.get((so_id, part_id), 0.0) > 1e-9:
             outstanding[so_id] = outstanding.get(so_id, 0) + 1
-    # lines with no part mapped at all -- an order is "linked" once none remain
+    # lines with no link row at all -- an order is "linked" once none remain. An
+    # ignored line has a part-less row, so it counts as linked for free.
     unlinked = dict(
         s.execute(
             select(SalesOrderLine.so_id, func.count())
@@ -2005,6 +2014,8 @@ def list_sales_order_lines(so_id: int) -> list[SalesOrderLineOut]:
     """The order's line items, each with the parts it has been mapped to."""
     with db.session() as s:
         _get_so_or_404(s, so_id)
+        lines = db.so_lines_for(s, so_id)
+        rows = {line.id: list(db.line_parts_for(s, line.id)) for line in lines}
         return [
             SalesOrderLineOut(
                 id=line.id,
@@ -2026,12 +2037,17 @@ def list_sales_order_lines(so_id: int) -> list[SalesOrderLineOut]:
                         in_stock=in_stock,
                         estimated_price=price,
                     )
-                    for link_id, part_id, sku, desc, qty, price, in_stock in (
-                        db.line_parts_for(s, line.id)
-                    )
+                    for link_id, part_id, sku, desc, qty, price, in_stock in rows[
+                        line.id
+                    ]
+                    if part_id is not None
                 ],
+                ignored_id=next(
+                    (r[0] for r in rows[line.id] if r[1] is None),
+                    None,
+                ),
             )
-            for line in db.so_lines_for(s, so_id)
+            for line in lines
         ]
 
 
@@ -2061,6 +2077,19 @@ def add_extra_part(so_id: int, body: LinePartIn) -> list[SalesOrderLineOut]:
     consumes stock and counts in the margin like any other linked part."""
     new_id = db.next_line_part_id()
     _guard(db.add_extra_part, new_id, so_id, body.part_id, body.quantity)
+    return list_sales_order_lines(so_id)
+
+
+@router.post(
+    "/sales-orders/{so_id}/lines/{line_id}/ignore",
+    response_model=list[SalesOrderLineOut],
+    status_code=201,
+)
+def ignore_line(so_id: int, line_id: int) -> list[SalesOrderLineOut]:
+    """Mark a sold line item as consuming nothing -- shipping, a fee, a service.
+    It then counts as linked. Undone by deleting the marker row this writes
+    (DELETE /sales-orders/lines/parts/{link_id}), like any other link."""
+    _guard(db.ignore_line, db.next_line_part_id(), line_id)
     return list_sales_order_lines(so_id)
 
 
@@ -2126,7 +2155,10 @@ def list_product_skus() -> list[ProductSkuOut]:
     with db.session() as s:
         for link_id, sku, part_id, part_sku, desc, qty, assembly in db.product_skus(s):
             if not out or out[-1].sku != sku:
-                out.append(ProductSkuOut(sku=sku, parts=[]))
+                out.append(ProductSkuOut(sku=sku, parts=[], ignored_id=None))
+            if part_id is None:  # the ignore marker, not a part
+                out[-1].ignored_id = link_id
+                continue
             out[-1].parts.append(
                 ProductSkuPartOut(
                     id=link_id,
@@ -2162,6 +2194,16 @@ def add_product_sku_part(body: ProductSkuPartIn) -> list[ProductSkuOut]:
         body.part_id,
         body.quantity,
     )
+    return list_product_skus()
+
+
+@router.post(
+    "/product-skus/ignore", response_model=list[ProductSkuOut], status_code=201
+)
+def ignore_product_sku(body: ProductSkuIgnoreIn) -> list[ProductSkuOut]:
+    """Mark a sold sku as consuming nothing, so orders carrying it prefill as
+    ignored. Undone by deleting the marker row, like any other mapping row."""
+    _guard(db.ignore_product_sku, db.next_product_sku_part_id(), body.sku)
     return list_product_skus()
 
 

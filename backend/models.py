@@ -541,14 +541,20 @@ class SalesOrderLinePart(Base):
     """Which part, and how many of it, one sold line item consumes. The only
     sales table the user writes to: WooCommerce cannot know what a product is
     made of, so the mapping is entered by hand. Quantity is per sold unit, like
-    BomLine."""
+    BomLine.
+
+    A row with a NULL part_id marks the line *ignored* instead: it consumes
+    nothing, and the order counts as fully linked without it."""
 
     __tablename__ = "sales_order_line_parts"
     __table_args__ = (UniqueConstraint("line_id", "part_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     line_id: Mapped[int] = mapped_column(ForeignKey(SalesOrderLine.id))
-    part_id: Mapped[int] = mapped_column(ForeignKey(Part.id))
+    # NULL = this line is ignored: it consumes nothing and needs no parts to
+    # count as linked (shipping, a fee, a service). The mapping side of the same
+    # marker is ProductSkuPart with a NULL part_id.
+    part_id: Mapped[int | None] = mapped_column(ForeignKey(Part.id))
     quantity: Mapped[float]
 
 
@@ -571,6 +577,11 @@ class ProductSkuPart(Base):
     It only prefills: copying it onto a sales line writes ordinary
     SalesOrderLinePart rows, which the user is then free to edit. Changing a
     mapping never rewrites an order already filled in.
+
+    A NULL part_id is the *ignore* mapping: this sku consumes nothing, and a
+    line carrying it needs no parts to count as linked. Stored as a row rather
+    than as the absence of one so it is a decision the user made and prefill can
+    remember, not a sku nobody has got to yet.
     """
 
     __tablename__ = "product_sku_parts"
@@ -578,7 +589,9 @@ class ProductSkuPart(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     sku: Mapped[str]
-    part_id: Mapped[int] = mapped_column(ForeignKey(Part.id))
+    # NULL = ignore this sku (see above). SQLite counts NULLs as distinct, so
+    # the unique constraint does not stop a second ignore row -- db does.
+    part_id: Mapped[int | None] = mapped_column(ForeignKey(Part.id))
     quantity: Mapped[float]
 
 

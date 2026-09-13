@@ -108,6 +108,14 @@
 					</tr>
 				</thead>
 				<tbody>
+					{#if row.ignored_id}
+						<tr>
+							<td colspan="2"><span class="badge">Ignored</span> consumes nothing</td>
+							<td class="num">
+								<button class="link" onclick={() => removePart(row.ignored_id!)}>unignore</button>
+							</td>
+						</tr>
+					{/if}
 					{#each row.parts as p (p.id)}
 						<tr>
 							<td>
@@ -153,7 +161,7 @@
 					{/if}
 				</tbody>
 			</table>
-			{#if addingTo !== row.sku}
+			{#if addingTo !== row.sku && !row.ignored_id}
 				<button class="btn ghost small" onclick={() => (addingTo = row.sku)}>Add a part</button>
 			{/if}
 		</div>

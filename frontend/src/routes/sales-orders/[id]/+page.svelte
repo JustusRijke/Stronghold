@@ -90,6 +90,16 @@
 	async function removePart(linkId: number) {
 		if (await toast.run(() => api.removeLinePart(linkId))) load();
 	}
+	// ignoring a line writes a part-less link row, so un-ignoring is removePart
+	async function ignoreLine(lineId: number) {
+		if (await toast.run(() => api.ignoreLine(id, lineId))) load();
+	}
+	async function ignoreSku(sku: string) {
+		if (await toast.run(() => api.ignoreProductSku({ sku }))) {
+			mappings = await api.productSkus();
+			toast.show(`${sku} is ignored on every future order`);
+		}
+	}
 	const linkCount = (ls: SalesOrderLine[]) => ls.reduce((n, l) => n + l.parts.length, 0);
 	async function prefill() {
 		const before = linkCount(lines);
@@ -371,7 +381,18 @@
 										</td>
 									</tr>
 								{/each}
-								{#if line.parts.length === 0 && addingTo !== line.id}
+								{#if line.ignored_id}
+									<tr>
+										<td colspan="5"><span class="badge">Ignored</span> consumes nothing</td>
+										<td class="num">
+											{#if !so.booked}
+												<button class="link" onclick={() => removePart(line.ignored_id!)}>
+													unignore
+												</button>
+											{/if}
+										</td>
+									</tr>
+								{:else if line.parts.length === 0 && addingTo !== line.id}
 									<tr><td colspan="6" class="muted">No parts linked yet.</td></tr>
 								{/if}
 								{#if addingTo === line.id}
@@ -396,9 +417,25 @@
 								{/if}
 							</tbody>
 						</table>
-						{#if addingTo !== line.id}
+						{#if addingTo !== line.id && !line.ignored_id}
 							<button class="btn ghost small" onclick={() => (addingTo = line.id)}>
 								Link a part
+							</button>
+							<!-- allowed on a booked order too: the marker consumes nothing,
+							     and an unlinked line is exactly what needs ignoring -->
+							{#if line.parts.length === 0 && !line.extras}
+								<button class="btn ghost small" onclick={() => ignoreLine(line.id)}>
+									Ignore this line
+								</button>
+							{/if}
+						{/if}
+						{#if line.ignored_id && line.sku && !mappingFor(line.sku)?.ignored_id}
+							<button
+								class="btn ghost small"
+								title={`Ignore ${line.sku} on every future order too`}
+								onclick={() => ignoreSku(line.sku)}
+							>
+								Always ignore {line.sku}
 							</button>
 						{/if}
 					</div>

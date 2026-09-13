@@ -224,6 +224,9 @@ export const api = {
 	editLinePart: (linkId: number, quantity: number) =>
 		patch<{ ok: boolean }>(`/sales-orders/lines/parts/${linkId}`, { quantity }),
 	removeLinePart: (linkId: number) => del<{ ok: boolean }>(`/sales-orders/lines/parts/${linkId}`),
+	// ignoring writes a part-less link row; un-ignoring is removeLinePart on it
+	ignoreLine: (id: number, lineId: number) =>
+		post<SalesOrderLine[]>(`/sales-orders/${id}/lines/${lineId}/ignore`, {}),
 	salesOrderShortages: (id: number) => get<SalesShortage[]>(`/sales-orders/${id}/shortages`),
 	bookSalesOrder: (id: number) => post<SalesOrder>(`/sales-orders/${id}/book`, {}),
 	salesOrderStock: (id: number) => get<StockItem[]>(`/sales-orders/${id}/stock`),
@@ -241,6 +244,7 @@ export const api = {
 		patch<{ ok: boolean }>(`/product-skus/parts/${linkId}`, { quantity }),
 	removeProductSkuPart: (linkId: number) =>
 		del<{ ok: boolean }>(`/product-skus/parts/${linkId}`),
+	ignoreProductSku: (b: { sku: string }) => post<ProductSku[]>('/product-skus/ignore', b),
 	saveProductSkuFromLine: (b: { sku: string; line_id: number }) =>
 		put<ProductSku[]>('/product-skus/from-line', b),
 

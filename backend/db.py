@@ -502,6 +502,9 @@ _MIGRATIONS = {
     11: lambda s: (_to_v11(s), _drop_columns(s, 11)),
     # 12 only added a column -- see the note on step 4.
     12: lambda s: None,
+    # 13 only relaxed two NOT NULLs -- create_all built the new shape and every
+    # replayed row still satisfies it. See the note on step 4.
+    13: lambda s: None,
 }
 
 
@@ -3134,7 +3137,10 @@ def so_lines_for(s: Session, so_id: int) -> list[SalesOrderLine]:
 
 def line_parts_for(s: Session, line_id: int) -> list:
     """(link_id, part_id, sku, description, quantity, estimated_price, in_stock)
-    for one line item's manual part mapping."""
+    for one line item's manual part mapping.
+
+    A part-less "ignore" row comes back with part_id None and the Part columns
+    empty -- the caller splits it out; see api.list_sales_order_lines."""
     in_stock = (
         select(
             StockItem.part_id.label("part_id"),
@@ -3155,7 +3161,8 @@ def line_parts_for(s: Session, line_id: int) -> list:
                 Part.estimated_price,
                 func.coalesce(in_stock.c.qty, 0.0),
             )
-            .join(Part, SalesOrderLinePart.part_id == Part.id)
+            # outer: an ignore row has no part and must still come back
+            .outerjoin(Part, SalesOrderLinePart.part_id == Part.id)
             .join(in_stock, in_stock.c.part_id == Part.id, isouter=True)
             .where(SalesOrderLinePart.line_id == line_id)
             .order_by(SalesOrderLinePart.id)
@@ -3247,6 +3254,15 @@ def _add_line_part(
     line_id = line.id
     so = get_so(s, line.so_id)
     part = get_part(s, part_id)
+    if s.scalar(
+        select(SalesOrderLinePart).where(
+            SalesOrderLinePart.line_id == line_id,
+            SalesOrderLinePart.part_id.is_(None),
+        )
+    ):
+        raise InventoryError(
+            "this line is ignored; remove that before linking parts to it"
+        )
     label = so_ref(so.id)
     existing = s.scalar(
         select(SalesOrderLinePart).where(
@@ -3279,6 +3295,41 @@ def _add_line_part(
 
 
 @_write
+def ignore_line(s: Session, link_id: int, line_id: int) -> None:
+    """Mark a sold line item as consuming nothing -- shipping, a fee, a service,
+    anything that leaves no part off the shelf.
+
+    Written as a real (part-less) link row rather than as the absence of one:
+    the blank then reads as a decision the user made, so the line counts as
+    linked and stops being outstanding work. Rejected once the line has parts --
+    "ignore this" and "it uses these" cannot both be true.
+
+    Allowed on a booked order, like add_line_part and unlike edit/remove: the
+    marker consumes nothing, so there is no stock movement to unwind. A line
+    left unlinked when the order was booked is exactly where this is needed --
+    booking does not make it any more linked than it was."""
+    line = _get_so_line(s, line_id)
+    so = get_so(s, line.so_id)
+    existing = s.scalars(
+        select(SalesOrderLinePart).where(SalesOrderLinePart.line_id == line_id)
+    ).all()
+    if any(r.part_id is None for r in existing):
+        return  # already ignored; a no-op should not manufacture an activity row
+    if existing:
+        raise InventoryError(
+            "this line already uses parts; remove them before ignoring it"
+        )
+    s.add(SalesOrderLinePart(id=link_id, line_id=line_id, part_id=None, quantity=0))
+    label = so_ref(so.id)
+    _activity(
+        s,
+        "ignore_line",
+        f"{label}: {line.description or line.sku} is ignored (consumes nothing)",
+        [("sales-order", so.id, label)],
+    )
+
+
+@_write
 def edit_line_part(s: Session, link_id: int, quantity: float) -> None:
     if quantity <= 0:
         raise InventoryError("quantity must be positive")
@@ -3287,6 +3338,8 @@ def edit_line_part(s: Session, link_id: int, quantity: float) -> None:
     _check_unbooked(s, so)
     if quantity == link.quantity:
         return  # a no-op patch should not manufacture an activity row
+    if link.part_id is None:
+        raise InventoryError("an ignored line has no quantity to change")
     part = get_part(s, link.part_id)
     label = so_ref(so.id)
     _activity(
@@ -3302,17 +3355,19 @@ def edit_line_part(s: Session, link_id: int, quantity: float) -> None:
 def remove_line_part(s: Session, link_id: int) -> None:
     # ponytail: the mapping is order detail, plain delete (not master data)
     link = get_line_part(s, link_id)
-    so = get_so(s, _get_so_line(s, link.line_id).so_id)
+    line = _get_so_line(s, link.line_id)
+    so = get_so(s, line.so_id)
     _check_unbooked(s, so)
-    part = get_part(s, link.part_id)
-    s.delete(link)
     label = so_ref(so.id)
-    _activity(
-        s,
-        "remove_line_part",
-        f"{label}: no longer uses {part.description}",
-        [("sales-order", so.id, label), ("part", part.id, part.sku)],
-    )
+    refs = [("sales-order", so.id, label)]
+    if link.part_id is None:
+        what = f"{line.description or line.sku} is no longer ignored"
+    else:
+        part = get_part(s, link.part_id)
+        what = f"no longer uses {part.description}"
+        refs.append(("part", part.id, part.sku))
+    s.delete(link)
+    _activity(s, "remove_line_part", f"{label}: {what}", refs)
 
 
 # -- product skus -----------------------------------------------------------
@@ -3338,7 +3393,8 @@ def product_skus(s: Session) -> list:
                 ProductSkuPart.quantity,
                 Part.assembly,
             )
-            .join(Part, ProductSkuPart.part_id == Part.id)
+            # outer: an ignore row has no part and must still be listed
+            .outerjoin(Part, ProductSkuPart.part_id == Part.id)
             .order_by(ProductSkuPart.sku, ProductSkuPart.id)
         )
     )
@@ -3395,6 +3451,14 @@ def add_product_sku_part(
     if quantity <= 0:
         raise InventoryError("quantity must be positive")
     part = get_part(s, part_id)
+    if s.scalar(
+        select(ProductSkuPart).where(
+            ProductSkuPart.sku == sku, ProductSkuPart.part_id.is_(None)
+        )
+    ):
+        raise InventoryError(
+            f"sku {sku} is set to be ignored; remove that before adding parts"
+        )
     existing = s.scalar(
         select(ProductSkuPart).where(
             ProductSkuPart.sku == sku, ProductSkuPart.part_id == part_id
@@ -3421,12 +3485,41 @@ def add_product_sku_part(
 
 
 @_write
+def ignore_product_sku(s: Session, link_id: int, sku: str) -> None:
+    """Mark a sold sku as consuming nothing, so every order carrying it prefills
+    as ignored instead of waiting to be linked by hand.
+
+    The remembered form of ignore_line: shipping lines, fees and services come
+    back on every order, and deciding to ignore one should only happen once."""
+    sku = sku.strip()
+    if not sku:
+        raise InventoryError("sku is required")
+    had = s.scalars(select(ProductSkuPart).where(ProductSkuPart.sku == sku)).all()
+    if any(r.part_id is None for r in had):
+        return  # already ignored; a no-op should not manufacture an activity row
+    if had:
+        raise InventoryError(
+            f"sku {sku} already maps to {len(had)} part(s); remove them before "
+            f"ignoring it"
+        )
+    s.add(ProductSkuPart(id=link_id, sku=sku, part_id=None, quantity=0))
+    _activity(
+        s,
+        "ignore_product_sku",
+        f"Product sku {sku} is ignored (consumes nothing)",
+        [],
+    )
+
+
+@_write
 def edit_product_sku_part(s: Session, link_id: int, quantity: float) -> None:
     if quantity <= 0:
         raise InventoryError("quantity must be positive")
     row = get_product_sku_part(s, link_id)
     if quantity == row.quantity:
         return  # a no-op patch should not manufacture an activity row
+    if row.part_id is None:
+        raise InventoryError("an ignored sku has no quantity to change")
     part = get_part(s, row.part_id)
     _activity(
         s,
@@ -3442,14 +3535,15 @@ def edit_product_sku_part(s: Session, link_id: int, quantity: float) -> None:
 def remove_product_sku_part(s: Session, link_id: int) -> None:
     # ponytail: a prefill lookup table, plain delete (orders keep their lines)
     row = get_product_sku_part(s, link_id)
-    part = get_part(s, row.part_id)
+    refs = []
+    if row.part_id is None:
+        what = "is no longer ignored"
+    else:
+        part = get_part(s, row.part_id)
+        what = f"no longer uses {part.description}"
+        refs.append(("part", part.id, part.sku))
     s.delete(row)
-    _activity(
-        s,
-        "remove_product_sku_part",
-        f"Product sku {row.sku} no longer uses {part.description}",
-        [("part", part.id, part.sku)],
-    )
+    _activity(s, "remove_product_sku_part", f"Product sku {row.sku} {what}", refs)
 
 
 @_write
@@ -3522,7 +3616,8 @@ def _prefill_so_parts(s: Session, so_id: int) -> tuple[int, int]:
     written, lines filled); the caller logs.
 
     A mapping's rows are copied verbatim -- what it lists is exactly what the
-    line gets, with no expansion in between. An assembly is copied like any
+    line gets, with no expansion in between. That includes the part-less
+    "ignore" row: a sku marked ignored prefills lines that consume nothing. An assembly is copied like any
     other part, so a sku mapped to one consumes one of that assembly off the
     shelf (built by a build order), which is what selling a built product does.
 
@@ -3567,7 +3662,10 @@ def _prefill_so_parts(s: Session, so_id: int) -> tuple[int, int]:
 
 def so_needs(s: Session, so_id: int) -> dict[int, float]:
     """{part_id: units} one sales order consumes, summed over its line items --
-    each line's sold quantity times the per-unit quantity of each linked part."""
+    each line's sold quantity times the per-unit quantity of each linked part.
+
+    Ignored lines carry a part-less marker row and consume nothing, so they are
+    excluded here -- everything downstream (demand, booking, costing) reads this."""
     needs: dict[int, float] = {}
     for part_id, units in s.execute(
         select(
@@ -3575,7 +3673,7 @@ def so_needs(s: Session, so_id: int) -> dict[int, float]:
             func.sum(SalesOrderLinePart.quantity * SalesOrderLine.quantity),
         )
         .join(SalesOrderLine, SalesOrderLinePart.line_id == SalesOrderLine.id)
-        .where(SalesOrderLine.so_id == so_id)
+        .where(SalesOrderLine.so_id == so_id, SalesOrderLinePart.part_id.is_not(None))
         .group_by(SalesOrderLinePart.part_id)
     ):
         needs[part_id] = units

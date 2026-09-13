@@ -46,7 +46,12 @@ from importlib.metadata import PackageNotFoundError, version
 # and filled by that same re-import.
 # 12 adds sales_orders.coupon_total (what coupons took off, for display only --
 # WooCommerce's line prices are already net of them). Purely additive.
-SCHEMA_VERSION = 12
+# 13 makes product_sku_parts.part_id and sales_order_line_parts.part_id
+# optional: a NULL part is the "ignore this sku/line" marker. Relaxing NOT NULL
+# only widens what is accepted, so an older file replays unchanged -- but the
+# stamp still moves, so an older Stronghold refuses a file whose ignore rows it
+# would drop on its next export.
+SCHEMA_VERSION = 13
 
 try:
     APP_VERSION = version("stronghold")
