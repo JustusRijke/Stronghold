@@ -2469,6 +2469,48 @@ def stock_value_report() -> StockValueReport:
     )
 
 
+class StockShortageRow(BaseModel):
+    """One part the open sales orders leave short. in_stock and needed are the
+    two figures shortage is the difference of, so the user can see what it is
+    based on -- needed includes the demand exploded assemblies pulled through."""
+
+    part_id: int
+    sku: str
+    description: str
+    shortage: float  # in_stock - needed, always negative
+    in_stock: float
+    needed: float
+    part_virtual: bool
+
+
+@router.get("/reports/stock-shortage", response_model=list[StockShortageRow])
+def stock_shortage_report() -> list[StockShortageRow]:
+    """What the open sales orders leave us short of, with short assemblies
+    exploded through their BOMs (see db.stock_shortages, which owns the rule).
+    Build orders are ignored entirely: this is what the sales on the books ask
+    for, whatever has already been planned to build."""
+    with db.session() as s:
+        rows = db.stock_shortages(s)
+        parts = {
+            p.id: p
+            for p in s.scalars(
+                select(Part).where(Part.id.in_([pid for pid, _, _ in rows]))
+            )
+        }
+    return [
+        StockShortageRow(
+            part_id=part_id,
+            sku=parts[part_id].sku or "",
+            description=parts[part_id].description,
+            shortage=in_stock - needed,
+            in_stock=in_stock,
+            needed=needed,
+            part_virtual=parts[part_id].virtual,
+        )
+        for part_id, in_stock, needed in rows
+    ]
+
+
 # -- activity log -----------------------------------------------------------
 
 

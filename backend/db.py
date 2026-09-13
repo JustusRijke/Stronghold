@@ -3953,3 +3953,66 @@ def part_demand(s: Session) -> dict[int, tuple[float, float, float, float]]:
         )
         for pid in set(for_builds) | set(for_sales) | set(incoming) | set(in_production)
     }
+
+
+def stock_shortages(s: Session) -> list[tuple[int, float, float]]:
+    """(part_id, in_stock, needed) for every non-assembly part the open sales
+    orders leave short, worst first.
+
+    A pure sales-vs-stock simulation: build orders are ignored entirely. An
+    assembly that comes out short is exploded through its BOM as if it were
+    built -- only the shortfall, since the units already on the shelf cover
+    that many sales -- and its components carry the demand down, recursively.
+    Assemblies therefore never appear in the result, only the parts you can
+    actually buy or make time for."""
+    need = {pid: sales for pid, (_, sales, _, _) in part_demand(s).items() if sales}
+    stock = {
+        part_id: total
+        for part_id, total in s.execute(
+            select(StockItem.part_id, func.sum(StockItem.count))
+            .where(StockItem.status == STOCK_AVAILABLE)
+            .group_by(StockItem.part_id)
+        )
+    }
+    bom: dict[int, list[tuple[int, float]]] = {}
+    for parent_id, component_id, qty in s.execute(
+        select(BomLine.parent_part_id, BomLine.component_part_id, BomLine.quantity)
+    ):
+        bom.setdefault(parent_id, []).append((component_id, qty))
+    assemblies = set(s.scalars(select(Part.id).where(Part.assembly.is_(True))))
+
+    # An assembly's shortfall depends on its total need, and several parents may
+    # each add to it, so it must not explode until every parent above it has.
+    # Hence a topological order (parents before children) rather than a plain
+    # recursion, which would settle a shared sub-assembly on first sight and
+    # silently drop the demand from its second parent.
+    parents: dict[int, list[int]] = {}
+    for parent_id, lines in bom.items():
+        for component_id, _ in lines:
+            parents.setdefault(component_id, []).append(parent_id)
+
+    order: list[int] = []
+    state: dict[int, int] = {}  # 1 = on the current path, 2 = emitted
+
+    def visit(part_id: int) -> None:
+        if state.get(part_id):
+            return  # already emitted, or a BOM cycle: stop rather than loop
+        state[part_id] = 1
+        for parent_id in parents.get(part_id, ()):
+            visit(parent_id)
+        state[part_id] = 2
+        order.append(part_id)
+
+    for part_id in sorted(set(need) | set(bom) | set(parents)):
+        visit(part_id)
+
+    out = []
+    for part_id in order:
+        short = need.get(part_id, 0.0) - stock.get(part_id, 0.0)
+        if part_id in assemblies:
+            if short > 1e-9:  # only the shortfall is built; the shelf covers the rest
+                for component_id, per_unit in bom.get(part_id, ()):
+                    need[component_id] = need.get(component_id, 0.0) + short * per_unit
+        elif short > 1e-9:
+            out.append((part_id, stock.get(part_id, 0.0), need.get(part_id, 0.0)))
+    return out

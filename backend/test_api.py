@@ -1365,6 +1365,62 @@ def test_sales_order_flow(client):
     assert client.get("/api/search?q=Buyer").json()[0]["id"] == so_id
 
 
+def test_stock_shortage_report(client):
+    """A two-level assembly with a shared component. Only leaf parts come out,
+    and the shared one carries demand from both parents."""
+
+    def part(sku, **kw):
+        return client.post(
+            "/api/parts", json={"sku": sku, "description": sku, **kw}
+        ).json()
+
+    def stock(part_id, count):
+        item = client.post("/api/stock", json={"part_id": part_id}).json()
+        client.patch(f"/api/stock/{item['id']}", json={"count": count})
+
+    def bom(parent, component, qty):
+        r = client.post(
+            f"/api/parts/{parent['id']}/bom",
+            json={"component_part_id": component["id"], "quantity": qty},
+        )
+        assert r.status_code == 201, r.text
+
+    screw = part("SCREW")  # shared by both assemblies
+    plate = part("PLATE")
+    spare = part("SPARE")  # stocked well enough never to appear
+    sub = part("SUB")
+    assy = part("ASSY")
+    client.patch(f"/api/parts/{sub['id']}", json={"assembly": True})
+    client.patch(f"/api/parts/{assy['id']}", json={"assembly": True})
+    bom(assy, sub, 2)
+    bom(assy, screw, 1)
+    bom(assy, spare, 1)
+    bom(sub, screw, 3)
+    bom(sub, plate, 1)
+
+    stock(sub["id"], 1)  # covers 1 of the 5 sold; 4 must be built
+    stock(plate["id"], 2)
+    stock(spare["id"], 100)
+
+    so_id = _seed_sale(client, qty=5.0)
+    line_id = client.get(f"/api/sales-orders/{so_id}/lines").json()[0]["id"]
+    client.post(
+        f"/api/sales-orders/{so_id}/lines/{line_id}/parts",
+        json={"part_id": assy["id"], "quantity": 1},
+    )
+
+    rows = {r["sku"]: r for r in client.get("/api/reports/stock-shortage").json()}
+    # assemblies are exploded away, and a well-stocked part is not short
+    assert set(rows) == {"SCREW", "PLATE"}
+    # 5 ASSY needed, 0 in stock -> 5 short. SUB: 5*2 = 10 needed, 1 in stock ->
+    # 9 short. SCREW is pulled by both: 5 direct from ASSY + 9*3 from SUB = 32.
+    assert (rows["SCREW"]["needed"], rows["SCREW"]["in_stock"]) == (32.0, 0.0)
+    assert rows["SCREW"]["shortage"] == -32.0
+    # PLATE: 9 from SUB, 2 on the shelf
+    assert (rows["PLATE"]["needed"], rows["PLATE"]["in_stock"]) == (9.0, 2.0)
+    assert rows["PLATE"]["shortage"] == -7.0
+
+
 def test_ignoring_lines_and_skus(client):
     """A line that consumes nothing (shipping, a fee) is ignored rather than
     linked, and the decision is remembered against the sku."""

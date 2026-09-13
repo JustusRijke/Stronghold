@@ -1186,6 +1186,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/reports/stock-shortage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stock Shortage Report
+         * @description What the open sales orders leave us short of, with short assemblies
+         *     exploded through their BOMs (see db.stock_shortages, which owns the rule).
+         *     Build orders are ignored entirely: this is what the sales on the books ask
+         *     for, whatever has already been planned to build.
+         */
+        get: operations["stock_shortage_report_api_reports_stock_shortage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/activity": {
         parameters: {
             query?: never;
@@ -2149,6 +2172,28 @@ export interface components {
              * @enum {string}
              */
             price_basis: "po" | "build" | "build_partial" | "estimate" | "virtual" | "po_no_price" | "none";
+        };
+        /**
+         * StockShortageRow
+         * @description One part the open sales orders leave short. in_stock and needed are the
+         *     two figures shortage is the difference of, so the user can see what it is
+         *     based on -- needed includes the demand exploded assemblies pulled through.
+         */
+        StockShortageRow: {
+            /** Part Id */
+            part_id: number;
+            /** Sku */
+            sku: string;
+            /** Description */
+            description: string;
+            /** Shortage */
+            shortage: number;
+            /** In Stock */
+            in_stock: number;
+            /** Needed */
+            needed: number;
+            /** Part Virtual */
+            part_virtual: boolean;
         };
         /**
          * StockStatus
@@ -4774,6 +4819,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StockValueReport"];
+                };
+            };
+        };
+    };
+    stock_shortage_report_api_reports_stock_shortage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockShortageRow"][];
                 };
             };
         };
