@@ -21,6 +21,13 @@
 			href: '/reports/stock-value',
 			title: 'Stock value',
 			blurb: 'What the stock on hand is worth, priced from purchase orders.'
+		},
+		{
+			href: '/reports/stock-shortage',
+			title: 'Stock shortage',
+			blurb:
+				'What the open sales orders leave us short of, with short assemblies exploded ' +
+				'through their BOMs. Build orders are ignored.'
 		}
 	];
 </script>

@@ -179,6 +179,12 @@ Open-source inventory/stock tracking for small and medium businesses.
   filtered rows and all stock. An "Understated" tile counts the rows whose value
   rests on an estimate (a build whose inputs were themselves estimated, or which
   still owes parts) so an underestimate cannot hide inside the total
+- A stock shortage report answering "what do I need to buy?": actual stock minus
+  what the open sales orders need, with every assembly that comes out short
+  exploded through its BOM (only the shortfall -- the units on the shelf cover
+  that many sales), recursively, so the list is only parts you can actually buy.
+  Columns show the shortfall alongside the two figures behind it. Build orders
+  are ignored by design: it is a plain sold-versus-shelf simulation
 - Every part carries an estimated unit price, shown on the part page and in the
   parts overview. A purchased part is worth its most recent purchase price
   (including that order's delivery cost, split over its lines by value); an

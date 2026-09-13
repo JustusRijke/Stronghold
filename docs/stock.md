@@ -223,6 +223,51 @@ The four tiles at the top:
 Assemblies appear as ordinary stock: they were produced by a build and are worth
 what that build consumed.
 
+## The stock shortage report
+
+Reports > Stock shortage. It answers "what do I need to buy to fulfil the
+orders I have?"
+
+It starts from the stock you actually have -- not free stock -- and takes off
+what the open sales orders need. A part that comes out negative is short. A part
+whose count is **already** negative is short on its own account, with nothing
+needing to ask for it: that is a debt row left by a short build or sale (see
+"Negative stock, and why it exists" above), and it appears here until settled.
+
+The useful part is what happens to **assemblies**. An assembly you are short of
+is exploded through its bill of materials, as if you were about to build it,
+and its components inherit that demand. If those components are themselves
+assemblies, it happens again, all the way down. The result lists only parts you
+can actually buy: every assembly has been taken apart.
+
+Only the **shortfall** explodes. If five are sold and you have two on the shelf,
+those two cover two of the sales and only the remaining three are exploded into
+components. An assembly you have enough of consumes nothing from its children.
+
+Three columns explain each figure:
+
+- **Short by** -- the gap. This is what you need to obtain.
+- **In stock** -- what that part has on the shelf right now.
+- **Needed for sales** -- what the open orders ask for, *including* everything
+  the exploded assemblies pulled through. So a screw used in two different
+  assemblies shows the demand from both, added together.
+
+Two things worth knowing:
+
+- **Build orders are ignored entirely.** This report is deliberately a plain
+  "what has been sold versus what is on the shelf" simulation. It does not care
+  what you have already planned to build, so it will happily tell you that you
+  are short of something a build order would have covered. Use it to decide what
+  to order, then check your builds.
+- **Virtual parts always appear.** Labour holds no stock, so it is always
+  short. The figure is the hours the open orders imply -- useful as a workload
+  estimate rather than a shopping list. The "Virtual" column filters them out.
+
+Which orders count is the same rule as the demand figures on a part page:
+unbooked orders, excluding the statuses you have marked as never going to be
+bought (see Sales orders > Order statuses). Booking an order consumes its stock,
+so a booked order has already taken its parts and asks for nothing more.
+
 ## Virtual parts
 
 A part can be marked **virtual** -- something with unlimited supply that has a

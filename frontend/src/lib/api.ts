@@ -19,6 +19,7 @@ import type {
 	Activity,
 	SearchResult,
 	StockValueReport,
+	StockShortageRow,
 	SalesOrder,
 	PartSalesOrder,
 	SalesOrderLine,
@@ -257,6 +258,7 @@ export const api = {
 
 	// reports
 	stockValue: () => get<StockValueReport>('/reports/stock-value'),
+	stockShortage: () => get<StockShortageRow[]>('/reports/stock-shortage'),
 	refreshPrices: () => post<{ priced: number }>('/parts/refresh-prices'),
 
 	// activity log
