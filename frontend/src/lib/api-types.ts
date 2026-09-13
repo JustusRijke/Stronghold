@@ -1216,8 +1216,9 @@ export interface paths {
         };
         /**
          * Stock Shortage Report
-         * @description What the open sales orders leave us short of, with short assemblies
-         *     exploded through their BOMs (see db.stock_shortages, which owns the rule).
+         * @description Every active non-assembly part's stock position against the open sales
+         *     orders, with short assemblies exploded through their BOMs (see
+         *     db.stock_shortages, which owns the rule).
          *     Build orders are ignored entirely: this is what the sales on the books ask
          *     for, whatever has already been planned to build.
          */
@@ -2203,9 +2204,10 @@ export interface components {
         };
         /**
          * StockShortageRow
-         * @description One part the open sales orders leave short. in_stock and needed are the
-         *     two figures shortage is the difference of, so the user can see what it is
-         *     based on -- needed includes the demand exploded assemblies pulled through.
+         * @description One part's stock position against the open sales orders. in_stock and
+         *     needed are the two figures shortage is the difference of, so the user can
+         *     see what it is based on -- needed includes the demand exploded assemblies
+         *     pulled through. Negative shortage means short, positive is left over.
          */
         StockShortageRow: {
             /** Part Id */

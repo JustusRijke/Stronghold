@@ -1423,8 +1423,12 @@ def test_stock_shortage_report(client):
     )
 
     rows = {r["sku"]: r for r in client.get("/api/reports/stock-shortage").json()}
-    # assemblies are exploded away, and a well-stocked part is not short
-    assert set(rows) == {"SCREW", "PLATE", "LONE"}
+    # every non-assembly part is listed, short or not; assemblies are exploded
+    # away, so ASSY and SUB never appear
+    assert set(rows) == {"SCREW", "PLATE", "LONE", "SPARE"}
+    # a well-stocked part is reported too, with what it has left over
+    assert (rows["SPARE"]["in_stock"], rows["SPARE"]["needed"]) == (100.0, 5.0)
+    assert rows["SPARE"]["shortage"] == 95.0
     # already negative is short on its own: nothing needs to ask for it
     assert (rows["LONE"]["in_stock"], rows["LONE"]["needed"]) == (-4.0, 0.0)
     assert rows["LONE"]["shortage"] == -4.0
