@@ -295,9 +295,9 @@
 					<!-- bookable while unbooked, and again once parts have been added
 					     to an order already booked (booking consumes the delta) -->
 					<div class="actions">
-						{#if !so.booked}
-							<button class="btn ghost" onclick={prefill}>Prefill from SKUs</button>
-						{/if}
+						<!-- also after booking: a booked order can still carry unlinked
+						     lines, and prefill only fills the ones with no link -->
+						<button class="btn ghost" onclick={prefill}>Prefill from SKUs</button>
 						{#if !so.booked || so.unbooked_parts > 0}
 							<button class="btn" onclick={() => dialog?.showModal()}>
 								{so.booked ? 'Book added parts' : 'Book order'}
