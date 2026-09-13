@@ -141,11 +141,10 @@
 		});
 		if (!ok) return;
 		dialog?.close();
-		// the last unit produced completes the build -- back to the list
-		if (status === 'Complete') {
-			buildTabs.close(id);
-			goto('/build-orders');
-		} else load();
+		// the last unit produced completes the build -- back to the overview
+		// (the tab stays open)
+		if (status === 'Complete') goto('/build-orders');
+		else load();
 	}
 
 	const stockCols: Column<StockItem>[] = [

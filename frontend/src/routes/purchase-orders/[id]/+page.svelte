@@ -108,11 +108,6 @@
 			lines = await api.poLines(id);
 		}
 	}
-	// a finished order needs no tab -- close it and show the list
-	function leave() {
-		poTabs.close(id);
-		goto('/purchase-orders');
-	}
 	async function receive(line: POLine, qty: number) {
 		const check = validate(BookIn, { quantity: Number.isFinite(qty) ? qty : undefined });
 		if (!check.ok) {
@@ -133,7 +128,8 @@
 			lines = await api.poLines(id);
 			stock = (await api.stock()).filter((s) => s.po_id === id);
 			// receiving the last outstanding line finishes the order -- back to the list
-			if (!outstandingOf(lines)) leave();
+			// nothing left outstanding -- back to the overview (the tab stays open)
+			if (!outstandingOf(lines)) goto('/purchase-orders');
 		}
 	}
 	async function removeLine(line: POLine) {
@@ -185,7 +181,7 @@
 	const factor = $derived(delivery > 0 && goods > 0 ? 1 + delivery / goods : 1);
 	async function receiveAll() {
 		if (!confirm(`Receive all outstanding quantity on ${lines.length} line(s)?`)) return;
-		if (await toast.run(() => api.receiveAllPo(id))) leave();
+		if (await toast.run(() => api.receiveAllPo(id))) goto('/purchase-orders');
 	}
 
 	const stockCols: Column<StockItem>[] = [

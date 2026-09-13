@@ -191,10 +191,11 @@ product, something shipped from stock you do not track here.
 If you link more parts afterwards, the button comes back as **Book added
 parts**: it consumes only the new ones.
 
-Booking closes the order's tab and returns you to the sales order list -- the
-order is dealt with, so the next one is usually what you want. Purchase orders
-and build orders do the same once they are finished: receiving the last
-outstanding quantity, or producing the last unit.
+Booking switches you back to the Overview tab and the sales order list -- the
+order is dealt with, so the next one is usually what you want. Its own tab stays
+open, so you can go straight back to it. Purchase orders and build orders do the
+same once they are finished: receiving the last outstanding quantity, or
+producing the last unit.
 
 ### Booking when you are short
 

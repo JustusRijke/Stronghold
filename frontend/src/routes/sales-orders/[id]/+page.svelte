@@ -131,8 +131,8 @@
 	async function doBook() {
 		if (await toast.run(() => api.bookSalesOrder(id))) {
 			dialog?.close();
-			// booking is the last thing done to an order -- close its tab, back to the list
-			salesOrderTabs.close(id);
+			// booking is the last thing done to an order -- back to the overview.
+			// The tab stays open, so the order is one click away.
 			goto('/sales-orders');
 		}
 	}
