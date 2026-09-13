@@ -1549,6 +1549,21 @@ def test_product_sku_prefill_over_the_api(client):
     ).json()
     assert [(p["part_sku"], p["quantity"]) for p in saved[0]["parts"]] == [("B1", 1.0)]
 
+    # the list page's button: every order's unlinked lines in one write. The
+    # two already-linked orders are left alone, so only the new one counts.
+    fresh = _seed_sale(client, so_id=3, qty=1.0, sku="HBT-H-DL")
+    assert client.post("/api/sales-orders/prefill").json() == {
+        "filled": 2,
+        "orders": 1,
+    }
+    lines = client.get(f"/api/sales-orders/{fresh}/lines").json()
+    assert [(p["sku"], p["quantity"]) for p in lines[0]["parts"]] == [
+        ("B1", 4.0),
+        ("N1", 2.0),
+    ]
+    # ...and again is a no-op: those lines now have parts
+    assert client.post("/api/sales-orders/prefill").json() == {"filled": 0, "orders": 0}
+
     # patch one mapping row, and drop another
     dl = next(
         r for r in client.get("/api/product-skus").json() if r["sku"] == "HBT-H-DL"

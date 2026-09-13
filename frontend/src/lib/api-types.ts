@@ -721,6 +721,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sales-orders/prefill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prefill All Sales Order Parts
+         * @description Prefill every order's unlinked lines from the product sku mappings.
+         *     Lines that already have parts are left alone, booked or not.
+         */
+        post: operations["prefill_all_sales_order_parts_api_sales_orders_prefill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sales-orders/{so_id}": {
         parameters: {
             query?: never;
@@ -1773,6 +1794,13 @@ export interface components {
             realised_margin_pct: number | null;
             /** Required */
             required: number;
+        };
+        /** PrefillResultOut */
+        PrefillResultOut: {
+            /** Filled */
+            filled: number;
+            /** Orders */
+            orders: number;
         };
         /** ProduceIn */
         ProduceIn: {
@@ -4030,6 +4058,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SalesStatusOut"][];
+                };
+            };
+        };
+    };
+    prefill_all_sales_order_parts_api_sales_orders_prefill_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrefillResultOut"];
                 };
             };
         };

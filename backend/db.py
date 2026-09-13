@@ -3611,6 +3611,27 @@ def prefill_so_parts(s: Session, so_id: int) -> None:
         )
 
 
+@_write
+def prefill_all_so_parts(s: Session, result: dict) -> None:
+    """The list page's "prefill from SKUs" over every order at once. One write,
+    one activity row, one commit -- the per-order route in a client-side loop
+    would be N of each. Counts go out through result, since @_write drops what
+    fn returns (the importer reports its own run the same way)."""
+    for (so_id,) in s.execute(select(SalesOrder.id).order_by(SalesOrder.id)):
+        got, _ = _prefill_so_parts(s, so_id)
+        if got:
+            result["filled"] += got
+            result["orders"] += 1
+    if result["filled"]:
+        _activity(
+            s,
+            "prefill_all_so_parts",
+            f"Filled in {result['filled']} part link(s) on {result['orders']} "
+            f"sales order(s) from the product sku mappings",
+            [],
+        )
+
+
 def _prefill_so_parts(s: Session, so_id: int) -> tuple[int, int]:
     """Fill in the parts of every line whose sku has a mapping. Returns (links
     written, lines filled); the caller logs.
@@ -3623,9 +3644,9 @@ def _prefill_so_parts(s: Session, so_id: int) -> tuple[int, int]:
 
     Only lines that have no parts yet are touched: once the user has edited a
     line, the mapping is a starting point they already moved on from. A booked
-    order is skipped for the same reason add_line_part is allowed on one --
-    adding is safe, but there is nothing to add to a line that already has its
-    parts, and a booked order's lines all do."""
+    order is fair game for the same reason add_line_part is allowed on one --
+    booking no longer implies every line is linked (an order can be booked
+    without consuming stock), and the links it adds are booked as the delta."""
     so = get_so(s, so_id)
     link_id = (s.scalar(select(func.max(SalesOrderLinePart.id))) or 0) + 1
     filled = 0
