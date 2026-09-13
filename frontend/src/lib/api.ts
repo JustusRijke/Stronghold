@@ -236,6 +236,8 @@ export const api = {
 	importSalesOrders: (b: { after: string; before?: string | null }) =>
 		post<ImportResult>('/sales-orders/import', b),
 	prefillSalesOrder: (id: number) => post<SalesOrderLine[]>(`/sales-orders/${id}/prefill`, {}),
+	prefillAllSalesOrders: () =>
+		post<{ filled: number; orders: number }>('/sales-orders/prefill', {}),
 
 	// product skus: the sold-sku -> assembly map the prefill reads
 	productSkus: () => get<ProductSku[]>('/product-skus'),

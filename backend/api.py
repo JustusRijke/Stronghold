@@ -2011,6 +2011,20 @@ def sales_order_statuses() -> list[SalesStatusOut]:
     ]
 
 
+class PrefillResultOut(BaseModel):
+    filled: int  # part links written
+    orders: int  # sales orders they landed on
+
+
+@router.post("/sales-orders/prefill", response_model=PrefillResultOut)
+def prefill_all_sales_order_parts() -> PrefillResultOut:
+    """Prefill every order's unlinked lines from the product sku mappings.
+    Lines that already have parts are left alone, booked or not."""
+    result = {"filled": 0, "orders": 0}
+    _guard(db.prefill_all_so_parts, result)
+    return PrefillResultOut(**result)
+
+
 @router.get("/sales-orders/{so_id}", response_model=SalesOrderOut)
 def get_sales_order(so_id: int) -> SalesOrderOut:
     with db.session() as s:

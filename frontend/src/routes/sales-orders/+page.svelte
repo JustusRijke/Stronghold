@@ -26,6 +26,7 @@
 	let after = $state(iso(weekAgo));
 	let before = $state('');
 	let importing = $state(false);
+	let prefilling = $state(false);
 
 	async function load() {
 		rows = (await api.salesOrders()).map((so) => ({
@@ -61,6 +62,23 @@
 			});
 		} finally {
 			importing = false;
+		}
+	}
+
+	async function prefillAll() {
+		prefilling = true;
+		try {
+			await toast.run(async () => {
+				const r = await api.prefillAllSalesOrders();
+				await load();
+				toast.show(
+					r.filled
+						? `Filled in ${r.filled} part link(s) on ${r.orders} order(s)`
+						: 'Nothing to fill in: no unlinked line matched a product SKU'
+				);
+			});
+		} finally {
+			prefilling = false;
 		}
 	}
 
@@ -100,6 +118,9 @@
 		<label>To <input type="date" bind:value={before} /></label>
 		<button onclick={runImport} disabled={importing}>
 			{importing ? 'Importing...' : 'Import from WooCommerce'}
+		</button>
+		<button onclick={prefillAll} disabled={prefilling}>
+			{prefilling ? 'Prefilling...' : 'Prefill from SKUs'}
 		</button>
 	</div>
 	<DataTable
