@@ -3190,11 +3190,15 @@ def _check_unbooked(s: Session, so: SalesOrder) -> None:
     Adding a link to a booked order is fine -- booking again consumes the delta
     (see so_outstanding). Changing or removing one is not: those units are
     already out of stock, so honouring it would mean un-consuming them, putting
-    stock back on the shelf and unwinding any paired debt row."""
-    if so.booked:
+    stock back on the shelf and unwinding any paired debt row.
+
+    What blocks the edit is the consumption, not the flag: an order booked
+    without consuming stock (`consume=False`, or a row marked booked by hand)
+    has taken nothing, so its links are still free to change."""
+    if so.booked and so_consumed(s, so.id):
         raise InventoryError(
-            f"sales order {so.id} is booked; its existing parts can no longer "
-            f"be changed (you can still add parts and book again)"
+            f"sales order {so.id} is booked and has consumed stock; its existing "
+            f"parts can no longer be changed (you can still add parts and book again)"
         )
 
 

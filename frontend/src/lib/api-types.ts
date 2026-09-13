@@ -1778,6 +1778,8 @@ export interface components {
             more_lines: number;
             /** Unbooked Parts */
             unbooked_parts: number;
+            /** Links Frozen */
+            links_frozen: boolean;
             /** Revenue */
             revenue: number;
             /** Estimated Cost */
@@ -2004,6 +2006,8 @@ export interface components {
             more_lines: number;
             /** Unbooked Parts */
             unbooked_parts: number;
+            /** Links Frozen */
+            links_frozen: boolean;
             /** Revenue */
             revenue: number;
             /** Estimated Cost */

@@ -446,6 +446,9 @@ class SalesOrderOut(BaseModel):
     # parts mapped but not yet taken out of stock. Non-zero on a booked order
     # means parts were linked after booking; booking again consumes them.
     unbooked_parts: int
+    # whether the existing links are frozen. Booking alone does not freeze them:
+    # an order booked without consuming stock has taken nothing to unwind.
+    links_frozen: bool
     revenue: float  # ex VAT, plus shipping charged when shipping counts
     estimated_cost: float | None
     realised_cost: float | None
@@ -1784,9 +1787,9 @@ def list_build_stock(build_id: int) -> list[StockItemOut]:
 # -- sales orders -----------------------------------------------------------
 
 
-def _so_totals(s) -> tuple[dict, dict, dict, dict, dict]:
+def _so_totals(s) -> tuple[dict, dict, dict, dict, dict, dict, set]:
     """(revenue, estimated cost, realised cost, outstanding parts, unlinked
-    lines) per sales order, as grouped queries rather than a handful per order
+    lines, line skus, orders that consumed stock) per sales order, as grouped queries rather than a handful per order
     -- the list
     page would otherwise scale with orders times parts-per-order.
 
@@ -1874,7 +1877,16 @@ def _so_totals(s) -> tuple[dict, dict, dict, dict, dict]:
             .group_by(SalesOrderLine.so_id)
         ).all()
     )
-    return revenue, estimated, realised, outstanding, unlinked, _line_skus(s)
+    consumed = {so_id for so_id, _ in taken}
+    return (
+        revenue,
+        estimated,
+        realised,
+        outstanding,
+        unlinked,
+        _line_skus(s),
+        consumed,
+    )
 
 
 # The sold product codes of an order, dearest first, for the list column. Built
@@ -1898,6 +1910,7 @@ def _so_out(s, so: SalesOrder, totals: tuple[dict, ...] | None = None):
         revenue = db.so_revenue(s, so.id)
         estimated, realised = db.so_cost(s, so.id)
         outstanding = len(db.so_outstanding(s, so.id))
+        has_consumed = bool(db.so_consumed(s, so.id))
         unlinked = s.scalar(
             select(func.count())
             .select_from(SalesOrderLine)
@@ -1908,9 +1921,16 @@ def _so_out(s, so: SalesOrder, totals: tuple[dict, ...] | None = None):
         )
         skus = _line_skus(s, so.id).get(so.id, [])
     else:
-        revenue_by, estimated_by, realised_by, outstanding_by, unlinked_by, skus_by = (
-            totals
-        )
+        (
+            revenue_by,
+            estimated_by,
+            realised_by,
+            outstanding_by,
+            unlinked_by,
+            skus_by,
+            consumed_ids,
+        ) = totals
+        has_consumed = so.id in consumed_ids
         skus = skus_by.get(so.id, [])
         revenue = revenue_by.get(so.id, 0.0)
         estimated = estimated_by.get(so.id)
@@ -1957,6 +1977,7 @@ def _so_out(s, so: SalesOrder, totals: tuple[dict, ...] | None = None):
         line_skus=skus[:3],
         more_lines=max(0, len(skus) - 3),
         unbooked_parts=outstanding,
+        links_frozen=so.booked and has_consumed,
         revenue=revenue,
         estimated_cost=estimated,
         realised_cost=realised,
