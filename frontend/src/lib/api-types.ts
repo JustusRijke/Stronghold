@@ -1674,6 +1674,8 @@ export interface components {
             date_created: string | null;
             /** Booked */
             booked: boolean;
+            /** Linked */
+            linked: boolean;
             /** Unbooked Parts */
             unbooked_parts: number;
             /** Revenue */
@@ -1878,6 +1880,8 @@ export interface components {
             date_created: string | null;
             /** Booked */
             booked: boolean;
+            /** Linked */
+            linked: boolean;
             /** Unbooked Parts */
             unbooked_parts: number;
             /** Revenue */

@@ -439,6 +439,7 @@ class SalesOrderOut(BaseModel):
     status: str
     date_created: date | None
     booked: bool
+    linked: bool  # every line maps to at least one part
     # parts mapped but not yet taken out of stock. Non-zero on a booked order
     # means parts were linked after booking; booking again consumes them.
     unbooked_parts: int
@@ -1772,9 +1773,10 @@ def list_build_stock(build_id: int) -> list[StockItemOut]:
 # -- sales orders -----------------------------------------------------------
 
 
-def _so_totals(s) -> tuple[dict, dict, dict, dict]:
-    """(revenue, estimated cost, realised cost, outstanding parts) per sales
-    order, as four grouped queries rather than a handful per order -- the list
+def _so_totals(s) -> tuple[dict, dict, dict, dict, dict]:
+    """(revenue, estimated cost, realised cost, outstanding parts, unlinked
+    lines) per sales order, as grouped queries rather than a handful per order
+    -- the list
     page would otherwise scale with orders times parts-per-order.
 
     Estimated cost skips a part with no price, matching db.so_cost: a part
@@ -1849,22 +1851,42 @@ def _so_totals(s) -> tuple[dict, dict, dict, dict]:
     for so_id, part_id, units in mapped:
         if units - taken.get((so_id, part_id), 0.0) > 1e-9:
             outstanding[so_id] = outstanding.get(so_id, 0) + 1
-    return revenue, estimated, realised, outstanding
+    # lines with no part mapped at all -- an order is "linked" once none remain
+    unlinked = dict(
+        s.execute(
+            select(SalesOrderLine.so_id, func.count())
+            .outerjoin(
+                SalesOrderLinePart, SalesOrderLinePart.line_id == SalesOrderLine.id
+            )
+            .where(SalesOrderLinePart.id.is_(None))
+            .group_by(SalesOrderLine.so_id)
+        ).all()
+    )
+    return revenue, estimated, realised, outstanding, unlinked
 
 
-def _so_out(s, so: SalesOrder, totals: tuple[dict, dict, dict, dict] | None = None):
+def _so_out(s, so: SalesOrder, totals: tuple[dict, ...] | None = None):
     if totals is None:
         revenue = db.so_revenue(s, so.id)
         estimated, realised = db.so_cost(s, so.id)
         outstanding = len(db.so_outstanding(s, so.id))
+        unlinked = s.scalar(
+            select(func.count())
+            .select_from(SalesOrderLine)
+            .outerjoin(
+                SalesOrderLinePart, SalesOrderLinePart.line_id == SalesOrderLine.id
+            )
+            .where(SalesOrderLine.so_id == so.id, SalesOrderLinePart.id.is_(None))
+        )
     else:
-        revenue_by, estimated_by, realised_by, outstanding_by = totals
+        revenue_by, estimated_by, realised_by, outstanding_by, unlinked_by = totals
         revenue = revenue_by.get(so.id, 0.0)
         estimated = estimated_by.get(so.id)
         # an unbooked order has consumed nothing, so it has no realised cost --
         # not a cost of zero
         realised = realised_by.get(so.id) if so.booked else None
         outstanding = outstanding_by.get(so.id, 0)
+        unlinked = unlinked_by.get(so.id, 0)
 
     # a fee is money that changed hands on this order (a discount is a negative
     # one), so it counts whether or not shipping does
@@ -1896,6 +1918,7 @@ def _so_out(s, so: SalesOrder, totals: tuple[dict, dict, dict, dict] | None = No
         status=so.status,
         date_created=so.date_created,
         booked=so.booked,
+        linked=not unlinked,
         unbooked_parts=outstanding,
         revenue=revenue,
         estimated_cost=estimated,
