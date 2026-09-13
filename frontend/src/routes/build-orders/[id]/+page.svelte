@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { api } from '$lib/api';
 	import { toast } from '$lib/toast.svelte';
 	import { buildTabs } from '$lib/tabs.svelte';
@@ -134,10 +135,17 @@
 		dialog?.showModal();
 	}
 	async function doProduce() {
-		if (await toast.run(() => api.produceBuild(id, produceQty))) {
-			dialog?.close();
-			load();
-		}
+		let status = '';
+		const ok = await toast.run(async () => {
+			status = (await api.produceBuild(id, produceQty)).status;
+		});
+		if (!ok) return;
+		dialog?.close();
+		// the last unit produced completes the build -- back to the list
+		if (status === 'Complete') {
+			buildTabs.close(id);
+			goto('/build-orders');
+		} else load();
 	}
 
 	const stockCols: Column<StockItem>[] = [
