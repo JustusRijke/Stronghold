@@ -3981,9 +3981,9 @@ def part_demand(s: Session) -> dict[int, tuple[float, float, float, float]]:
 
 
 def stock_shortages(s: Session) -> list[tuple[int, float, float]]:
-    """(part_id, in_stock, needed) for every non-assembly part that is short,
-    worst first -- either because the open sales orders ask for more than is on
-    the shelf, or because the count is already negative.
+    """(part_id, in_stock, needed) for every active non-assembly part, short or
+    not: a full stock position against what the open sales orders ask for.
+    Negative means short, and the caller sorts those to the top.
 
     A pure sales-vs-stock simulation: build orders are ignored entirely. An
     assembly that comes out short is exploded through its BOM as if it were
@@ -4029,10 +4029,11 @@ def stock_shortages(s: Session) -> list[tuple[int, float, float]]:
         state[part_id] = 2
         order.append(part_id)
 
-    # stock is in the seed set too: a part already sitting at a negative count
-    # is short whether or not anything is asking for it (that is what a debt row
-    # from a short build or sale is), and would otherwise never be looked at
-    for part_id in sorted(set(need) | set(stock) | set(bom) | set(parents)):
+    # every active part is reported, so every active part is walked -- plus the
+    # inactive ones still sitting in a BOM or holding stock, which must explode
+    # (or be counted) even though they are not listed themselves
+    active = set(s.scalars(select(Part.id).where(Part.active.is_(True))))
+    for part_id in sorted(active | set(need) | set(stock) | set(bom) | set(parents)):
         visit(part_id)
 
     out = []
@@ -4042,6 +4043,6 @@ def stock_shortages(s: Session) -> list[tuple[int, float, float]]:
             if short > 1e-9:  # only the shortfall is built; the shelf covers the rest
                 for component_id, per_unit in bom.get(part_id, ()):
                     need[component_id] = need.get(component_id, 0.0) + short * per_unit
-        elif short > 1e-9:
+        elif part_id in active:
             out.append((part_id, stock.get(part_id, 0.0), need.get(part_id, 0.0)))
     return out

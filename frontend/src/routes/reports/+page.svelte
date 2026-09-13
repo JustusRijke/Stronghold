@@ -26,8 +26,8 @@
 			href: '/reports/stock-shortage',
 			title: 'Stock shortage',
 			blurb:
-				'What the open sales orders leave us short of, with short assemblies exploded ' +
-				'through their BOMs. Build orders are ignored.'
+				'Every part against the open sales orders, shortages first, with short ' +
+				'assemblies exploded through their BOMs. Build orders are ignored.'
 		}
 	];
 </script>

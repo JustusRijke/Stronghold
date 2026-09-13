@@ -14,7 +14,7 @@
 	const columns: Column<StockShortageRow>[] = [
 		{ key: 'sku', header: 'SKU', mono: true, width: '160px' },
 		{ key: 'description', header: 'Description', truncate: true },
-		{ key: 'shortage', header: 'Short by', width: '110px', mono: true, format: qty },
+		{ key: 'shortage', header: 'Balance', width: '110px', mono: true, format: qty },
 		{ key: 'in_stock', header: 'In stock', width: '110px', mono: true, format: qty },
 		{ key: 'needed', header: 'Needed for sales', width: '150px', mono: true, format: qty },
 		{
@@ -38,7 +38,8 @@
 			defaultSort={{ key: 'shortage', dir: 'asc' }}
 		/>
 		<p class="note">
-			What the open sales orders leave us short of. An assembly that is short is exploded
+			Every part's stock position against the open sales orders: negative means short,
+			positive is what is left over. An assembly that is short is exploded
 			through its bill of materials as if it were built -- only the shortfall, since the
 			units already on the shelf cover that many sales -- so only the parts you can actually
 			buy are listed. "Needed for sales" therefore includes what those assemblies pull

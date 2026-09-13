@@ -2504,14 +2504,15 @@ def stock_value_report() -> StockValueReport:
 
 
 class StockShortageRow(BaseModel):
-    """One part the open sales orders leave short. in_stock and needed are the
-    two figures shortage is the difference of, so the user can see what it is
-    based on -- needed includes the demand exploded assemblies pulled through."""
+    """One part's stock position against the open sales orders. in_stock and
+    needed are the two figures shortage is the difference of, so the user can
+    see what it is based on -- needed includes the demand exploded assemblies
+    pulled through. Negative shortage means short, positive is left over."""
 
     part_id: int
     sku: str
     description: str
-    shortage: float  # in_stock - needed, always negative
+    shortage: float  # in_stock - needed; negative means short
     in_stock: float
     needed: float
     part_virtual: bool
@@ -2519,8 +2520,9 @@ class StockShortageRow(BaseModel):
 
 @router.get("/reports/stock-shortage", response_model=list[StockShortageRow])
 def stock_shortage_report() -> list[StockShortageRow]:
-    """What the open sales orders leave us short of, with short assemblies
-    exploded through their BOMs (see db.stock_shortages, which owns the rule).
+    """Every active non-assembly part's stock position against the open sales
+    orders, with short assemblies exploded through their BOMs (see
+    db.stock_shortages, which owns the rule).
     Build orders are ignored entirely: this is what the sales on the books ask
     for, whatever has already been planned to build."""
     with db.session() as s:

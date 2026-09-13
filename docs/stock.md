@@ -229,16 +229,22 @@ Reports > Stock shortage. It answers "what do I need to buy to fulfil the
 orders I have?"
 
 It starts from the stock you actually have -- not free stock -- and takes off
-what the open sales orders need. A part that comes out negative is short. A part
-whose count is **already** negative is short on its own account, with nothing
-needing to ask for it: that is a debt row left by a short build or sale (see
-"Negative stock, and why it exists" above), and it appears here until settled.
+what the open sales orders need. **Every part is listed**, whether it is short or
+not: a negative balance is a shortfall, a positive one is what you have left over
+once the orders are met. The table sorts worst-first, so anything you need to act
+on is at the top.
+
+A part whose count is **already** negative is short on its own account, with
+nothing needing to ask for it: that is a debt row left by a short build or sale
+(see "Negative stock, and why it exists" above), and it appears here until
+settled.
 
 The useful part is what happens to **assemblies**. An assembly you are short of
 is exploded through its bill of materials, as if you were about to build it,
 and its components inherit that demand. If those components are themselves
-assemblies, it happens again, all the way down. The result lists only parts you
-can actually buy: every assembly has been taken apart.
+assemblies, it happens again, all the way down. Assemblies themselves are never
+listed: every one has been taken apart, so the report is only parts you can
+actually buy.
 
 Only the **shortfall** explodes. If five are sold and you have two on the shelf,
 those two cover two of the sales and only the remaining three are exploded into
@@ -246,7 +252,8 @@ components. An assembly you have enough of consumes nothing from its children.
 
 Three columns explain each figure:
 
-- **Short by** -- the gap. This is what you need to obtain.
+- **Balance** -- stock minus what is needed. Negative is a shortfall and is what
+  you need to obtain; positive is the surplus left once the orders are filled.
 - **In stock** -- what that part has on the shelf right now.
 - **Needed for sales** -- what the open orders ask for, *including* everything
   the exploded assemblies pulled through. So a screw used in two different
