@@ -3302,10 +3302,14 @@ def ignore_line(s: Session, link_id: int, line_id: int) -> None:
     Written as a real (part-less) link row rather than as the absence of one:
     the blank then reads as a decision the user made, so the line counts as
     linked and stops being outstanding work. Rejected once the line has parts --
-    "ignore this" and "it uses these" cannot both be true."""
+    "ignore this" and "it uses these" cannot both be true.
+
+    Allowed on a booked order, like add_line_part and unlike edit/remove: the
+    marker consumes nothing, so there is no stock movement to unwind. A line
+    left unlinked when the order was booked is exactly where this is needed --
+    booking does not make it any more linked than it was."""
     line = _get_so_line(s, line_id)
     so = get_so(s, line.so_id)
-    _check_unbooked(s, so)
     existing = s.scalars(
         select(SalesOrderLinePart).where(SalesOrderLinePart.line_id == line_id)
     ).all()

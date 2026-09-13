@@ -1407,6 +1407,16 @@ def test_ignoring_lines_and_skus(client):
     assert filled[0]["ignored_id"] and filled[0]["parts"] == []
     assert client.get(f"/api/sales-orders/{so_id}").json()["linked"]
 
+    # a booked order is exactly where an unlinked line still needs ignoring:
+    # the marker consumes nothing, so booking does not freeze it
+    so2 = _seed_sale(client, so_id=2, qty=1.0, sku="FEE")
+    line2 = client.get(f"/api/sales-orders/{so2}/lines").json()[0]["id"]
+    assert client.post(f"/api/sales-orders/{so2}/book").json()["booked"]
+    assert not client.get(f"/api/sales-orders/{so2}").json()["linked"]
+    booked_lines = client.post(f"/api/sales-orders/{so2}/lines/{line2}/ignore").json()
+    assert booked_lines[0]["ignored_id"]
+    assert client.get(f"/api/sales-orders/{so2}").json()["linked"]
+
     # a sku that is ignored cannot also map to parts
     bad = client.post(
         "/api/product-skus",

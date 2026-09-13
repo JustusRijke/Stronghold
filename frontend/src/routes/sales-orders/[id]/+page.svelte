@@ -421,7 +421,9 @@
 							<button class="btn ghost small" onclick={() => (addingTo = line.id)}>
 								Link a part
 							</button>
-							{#if !so.booked && line.parts.length === 0 && !line.extras}
+							<!-- allowed on a booked order too: the marker consumes nothing,
+							     and an unlinked line is exactly what needs ignoring -->
+							{#if line.parts.length === 0 && !line.extras}
 								<button class="btn ghost small" onclick={() => ignoreLine(line.id)}>
 									Ignore this line
 								</button>
