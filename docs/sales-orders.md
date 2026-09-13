@@ -119,6 +119,10 @@ The sales order list carries a **Linked** column, ticked once every line on the
 order maps to at least one part -- what still needs your attention before the
 order can be booked in full.
 
+Its **Items** column lists every product code on the order, so typing a SKU into
+the table filter finds the orders that sold it. The cell is clipped to one line;
+hover it to read the full list.
+
 One thing is rejected:
 
 - **Changing or removing a link once the order has consumed stock.** Those
