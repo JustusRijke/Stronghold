@@ -15,6 +15,7 @@
 		revenue: number;
 		margin: number | null;
 		booked: boolean;
+		linked: boolean;
 	};
 	let rows = $state<Row[]>([]);
 
@@ -36,7 +37,8 @@
 			revenue: so.revenue,
 			// realised once booked, else the estimate -- whichever we actually know
 			margin: so.realised_margin_pct ?? so.estimated_margin_pct,
-			booked: so.booked
+			booked: so.booked,
+			linked: so.linked
 		}));
 	}
 	$effect(() => {
@@ -84,6 +86,7 @@
 			width: '100px',
 			format: (v) => (v === null ? '' : `${(v as number).toFixed(1)}%`)
 		},
+		{ key: 'linked', header: 'Linked', bool: true, width: '90px' },
 		{ key: 'booked', header: 'Booked', bool: true, width: '90px' }
 	]);
 </script>
