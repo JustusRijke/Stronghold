@@ -31,7 +31,7 @@
 			api.soldSkus()
 		]);
 		rows = skus;
-		parts = allParts;
+		parts = allParts.filter((p) => p.active);
 		sold = soldSkus;
 	}
 	$effect(() => {
