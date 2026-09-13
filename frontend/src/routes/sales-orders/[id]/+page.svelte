@@ -360,7 +360,7 @@
 											</a>
 										</td>
 										<td class="num mono">
-											{#if so.booked}
+											{#if so.links_frozen}
 												{p.quantity}
 											{:else}
 												<input
@@ -376,7 +376,7 @@
 										<td class="num mono">{p.in_stock}</td>
 										<td class="num mono">{money(p.estimated_price)}</td>
 										<td class="num">
-											{#if !so.booked}
+											{#if !so.links_frozen}
 												<button class="link" onclick={() => removePart(p.id)}>remove</button>
 											{/if}
 										</td>
@@ -386,7 +386,7 @@
 									<tr>
 										<td colspan="5"><span class="badge">Ignored</span> consumes nothing</td>
 										<td class="num">
-											{#if !so.booked}
+											{#if !so.links_frozen}
 												<button class="link" onclick={() => removePart(line.ignored_id!)}>
 													unignore
 												</button>

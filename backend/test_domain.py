@@ -1900,7 +1900,7 @@ def test_parts_added_after_booking_are_booked_by_the_delta(database):
 def test_an_order_that_consumes_nothing_can_still_be_booked(database):
     """Some sales draw no stock (a service, a digital product). Booking one is
     how the user records that it has been dealt with."""
-    so_id, _ = _seed_sale()
+    so_id, line_id = _seed_sale()
     db.book_sales_order(so_id)  # no parts linked at all
     with db.session() as s:
         assert db.get_so(s, so_id).booked is True
@@ -1911,6 +1911,16 @@ def test_an_order_that_consumes_nothing_can_still_be_booked(database):
         assert "no parts to consume" in act.message
     with pytest.raises(db.InventoryError):
         db.book_sales_order(so_id)
+
+    # it took nothing out of stock, so its links are still free to change --
+    # what freezes them is the consumption, not the flag (old orders marked
+    # booked by hand are the real case)
+    part_id = db.next_part_id()
+    db.create_part(part_id, "N", "Nut")
+    link = db.next_line_part_id()
+    db.add_line_part(link, line_id, part_id, 3.0)
+    db.edit_line_part(link, 4.0)
+    db.remove_line_part(link)
 
 
 def test_linking_a_part_twice_adds_to_the_existing_link(database):

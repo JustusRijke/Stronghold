@@ -121,9 +121,13 @@ order can be booked in full.
 
 One thing is rejected:
 
-- **Changing or removing a link once the order is booked.** Those units are
-  already out of stock, so honouring it would mean putting stock back on the
-  shelf and unwinding any shortfall it recorded.
+- **Changing or removing a link once the order has consumed stock.** Those
+  units are already off the shelf, so honouring it would mean putting stock
+  back and unwinding any shortfall it recorded.
+
+What locks the links is the consumption, not the Booked tick: an order booked
+without consuming stock (booked with that option, or an old row marked booked
+by hand) has taken nothing, so its links stay editable.
 
 **Adding** a part to a booked order is fine, and is the normal way to correct a
 mapping you got wrong: link what was missing and book again. Booking only ever
