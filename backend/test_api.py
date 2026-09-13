@@ -1365,6 +1365,56 @@ def test_sales_order_flow(client):
     assert client.get("/api/search?q=Buyer").json()[0]["id"] == so_id
 
 
+def test_ignoring_lines_and_skus(client):
+    """A line that consumes nothing (shipping, a fee) is ignored rather than
+    linked, and the decision is remembered against the sku."""
+    part = client.post("/api/parts", json={"sku": "W1", "description": "Widget"}).json()
+    so_id = _seed_sale(client, qty=2.0, sku="SHIPPING")
+    line_id = client.get(f"/api/sales-orders/{so_id}/lines").json()[0]["id"]
+
+    # an unlinked line leaves the order unlinked
+    assert not client.get(f"/api/sales-orders/{so_id}").json()["linked"]
+
+    lines = client.post(f"/api/sales-orders/{so_id}/lines/{line_id}/ignore").json()
+    assert lines[0]["ignored_id"] and lines[0]["parts"] == []
+    # ignored counts as linked, and consumes nothing
+    assert client.get(f"/api/sales-orders/{so_id}").json()["linked"]
+    assert client.get(f"/api/sales-orders/{so_id}/shortages").json() == []
+    assert client.get(f"/api/parts/{part['id']}").json()["needed_sales"] == 0.0
+
+    # "ignore" and "uses parts" cannot both be true
+    clash = client.post(
+        f"/api/sales-orders/{so_id}/lines/{line_id}/parts",
+        json={"part_id": part["id"], "quantity": 1},
+    )
+    assert clash.status_code == 400 and "ignored" in clash.json()["detail"]
+
+    # un-ignoring is deleting the marker, like any other link
+    marker = lines[0]["ignored_id"]
+    assert client.delete(f"/api/sales-orders/lines/parts/{marker}").status_code == 200
+    assert not client.get(f"/api/sales-orders/{so_id}").json()["linked"]
+
+    # the sku-level decision is remembered, and prefills onto the order
+    assert (
+        client.post("/api/product-skus/ignore", json={"sku": "SHIPPING"}).status_code
+        == 201
+    )
+    assert [
+        (r["sku"], r["ignored_id"] is not None, r["parts"])
+        for r in client.get("/api/product-skus").json()
+    ] == [("SHIPPING", True, [])]
+    filled = client.post(f"/api/sales-orders/{so_id}/prefill").json()
+    assert filled[0]["ignored_id"] and filled[0]["parts"] == []
+    assert client.get(f"/api/sales-orders/{so_id}").json()["linked"]
+
+    # a sku that is ignored cannot also map to parts
+    bad = client.post(
+        "/api/product-skus",
+        json={"sku": "SHIPPING", "part_id": part["id"], "quantity": 1},
+    )
+    assert bad.status_code == 400 and "ignored" in bad.json()["detail"]
+
+
 def test_product_sku_prefill_over_the_api(client):
     bolt = client.post("/api/parts", json={"sku": "B1", "description": "Bolt"}).json()
     nut = client.post("/api/parts", json={"sku": "N1", "description": "Nut"}).json()
