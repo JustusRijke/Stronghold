@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { api } from '$lib/api';
 	import { toast } from '$lib/toast.svelte';
 	import { salesOrderTabs } from '$lib/tabs.svelte';
@@ -130,7 +131,9 @@
 	async function doBook() {
 		if (await toast.run(() => api.bookSalesOrder(id))) {
 			dialog?.close();
-			load();
+			// booking is the last thing done to an order -- close its tab, back to the list
+			salesOrderTabs.close(id);
+			goto('/sales-orders');
 		}
 	}
 
