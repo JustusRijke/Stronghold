@@ -62,7 +62,7 @@
 		consumed = stock;
 		// virtual parts (labour) are offered too: a sale can consume them, and
 		// the backend records the cost without drawing any stock down
-		parts = allParts;
+		parts = allParts.filter((p) => p.active);
 		shortages = shorts;
 	}
 	$effect(() => {
