@@ -77,6 +77,9 @@ export const ProductSkuFromLineIn = v.object({
 	sku: v.string(),
 	line_id: v.pipe(v.number(), v.integer()),
 	});
+export const ProductSkuIgnoreIn = v.object({
+	sku: v.string(),
+	});
 export const ProductSkuPartIn = v.object({
 	sku: v.string(),
 	part_id: v.pipe(v.number(), v.integer()),
