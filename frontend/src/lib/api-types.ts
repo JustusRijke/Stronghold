@@ -1774,8 +1774,6 @@ export interface components {
             linked: boolean;
             /** Line Skus */
             line_skus: string[];
-            /** More Lines */
-            more_lines: number;
             /** Unbooked Parts */
             unbooked_parts: number;
             /** Links Frozen */
@@ -2002,8 +2000,6 @@ export interface components {
             linked: boolean;
             /** Line Skus */
             line_skus: string[];
-            /** More Lines */
-            more_lines: number;
             /** Unbooked Parts */
             unbooked_parts: number;
             /** Links Frozen */

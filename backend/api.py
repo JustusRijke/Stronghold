@@ -440,9 +440,9 @@ class SalesOrderOut(BaseModel):
     date_created: date | None
     booked: bool
     linked: bool  # every line maps to at least one part
-    # the sold product codes, dearest first, capped for the list column
+    # the sold product codes, dearest first -- all of them, so the list
+    # column is searchable by sku
     line_skus: list[str]
-    more_lines: int  # how many further lines the cap left out
     # parts mapped but not yet taken out of stock. Non-zero on a booked order
     # means parts were linked after booking; booking again consumes them.
     unbooked_parts: int
@@ -1974,8 +1974,7 @@ def _so_out(s, so: SalesOrder, totals: tuple[dict, ...] | None = None):
         date_created=so.date_created,
         booked=so.booked,
         linked=not unlinked,
-        line_skus=skus[:3],
-        more_lines=max(0, len(skus) - 3),
+        line_skus=skus,
         unbooked_parts=outstanding,
         links_frozen=so.booked and has_consumed,
         revenue=revenue,
