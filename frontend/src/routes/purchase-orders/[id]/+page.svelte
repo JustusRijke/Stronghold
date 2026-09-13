@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { api } from '$lib/api';
 	import { toast } from '$lib/toast.svelte';
 	import { poTabs } from '$lib/tabs.svelte';
@@ -126,6 +127,9 @@
 		if (await toast.run(() => api.bookPoLine(line.id, qty))) {
 			lines = await api.poLines(id);
 			stock = (await api.stock()).filter((s) => s.po_id === id);
+			// receiving the last outstanding line finishes the order -- back to the list
+			// nothing left outstanding -- back to the overview (the tab stays open)
+			if (!outstandingOf(lines)) goto('/purchase-orders');
 		}
 	}
 	async function removeLine(line: POLine) {
@@ -135,7 +139,9 @@
 	// once Complete/Cancelled, backend rejects line adds/edits/removes and
 	// (when cancelled) receiving -- grey out the matching controls to match
 	const locked = $derived(po?.status === 'Complete' || po?.status === 'Cancelled');
-	const outstanding = $derived(lines.reduce((n, l) => n + Math.max(l.quantity - l.received, 0), 0));
+	const outstandingOf = (ls: POLine[]) =>
+		ls.reduce((n, l) => n + Math.max(l.quantity - l.received, 0), 0);
+	const outstanding = $derived(outstandingOf(lines));
 
 	// click-to-sort over the lines table. Hand-rolled rather than DataTable: this
 	// table has a totals tfoot and per-row receive controls DataTable has no slot
@@ -175,7 +181,7 @@
 	const factor = $derived(delivery > 0 && goods > 0 ? 1 + delivery / goods : 1);
 	async function receiveAll() {
 		if (!confirm(`Receive all outstanding quantity on ${lines.length} line(s)?`)) return;
-		if (await toast.run(() => api.receiveAllPo(id))) load();
+		if (await toast.run(() => api.receiveAllPo(id))) goto('/purchase-orders');
 	}
 
 	const stockCols: Column<StockItem>[] = [
