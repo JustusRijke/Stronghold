@@ -8,6 +8,7 @@ import subprocess
 import time
 from datetime import date
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import crypto
 import db
@@ -1787,6 +1788,30 @@ def test_woocommerce_line_names_arrive_as_plain_text():
         "Hayfall - Met starterspakket",
         "A B & C",
     ]
+
+
+def test_a_long_window_pages_past_the_first_hundred_orders(monkeypatch):
+    """Paging used to stop on X-WP-TotalPages, defaulted to 1 when the header
+    was missing -- so a store that does not send it truncated every import at
+    100 orders however wide the window. A short page ends the run instead."""
+    store = [
+        {"id": i, "number": str(i), "status": "processing", "line_items": []}
+        for i in range(250)
+    ]
+    seen = []
+
+    def fake_get(url, headers):
+        page = int(parse_qs(urlparse(url).query)["page"][0])
+        seen.append(page)
+        return store[(page - 1) * woocommerce._PAGE : page * woocommerce._PAGE]
+
+    monkeypatch.setattr(woocommerce, "_get", fake_get)
+    orders = woocommerce.fetch_orders(
+        "https://shop.example.com", "k", "s", date.today()
+    )
+
+    assert [o["wc_order_id"] for o in orders] == list(range(250))
+    assert seen == [1, 2, 3]  # stopped on the short third page, no fourth request
 
 
 def test_credential_settings_are_encrypted_at_rest(database, tmp_path):

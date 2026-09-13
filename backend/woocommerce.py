@@ -50,7 +50,7 @@ def _money(value) -> float:
     return float(value or 0)
 
 
-def _get(url: str, headers: dict[str, str]) -> tuple[list | dict, dict]:
+def _get(url: str, headers: dict[str, str]) -> list | dict:
     # S310: url is the operator's own WooCommerce host from settings.toml
     request = urllib.request.Request(url, headers=headers)  # noqa: S310
     # ponytail: test/LAN stores commonly run a self-signed cert, and this
@@ -58,7 +58,7 @@ def _get(url: str, headers: dict[str, str]) -> tuple[list | dict, dict]:
     # store worth spoofing.
     context = ssl._create_unverified_context()  # noqa: S323
     with urllib.request.urlopen(request, timeout=120, context=context) as response:  # noqa: S310
-        return json.loads(response.read()), dict(response.headers)
+        return json.loads(response.read())
 
 
 def _auth_header(key: str, secret: str) -> dict[str, str]:
@@ -113,7 +113,7 @@ def fetch_status_labels(base_url: str, key: str, secret: str) -> dict[str, str]:
     (an order-proposal plugin adds "order-proposal", Blocks adds
     "checkout-draft"). The labels come back in the store's own language."""
     root = f"{base_url.rstrip('/')}/wp-json/wc/v3/reports/orders/totals"
-    rows, _ = _get(root, _auth_header(key, secret))
+    rows = _get(root, _auth_header(key, secret))
     return {r["slug"]: r["name"] for r in rows if r.get("slug")}
 
 
@@ -130,12 +130,13 @@ def fetch_orders(
 
     orders, page = [], 1
     while True:
-        result, headers_out = _get(
-            f"{root}?{urlencode({**params, 'page': page})}", headers
-        )
+        result = _get(f"{root}?{urlencode({**params, 'page': page})}", headers)
         orders.extend(_map_order(o) for o in result)
-        # WooCommerce reports the page count; trust it rather than guessing
-        # from a short page (a filtered final page can be exactly _PAGE long)
-        if page >= int(headers_out.get("X-WP-TotalPages", 1) or 1):
+        # A short page is the end. X-WP-TotalPages looks like the better signal
+        # but goes missing (a case-folding proxy, a caching plugin strips
+        # X-WP-*), and defaulting it to 1 silently truncated every window at
+        # _PAGE orders. The store applies after/before itself, so a full page
+        # means there is more; the cost of being wrong is one empty request.
+        if len(result) < _PAGE:
             return orders
         page += 1
