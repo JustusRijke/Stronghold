@@ -1898,6 +1898,9 @@ def _so_out(s, so: SalesOrder, totals: tuple[dict, ...] | None = None):
         revenue += so.shipping_cost
         estimated = None if estimated is None else estimated + so.actual_shipping_cost
         realised = None if realised is None else realised + so.actual_shipping_cost
+    # money is float, so a 100% discount lands on -0.0048 rather than 0 and the
+    # zero guard below never fires -- a 460000% margin. Cents are the unit.
+    revenue = round(revenue, 2) + 0.0
 
     def pct(cost):
         if cost is None or revenue == 0:
