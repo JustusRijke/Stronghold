@@ -10,6 +10,7 @@
 		reference: string;
 		date_created: string;
 		customer_name: string;
+		items: string;
 		shipping_country: string;
 		status: string;
 		revenue: number;
@@ -32,6 +33,7 @@
 			reference: so.reference,
 			date_created: so.date_created ?? '',
 			customer_name: so.customer_name,
+			items: so.line_skus.join(', ') + (so.more_lines ? ', ...' : ''),
 			shipping_country: so.shipping_country,
 			status: so.status,
 			revenue: so.revenue,
@@ -68,6 +70,7 @@
 		{ key: 'reference', header: 'SO', mono: true, width: '110px' },
 		{ key: 'date_created', header: 'Date', width: '120px' },
 		{ key: 'customer_name', header: 'Customer', truncate: true },
+		{ key: 'items', header: 'Items', mono: true, truncate: true },
 		{ key: 'shipping_country', header: 'Country', width: '90px' },
 		{
 			key: 'status',

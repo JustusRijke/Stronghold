@@ -440,6 +440,9 @@ class SalesOrderOut(BaseModel):
     date_created: date | None
     booked: bool
     linked: bool  # every line maps to at least one part
+    # the sold product codes, dearest first, capped for the list column
+    line_skus: list[str]
+    more_lines: int  # how many further lines the cap left out
     # parts mapped but not yet taken out of stock. Non-zero on a booked order
     # means parts were linked after booking; booking again consumes them.
     unbooked_parts: int
@@ -1871,7 +1874,23 @@ def _so_totals(s) -> tuple[dict, dict, dict, dict, dict]:
             .group_by(SalesOrderLine.so_id)
         ).all()
     )
-    return revenue, estimated, realised, outstanding, unlinked
+    return revenue, estimated, realised, outstanding, unlinked, _line_skus(s)
+
+
+# The sold product codes of an order, dearest first, for the list column. Built
+# for every order at once (the list route is one query per figure, not N+1);
+# _line_skus(s, so_id) is the single-order path.
+def _line_skus(s, so_id: int | None = None) -> dict[int, list[str]]:
+    q = select(SalesOrderLine.so_id, SalesOrderLine.sku).order_by(
+        (SalesOrderLine.unit_price * SalesOrderLine.quantity).desc()
+    )
+    if so_id is not None:
+        q = q.where(SalesOrderLine.so_id == so_id)
+    out: dict[int, list[str]] = {}
+    for sid, sku in s.execute(q):
+        if sku:
+            out.setdefault(sid, []).append(sku)
+    return out
 
 
 def _so_out(s, so: SalesOrder, totals: tuple[dict, ...] | None = None):
@@ -1887,8 +1906,12 @@ def _so_out(s, so: SalesOrder, totals: tuple[dict, ...] | None = None):
             )
             .where(SalesOrderLine.so_id == so.id, SalesOrderLinePart.id.is_(None))
         )
+        skus = _line_skus(s, so.id).get(so.id, [])
     else:
-        revenue_by, estimated_by, realised_by, outstanding_by, unlinked_by = totals
+        revenue_by, estimated_by, realised_by, outstanding_by, unlinked_by, skus_by = (
+            totals
+        )
+        skus = skus_by.get(so.id, [])
         revenue = revenue_by.get(so.id, 0.0)
         estimated = estimated_by.get(so.id)
         # an unbooked order has consumed nothing, so it has no realised cost --
@@ -1931,6 +1954,8 @@ def _so_out(s, so: SalesOrder, totals: tuple[dict, ...] | None = None):
         date_created=so.date_created,
         booked=so.booked,
         linked=not unlinked,
+        line_skus=skus[:3],
+        more_lines=max(0, len(skus) - 3),
         unbooked_parts=outstanding,
         revenue=revenue,
         estimated_cost=estimated,
