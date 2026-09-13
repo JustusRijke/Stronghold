@@ -1719,6 +1719,10 @@ export interface components {
             booked: boolean;
             /** Linked */
             linked: boolean;
+            /** Line Skus */
+            line_skus: string[];
+            /** More Lines */
+            more_lines: number;
             /** Unbooked Parts */
             unbooked_parts: number;
             /** Revenue */
@@ -1934,6 +1938,10 @@ export interface components {
             booked: boolean;
             /** Linked */
             linked: boolean;
+            /** Line Skus */
+            line_skus: string[];
+            /** More Lines */
+            more_lines: number;
             /** Unbooked Parts */
             unbooked_parts: number;
             /** Revenue */
