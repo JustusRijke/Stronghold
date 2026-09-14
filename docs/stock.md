@@ -275,6 +275,35 @@ unbooked orders, excluding the statuses you have marked as never going to be
 bought (see Sales orders > Order statuses). Booking an order consumes its stock,
 so a booked order has already taken its parts and asks for nothing more.
 
+## The suspected inactive parts report
+
+Reports > Suspected inactive parts. The other side of the shortage report: it
+answers "what am I still carrying that nothing needs any more?"
+
+A part is listed when **nothing live uses it**, which is either of:
+
+- it is in **no bill of materials at all**, or
+- every assembly it is still a component of has **itself been deactivated**.
+
+and, in both cases, **no sold product sku and no sales order line maps to it**.
+A part you sell directly is never a suspect, however little it is used, and
+neither is a part in a live recipe.
+
+The **Used in** column tells you which of the two cases you are looking at:
+"no BOM", or the number of deactivated assemblies still listing it.
+
+Two deliberate choices:
+
+- **Stock on hand does not disqualify a part.** It is shown, because it is the
+  thing you probably want to know, but a leftover pile of something nothing uses
+  is exactly the case worth a decision -- use it up, sell it off, or write it
+  off.
+- **Nothing is deactivated for you.** This is a suggestion list. Click a row to
+  open the part and deactivate it there, if that is what you decide.
+
+Assemblies appear here too: an assembly nothing else builds and no sku sells is
+as retired as any other part.
+
 ## Virtual parts
 
 A part can be marked **virtual** -- something with unlimited supply that has a

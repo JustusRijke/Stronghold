@@ -186,6 +186,11 @@ Open-source inventory/stock tracking for small and medium businesses.
   buy. A negative balance is a shortfall and a positive one the surplus, sorted
   worst-first; the two figures behind it are shown alongside. Build orders are
   ignored by design: it is a plain sold-versus-shelf simulation
+- A suspected inactive parts report, the other side of the same coin: active
+  parts nothing live uses -- in no BOM at all, or only in assemblies that have
+  themselves been deactivated -- and which no sold sku or sales order line maps
+  to. Stock on hand is shown but does not disqualify a part; nothing is
+  deactivated for you, it is a suggestion list
 - Every part carries an estimated unit price, shown on the part page and in the
   parts overview. A purchased part is worth its most recent purchase price
   (including that order's delivery cost, split over its lines by value); an
