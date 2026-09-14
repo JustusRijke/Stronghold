@@ -27,6 +27,7 @@ export type SearchResult = S['SearchResult'];
 export type StockValueReport = S['StockValueReport'];
 export type StockValueRow = S['StockValueRow'];
 export type StockShortageRow = S['StockShortageRow'];
+export type InactivePartSuspectRow = S['InactivePartSuspectRow'];
 export type SalesOrder = S['SalesOrderOut'];
 export type PartSalesOrder = S['PartSalesOrderOut'];
 export type SalesOrderLine = S['SalesOrderLineOut'];

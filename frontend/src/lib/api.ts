@@ -20,6 +20,7 @@ import type {
 	SearchResult,
 	StockValueReport,
 	StockShortageRow,
+	InactivePartSuspectRow,
 	SalesOrder,
 	PartSalesOrder,
 	SalesOrderLine,
@@ -255,6 +256,8 @@ export const api = {
 	// reports
 	stockValue: () => get<StockValueReport>('/reports/stock-value'),
 	stockShortage: () => get<StockShortageRow[]>('/reports/stock-shortage'),
+	inactivePartSuspects: () =>
+		get<InactivePartSuspectRow[]>('/reports/inactive-part-suspects'),
 	refreshPrices: () => post<{ priced: number }>('/parts/refresh-prices'),
 
 	// activity log
