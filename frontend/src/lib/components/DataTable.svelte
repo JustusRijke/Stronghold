@@ -49,6 +49,8 @@
 		storageKey,
 		defaultSort,
 		onRemove,
+		canRemove,
+		rowKey,
 		onAdd,
 		onEdit,
 		rowAction,
@@ -60,7 +62,17 @@
 		storageKey: string;
 		defaultSort?: { key: keyof T & string; dir: SortDir }; // initial sort on first visit
 		onRemove?: (row: T) => void;
-		rowAction?: { icon: string; title: string; run: (row: T) => void }; // extra per-row button
+		canRemove?: (row: T) => boolean; // hides the trash on rows with nothing to remove
+		// what makes a row unique, when href does not (rows that link nowhere
+		// would otherwise all share the empty string and collide)
+		rowKey?: (row: T) => string;
+		// extra per-row button; `show` hides it on rows it does not apply to
+		rowAction?: {
+			icon: string;
+			title: string;
+			run: (row: T) => void;
+			show?: (row: T) => boolean;
+		};
 		onAdd?: () => void; // shows a left-aligned "+" button in the toolbar
 		onEdit?: (row: T, key: keyof T & string, value: string | number | boolean) => void;
 		visibleRows?: T[]; // bind: to read the rows surviving the filters (e.g. to total them)
@@ -424,7 +436,7 @@ tr { break-inside: avoid; }
 			</tr>
 		</thead>
 		<tbody>
-			{#each filtered as row (href(row))}
+			{#each filtered as row (rowKey ? rowKey(row) : href(row))}
 				<tr>
 					{#each visibleColumns as c (c.key)}
 						<td
@@ -473,7 +485,7 @@ tr { break-inside: avoid; }
 					{/each}
 					{#if hasActions}
 						<td class="actions">
-							{#if rowAction}
+							{#if rowAction && (rowAction.show?.(row) ?? true)}
 								<button
 									class="iconbtn plain"
 									title={rowAction.title}
@@ -483,7 +495,7 @@ tr { break-inside: avoid; }
 									}}>{rowAction.icon}</button
 								>
 							{/if}
-							{#if onRemove}
+							{#if onRemove && (canRemove?.(row) ?? true)}
 								<button
 									class="iconbtn"
 									title="Remove"

@@ -553,29 +553,28 @@ class SalesOrderLinePart(Base):
     line_id: Mapped[int] = mapped_column(ForeignKey(SalesOrderLine.id))
     # NULL = this line is ignored: it consumes nothing and needs no parts to
     # count as linked (shipping, a fee, a service). The mapping side of the same
-    # marker is ProductSkuPart with a NULL part_id.
+    # marker is PartSku with a NULL part_id.
     part_id: Mapped[int | None] = mapped_column(ForeignKey(Part.id))
     quantity: Mapped[float]
 
 
-class ProductSkuPart(Base):
-    """One part a sold sku consumes, and how many per unit sold.
+class PartSku(Base):
+    """A sales sku one part is sold under.
 
-    The mapping side of SalesOrderLinePart, and deliberately the same shape: a
-    sku maps to a *list* of (part, quantity), so one sold product may be made of
-    several parts without inventing an assembly to hold them. Prefill copies
-    these rows onto a sales line verbatim -- what the mapping says is exactly
-    what the line gets, with no expansion step in between.
+    What WooCommerce sells, named in our terms. A part may carry several skus --
+    variants that are the same build (a door-left and a door-right differ in how
+    they are mounted, not in what they are made of) -- but a sku names exactly
+    one part, which is why the unique key is the sku alone.
 
-    That includes an assembly: map a sku to one and the line consumes one of
-    that assembly, drawn from the stock a build order produced, which is what
-    selling a built product actually does.
+    A sold product made of *several* parts is an assembly, and its BOM says so.
+    There is deliberately no list here and no quantity: one sold unit consumes
+    one of the linked part, and "two of those per sale" is a BOM line with
+    quantity 2. Before schema 14 this table held its own (sku, part, quantity)
+    list -- a second BOM mechanism beside the real one, which could not express
+    two skus sharing one recipe.
 
-    Many skus may share a part (a door-left and a door-right variant are the
-    same build), and a sku may name several parts, so the key is the pair.
-
-    It only prefills: copying it onto a sales line writes ordinary
-    SalesOrderLinePart rows, which the user is then free to edit. Changing a
+    It only prefills: resolving a sku onto a sales line writes an ordinary
+    SalesOrderLinePart row, which the user is then free to edit. Changing a
     mapping never rewrites an order already filled in.
 
     A NULL part_id is the *ignore* mapping: this sku consumes nothing, and a
@@ -584,15 +583,13 @@ class ProductSkuPart(Base):
     remember, not a sku nobody has got to yet.
     """
 
-    __tablename__ = "product_sku_parts"
-    __table_args__ = (UniqueConstraint("sku", "part_id"),)
+    __tablename__ = "part_skus"
+    __table_args__ = (UniqueConstraint("sku"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     sku: Mapped[str]
-    # NULL = ignore this sku (see above). SQLite counts NULLs as distinct, so
-    # the unique constraint does not stop a second ignore row -- db does.
+    # NULL = ignore this sku (see above).
     part_id: Mapped[int | None] = mapped_column(ForeignKey(Part.id))
-    quantity: Mapped[float]
 
 
 class Booking(Base):

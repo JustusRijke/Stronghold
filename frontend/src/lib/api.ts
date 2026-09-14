@@ -25,7 +25,7 @@ import type {
 	SalesOrderLine,
 	SalesShortage,
 	ImportResult,
-	ProductSku,
+	PartSku,
 	SoldSku
 } from './types';
 
@@ -240,17 +240,11 @@ export const api = {
 		post<{ filled: number; orders: number }>('/sales-orders/prefill', {}),
 
 	// product skus: the sold-sku -> assembly map the prefill reads
-	productSkus: () => get<ProductSku[]>('/product-skus'),
-	soldSkus: () => get<SoldSku[]>('/product-skus/sold'),
-	addProductSkuPart: (b: { sku: string; part_id: number; quantity: number }) =>
-		post<ProductSku[]>('/product-skus', b),
-	editProductSkuPart: (linkId: number, quantity: number) =>
-		patch<{ ok: boolean }>(`/product-skus/parts/${linkId}`, { quantity }),
-	removeProductSkuPart: (linkId: number) =>
-		del<{ ok: boolean }>(`/product-skus/parts/${linkId}`),
-	ignoreProductSku: (b: { sku: string }) => post<ProductSku[]>('/product-skus/ignore', b),
-	saveProductSkuFromLine: (b: { sku: string; line_id: number }) =>
-		put<ProductSku[]>('/product-skus/from-line', b),
+	partSkus: () => get<PartSku[]>('/part-skus'),
+	soldSkus: () => get<SoldSku[]>('/part-skus/sold'),
+	addPartSku: (b: { part_id: number; sku: string }) => post<PartSku[]>('/part-skus', b),
+	removePartSku: (linkId: number) => del<{ ok: boolean }>(`/part-skus/${linkId}`),
+	ignoreSku: (b: { sku: string }) => post<PartSku[]>('/part-skus/ignore', b),
 
 	// settings
 	settings: () => get<Setting[]>('/settings'),

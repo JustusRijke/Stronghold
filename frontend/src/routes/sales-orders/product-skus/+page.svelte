@@ -1,215 +1,169 @@
 <script lang="ts">
 	import { api } from '$lib/api';
-	import { toast } from '$lib/toast.svelte';
+	import DataTable, { type Column } from '$lib/components/DataTable.svelte';
 	import Picker from '$lib/components/Picker.svelte';
-	import type { Part, ProductSku, SoldSku } from '$lib/types';
+	import { toast } from '$lib/toast.svelte';
+	import type { Part, PartSku } from '$lib/types';
 
-	let rows = $state<ProductSku[]>([]);
+	type Row = {
+		id: number | null;
+		sku: string;
+		part: string;
+		part_id: number | null;
+		assembly: boolean;
+		lines: number;
+		state: string;
+	};
+
+	let skus = $state<PartSku[]>([]);
 	let parts = $state<Part[]>([]);
-	let sold = $state<SoldSku[]>([]);
 
-	// which sku's "add part" row is open, and what it holds
-	let addingTo = $state<string | null>(null);
-	let newPart = $state<number | ''>('');
-	let newQty = $state(1);
-
-	// the add-a-mapping row at the bottom
+	// the add row, open only while it is being filled in
+	let adding = $state(false);
 	let newSku = $state('');
-	let newSkuPart = $state<number | ''>('');
-	let newSkuQty = $state(1);
+	let newPart = $state<number | ''>('');
 
-	// SKUs the imported orders use that nothing maps yet -- what the add box
-	// suggests, so a key is picked rather than typed (a typo makes a mapping
-	// that silently matches nothing)
-	const unmapped = $derived(sold.filter((s) => !s.mapped));
-	const describe = (sku: string) => sold.find((s) => s.sku === sku)?.description ?? '';
+	const MAPPED = 'Mapped';
+	const IGNORED = 'Ignored';
+	const TODO = 'Not mapped';
+
+	const rows = $derived<Row[]>(
+		skus.map((s) => ({
+			id: s.id,
+			sku: s.sku,
+			part: s.part_id ? `${s.part_sku ? s.part_sku + ' - ' : ''}${s.part_description}` : '',
+			part_id: s.part_id,
+			assembly: s.part_assembly,
+			lines: s.lines,
+			state: s.ignored ? IGNORED : s.part_id ? MAPPED : TODO
+		}))
+	);
+	const todo = $derived(rows.filter((r) => r.state === TODO).length);
 
 	async function load() {
-		const [skus, allParts, soldSkus] = await Promise.all([
-			api.productSkus(),
-			api.parts(),
-			api.soldSkus()
-		]);
-		rows = skus;
+		const [all, allParts] = await Promise.all([api.partSkus(), api.parts()]);
+		skus = all;
 		parts = allParts.filter((p) => p.active);
-		sold = soldSkus;
 	}
 	$effect(() => {
 		load();
 	});
 
-	async function addPart(sku: string) {
-		if (newPart === '') return;
-		const ok = await toast.run(() =>
-			api.addProductSkuPart({ sku, part_id: Number(newPart), quantity: newQty })
-		);
-		if (ok) {
-			addingTo = null;
-			newPart = '';
-			newQty = 1;
-			load();
-		}
-	}
-	async function addSku() {
-		const sku = newSku.trim();
-		if (!sku || newSkuPart === '') return;
-		const ok = await toast.run(() =>
-			api.addProductSkuPart({ sku, part_id: Number(newSkuPart), quantity: newSkuQty })
-		);
-		if (ok) {
+	async function add(sku: string, partId: number) {
+		if (await toast.run(() => api.addPartSku({ sku, part_id: partId }))) {
+			adding = false;
 			newSku = '';
-			newSkuPart = '';
-			newSkuQty = 1;
+			newPart = '';
 			load();
 		}
 	}
-	async function editPart(linkId: number, quantity: number) {
-		if (await toast.run(() => api.editProductSkuPart(linkId, quantity))) load();
+	async function link(row: Row) {
+		// an unmapped row already knows its sku; only the part is missing
+		newSku = row.sku;
+		newPart = '';
+		adding = true;
 	}
-	async function removePart(linkId: number) {
-		if (await toast.run(() => api.removeProductSkuPart(linkId))) load();
+	async function ignore(sku: string) {
+		if (await toast.run(() => api.ignoreSku({ sku }))) load();
+	}
+	async function remove(row: Row) {
+		if (row.id && (await toast.run(() => api.removePartSku(row.id!)))) load();
 	}
 
 	const partLabel = (p: Part) => `${p.sku ? p.sku + ' - ' : ''}${p.description}`;
+
+	const columns: Column<Row>[] = $derived([
+		{ key: 'sku', header: 'Sold SKU', mono: true, width: '200px' },
+		{
+			key: 'part',
+			header: 'Sold as',
+			truncate: true,
+			cellHref: (r) => (r.part_id ? `/parts/${r.part_id}` : '')
+		},
+		{ key: 'assembly', header: 'Assembly', bool: true, width: '100px' },
+		{ key: 'lines', header: 'Sold', mono: true, width: '80px' },
+		{
+			key: 'state',
+			header: 'State',
+			width: '120px',
+			statusFilter: true,
+			statusOptions: [MAPPED, IGNORED, TODO]
+		}
+	]);
 </script>
 
 <div class="content nosidebar">
 	<h1 class="h1">Product SKUs</h1>
 	<p class="muted">
-		What a sold SKU is made of. WooCommerce knows the SKU it sold, not the parts behind
-		it, so each one is mapped to a list of parts here &mdash; the same shape as the parts
-		on a sales order line, and copied onto it verbatim. Map an assembly and the line
-		consumes one of that assembly off the shelf; map loose parts and it consumes those.
-		Several SKUs may map to the same parts &mdash; a door-left and a door-right variant
-		are the same build. Importing an order, or the &ldquo;Prefill from SKUs&rdquo; button
-		on a sales order, does the copying, and only ever fills in a line that has no parts
-		yet: editing a mapping never rewrites an order.
+		What each sold SKU is. WooCommerce knows the SKU it sold, not what is behind it, so
+		each one names a part here. A product made of several parts is an assembly &mdash; its
+		BOM holds the list, and one sold unit consumes one of it off the shelf. Variants that
+		are the same build (a door-left and a door-right) both name that one part, so the
+		recipe is written once. A SKU that consumes nothing &mdash; shipping, a fee, a service
+		&mdash; is ignored instead. Importing an order, or the &ldquo;Prefill from SKUs&rdquo;
+		button on a sales order, does the filling in, and only ever touches a line that has no
+		parts yet: changing a mapping never rewrites an order.
 	</p>
-	{#if unmapped.length}
+	{#if todo}
 		<p class="muted">
-			<strong>{unmapped.length}</strong> SKU{unmapped.length === 1 ? '' : 's'} sold in the
-			imported orders {unmapped.length === 1 ? 'is' : 'are'} not mapped yet; the box at the
-			bottom suggests them, most-sold first.
+			<strong>{todo}</strong> sold SKU{todo === 1 ? '' : 's'} not mapped yet &mdash; filter
+			the State column to find {todo === 1 ? 'it' : 'them'}.
 		</p>
 	{/if}
 
-	{#each rows as row (row.sku)}
-		<div class="sku">
-			<div class="skuhead">
-				<span class="mono code">{row.sku}</span>
-				<span class="muted">{describe(row.sku)}</span>
-			</div>
-			<table class="parts">
-				<thead>
-					<tr>
-						<th>Part</th>
-						<th class="num">Per unit</th>
-						<th></th>
-					</tr>
-				</thead>
-				<tbody>
-					{#if row.ignored_id}
-						<tr>
-							<td colspan="2"><span class="badge">Ignored</span> consumes nothing</td>
-							<td class="num">
-								<button class="link" onclick={() => removePart(row.ignored_id!)}>unignore</button>
-							</td>
-						</tr>
-					{/if}
-					{#each row.parts as p (p.id)}
-						<tr>
-							<td>
-								<a href={`/parts/${p.part_id}`}>
-									{#if p.part_sku}<span class="mono">{p.part_sku}</span> &mdash; {/if}{p.part_description}
-								</a>
-								{#if p.part_assembly}<span class="tag">assembly</span>{/if}
-							</td>
-							<td class="num mono">
-								<input
-									type="number"
-									min="0"
-									step="any"
-									value={p.quantity}
-									onchange={(e) => editPart(p.id, Number(e.currentTarget.value))}
-								/>
-							</td>
-							<td class="num">
-								<button class="link" onclick={() => removePart(p.id)}>remove</button>
-							</td>
-						</tr>
-					{/each}
-					{#if addingTo === row.sku}
-						<tr>
-							<td>
-								<Picker
-									bind:value={newPart}
-									rows={parts}
-									label={partLabel}
-									id={`addpart-${row.sku}`}
-									onenter={() => addPart(row.sku)}
-									wide
-								/>
-							</td>
-							<td class="num">
-								<input type="number" min="0" step="any" bind:value={newQty} />
-							</td>
-							<td class="num">
-								<button class="link" onclick={() => addPart(row.sku)}>add</button>
-								<button class="link" onclick={() => (addingTo = null)}>cancel</button>
-							</td>
-						</tr>
-					{/if}
-				</tbody>
-			</table>
-			{#if addingTo !== row.sku && !row.ignored_id}
-				<button class="btn ghost small" onclick={() => (addingTo = row.sku)}>Add a part</button>
-			{/if}
+	{#if adding}
+		<div class="addbar">
+			<input list="soldskus" placeholder="Sold SKU" bind:value={newSku} />
+			<datalist id="soldskus">
+				<!-- the description goes in `label`, never in the option's text: a
+				     datalist option's text content is what the browser inserts on pick,
+				     so writing it there fills the box with the description instead of
+				     the sku that is the key -->
+				{#each rows.filter((r) => r.state === TODO) as r (r.sku)}
+					<option value={r.sku} label={`${r.sku} (${r.lines} sold)`}></option>
+				{/each}
+			</datalist>
+			<Picker
+				bind:value={newPart}
+				rows={parts}
+				label={partLabel}
+				id="newpartsku"
+				onenter={() => newPart !== '' && add(newSku.trim(), Number(newPart))}
+				wide
+			/>
+			<button
+				class="btn"
+				disabled={!newSku.trim() || newPart === ''}
+				onclick={() => add(newSku.trim(), Number(newPart))}>Add</button
+			>
+			<button class="btn ghost" onclick={() => ignore(newSku.trim())} disabled={!newSku.trim()}
+				>Ignore this SKU</button
+			>
+			<button class="btn ghost" onclick={() => (adding = false)}>Cancel</button>
 		</div>
-	{/each}
-	{#if rows.length === 0}
-		<p class="muted">No product SKUs mapped yet.</p>
 	{/if}
 
-	<div class="sku new">
-		<div class="skuhead"><strong>Map another SKU</strong></div>
-		<table class="parts">
-			<tbody>
-				<tr>
-					<td>
-						<!-- the description goes in `label`, never in the option's text: a
-						     datalist option's text content is what the browser inserts on
-						     pick, so writing it there fills the box with the description
-						     instead of the sku that is the key -->
-						<input
-							list="soldskus"
-							placeholder={unmapped.length ? 'Pick or type a sold SKU' : 'HBT-H-DL'}
-							bind:value={newSku}
-						/>
-						<datalist id="soldskus">
-							{#each unmapped as s (s.sku)}
-								<option value={s.sku} label={`${s.sku} - ${s.description} (${s.lines})`}
-								></option>
-							{/each}
-						</datalist>
-					</td>
-					<td>
-						<Picker
-							bind:value={newSkuPart}
-							rows={parts}
-							label={partLabel}
-							id="newproductsku"
-							onenter={addSku}
-							wide
-						/>
-					</td>
-					<td class="num">
-						<input type="number" min="0" step="any" bind:value={newSkuQty} />
-					</td>
-					<td class="num"><button class="link" onclick={addSku}>add</button></td>
-				</tr>
-			</tbody>
-		</table>
-	</div>
+	<DataTable
+		{columns}
+		{rows}
+		href={(r) => (r.part_id ? `/parts/${r.part_id}` : '')}
+		rowKey={(r) => r.sku}
+		storageKey="/sales-orders/product-skus"
+		defaultSort={{ key: 'sku', dir: 'asc' }}
+		onAdd={() => {
+			newSku = '';
+			newPart = '';
+			adding = true;
+		}}
+		rowAction={{
+			icon: '+',
+			title: 'Map this SKU to a part',
+			run: link,
+			show: (r) => r.state === TODO
+		}}
+		onRemove={remove}
+		canRemove={(r) => r.id !== null}
+	/>
 </div>
 
 <style>
@@ -219,49 +173,10 @@
 	.muted {
 		max-width: 70ch;
 	}
-	.sku {
-		margin: 18px 0;
-		border: 1px solid var(--line);
-		border-radius: 6px;
-		padding: 10px 12px;
-		max-width: 900px;
-	}
-	.skuhead {
+	.addbar {
 		display: flex;
-		align-items: baseline;
-		gap: 10px;
-		margin-bottom: 6px;
-	}
-	.code {
-		font-weight: 600;
-	}
-	.tag {
-		font-size: 11px;
-		color: var(--ink-faint);
-		border: 1px solid var(--line);
-		border-radius: 3px;
-		padding: 0 4px;
-		margin-left: 6px;
-	}
-	table.parts {
-		width: 100%;
-		border-collapse: collapse;
-	}
-	table.parts th,
-	table.parts td {
-		border-bottom: 1px solid var(--line);
-		padding: 5px 8px;
-		text-align: left;
-	}
-	table.parts th {
-		font-size: 11px;
-		color: var(--ink-faint);
-	}
-	table.parts td.num,
-	table.parts th.num {
-		text-align: right;
-	}
-	.new table.parts td {
-		border-bottom: none;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 10px;
 	}
 </style>

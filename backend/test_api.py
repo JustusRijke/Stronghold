@@ -1472,13 +1472,14 @@ def test_ignoring_lines_and_skus(client):
 
     # the sku-level decision is remembered, and prefills onto the order
     assert (
-        client.post("/api/product-skus/ignore", json={"sku": "SHIPPING"}).status_code
+        client.post("/api/part-skus/ignore", json={"sku": "SHIPPING"}).status_code
         == 201
     )
     assert [
-        (r["sku"], r["ignored_id"] is not None, r["parts"])
-        for r in client.get("/api/product-skus").json()
-    ] == [("SHIPPING", True, [])]
+        (r["sku"], r["ignored"], r["part_id"])
+        for r in client.get("/api/part-skus").json()
+        if r["id"]
+    ] == [("SHIPPING", True, None)]
     filled = client.post(f"/api/sales-orders/{so_id}/prefill").json()
     assert filled[0]["ignored_id"] and filled[0]["parts"] == []
     assert client.get(f"/api/sales-orders/{so_id}").json()["linked"]
@@ -1493,100 +1494,76 @@ def test_ignoring_lines_and_skus(client):
     assert booked_lines[0]["ignored_id"]
     assert client.get(f"/api/sales-orders/{so2}").json()["linked"]
 
-    # a sku that is ignored cannot also map to parts
-    bad = client.post(
-        "/api/product-skus",
-        json={"sku": "SHIPPING", "part_id": part["id"], "quantity": 1},
-    )
+    # a sku that is ignored cannot also name a part
+    bad = client.post("/api/part-skus", json={"sku": "SHIPPING", "part_id": part["id"]})
     assert bad.status_code == 400 and "ignored" in bad.json()["detail"]
 
 
-def test_product_sku_prefill_over_the_api(client):
+def test_part_sku_prefill_over_the_api(client):
     bolt = client.post("/api/parts", json={"sku": "B1", "description": "Bolt"}).json()
-    nut = client.post("/api/parts", json={"sku": "N1", "description": "Nut"}).json()
+    product = client.post(
+        "/api/parts", json={"sku": "HBT-H", "description": "Haybutler"}
+    ).json()
+    client.patch(f"/api/parts/{product['id']}", json={"assembly": True})
+    client.post(
+        "/api/bom",
+        json={
+            "parent_part_id": product["id"],
+            "component_part_id": bolt["id"],
+            "quantity": 4,
+        },
+    )
 
-    # a sku maps to a list of parts; the two sold variants share one mapping
+    # the two sold variants are the same build: one part, two skus
     for sku in ("HBT-H-DL", "HBT-H-DR"):
-        for part, qty in ((bolt, 4), (nut, 2)):
-            assert (
-                client.post(
-                    "/api/product-skus",
-                    json={"sku": sku, "part_id": part["id"], "quantity": qty},
-                ).status_code
-                == 201
-            )
-    listed = client.get("/api/product-skus").json()
+        assert (
+            client.post(
+                "/api/part-skus", json={"sku": sku, "part_id": product["id"]}
+            ).status_code
+            == 201
+        )
     assert [
-        (r["sku"], [(p["part_sku"], p["quantity"]) for p in r["parts"]]) for r in listed
-    ] == [
-        ("HBT-H-DL", [("B1", 4.0), ("N1", 2.0)]),
-        ("HBT-H-DR", [("B1", 4.0), ("N1", 2.0)]),
-    ]
+        (r["sku"], r["part_sku"], r["part_assembly"])
+        for r in client.get("/api/part-skus").json()
+    ] == [("HBT-H-DL", "HBT-H", True), ("HBT-H-DR", "HBT-H", True)]
 
     so_id = _seed_sale(client, qty=2.0, sku="HBT-H-DR")
-    # the add box offers what the orders actually sold, mapped ones flagged so
-    # the page can drop them from the picker
-    assert [
-        (r["sku"], r["lines"], r["mapped"])
-        for r in client.get("/api/product-skus/sold").json()
-    ] == [("HBT-H-DR", 1, True)]
-
+    # the line consumes one assembly per sold unit, not its components
     lines = client.post(f"/api/sales-orders/{so_id}/prefill").json()
     assert [(p["sku"], p["quantity"], p["required"]) for p in lines[0]["parts"]] == [
-        ("B1", 4.0, 8.0),
-        ("N1", 2.0, 4.0),
+        ("HBT-H", 1.0, 2.0)
     ]
 
-    # save a line's parts as its sku's mapping -- the button on the order page
-    plain = _seed_sale(client, so_id=2, qty=3.0, sku="B1-SINGLE")
-    # an unmapped sku is exactly what the picker exists to offer
+    # an unmapped sold sku is listed too, with no row to delete -- it is the
+    # work left to do, and the page shows it in the same table
+    _seed_sale(client, so_id=2, qty=3.0, sku="B1-SINGLE")
     assert [
-        (r["sku"], r["mapped"]) for r in client.get("/api/product-skus/sold").json()
-    ] == [("B1-SINGLE", False), ("HBT-H-DR", True)]
-    line_id = client.get(f"/api/sales-orders/{plain}/lines").json()[0]["id"]
-    client.post(
-        f"/api/sales-orders/{plain}/lines/{line_id}/parts",
-        json={"part_id": bolt["id"], "quantity": 1},
-    )
-    saved = client.put(
-        "/api/product-skus/from-line", json={"sku": "B1-SINGLE", "line_id": line_id}
-    ).json()
-    assert [(p["part_sku"], p["quantity"]) for p in saved[0]["parts"]] == [("B1", 1.0)]
+        (r["sku"], r["id"] is None, r["lines"])
+        for r in client.get("/api/part-skus").json()
+    ] == [
+        ("B1-SINGLE", True, 1),
+        ("HBT-H-DL", False, 0),
+        ("HBT-H-DR", False, 1),
+    ]
 
-    # the list page's button: every order's unlinked lines in one write. The
-    # two already-linked orders are left alone, so only the new one counts.
+    # the list page's button: every order's unlinked lines in one write
     fresh = _seed_sale(client, so_id=3, qty=1.0, sku="HBT-H-DL")
     assert client.post("/api/sales-orders/prefill").json() == {
-        "filled": 2,
+        "filled": 1,
         "orders": 1,
     }
     lines = client.get(f"/api/sales-orders/{fresh}/lines").json()
-    assert [(p["sku"], p["quantity"]) for p in lines[0]["parts"]] == [
-        ("B1", 4.0),
-        ("N1", 2.0),
-    ]
+    assert [(p["sku"], p["quantity"]) for p in lines[0]["parts"]] == [("HBT-H", 1.0)]
     # ...and again is a no-op: those lines now have parts
     assert client.post("/api/sales-orders/prefill").json() == {"filled": 0, "orders": 0}
 
-    # patch one mapping row, and drop another
-    dl = next(
-        r for r in client.get("/api/product-skus").json() if r["sku"] == "HBT-H-DL"
-    )
-    assert (
-        client.patch(
-            f"/api/product-skus/parts/{dl['parts'][0]['id']}", json={"quantity": 9}
-        ).status_code
-        == 200
-    )
-    assert (
-        client.delete(f"/api/product-skus/parts/{dl['parts'][1]['id']}").status_code
-        == 200
-    )
-    dl = next(
-        r for r in client.get("/api/product-skus").json() if r["sku"] == "HBT-H-DL"
-    )
-    assert [(p["part_sku"], p["quantity"]) for p in dl["parts"]] == [("B1", 9.0)]
-    assert client.delete("/api/product-skus/parts/9999").status_code == 400
+    # unlinking one sku leaves the part sold under the other
+    dl = next(r for r in client.get("/api/part-skus").json() if r["sku"] == "HBT-H-DL")
+    assert client.delete(f"/api/part-skus/{dl['id']}").status_code == 200
+    assert [r["sku"] for r in client.get("/api/part-skus").json() if r["part_id"]] == [
+        "HBT-H-DR"
+    ]
+    assert client.delete("/api/part-skus/9999").status_code == 400
 
 
 def test_sales_order_margin_from_purchased_stock(client):
