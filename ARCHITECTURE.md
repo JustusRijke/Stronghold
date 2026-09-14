@@ -174,15 +174,23 @@ current file: the column is simply never populated, and the same step drops it
 again. Renames are still unhandled -- do them as a drop plus an add, or add the
 step when one is actually needed.
 
+A removed **table** needs the same trick one level up, and fails more quietly:
+the replay loop walks the *declared* tables, so an undeclared one's `.sql` is
+never read at all and its data disappears without an error. `db._DROPPED_TABLES`
+lists each one with the columns it had; `_import_sql` recreates it empty and
+replays its file, the migration step reads it and drops it, and `export`'s
+`_drop_stale_files` then removes the orphaned `.sql`. Schema 14 (the
+`product_sku_parts` collapse) is the first user.
+
 ### The two directions
 
 `db._migrate` runs after the replay:
 
 - **Older file** -- each `db._MIGRATIONS[n]` runs in ascending order, then
   `init`'s own `export()` writes the upgraded file back, re-stamped. Steps
-  transform replayed data; the tables are already current, the one exception
-  being a dropped column, which needs both halves (the `_import_sql` scaffold
-  above and a step here to take it down). A file with no stamp at all predates
+  transform replayed data; the tables are already current, the exceptions
+  being a dropped column or table, which need both halves (the `_import_sql`
+  scaffold above and a step here to take it down). A file with no stamp at all predates
   stamping and is treated as version 1.
 - **Newer file** -- refused with `DataVersionError`, and `main` exits 1. This
   is a data-loss guard, not tidiness: this app exports only the columns it
@@ -257,13 +265,15 @@ step when one is actually needed.
   (its `sku` is plain text, often empty, and never matched against `Part.sku`).
   `SalesOrderLinePart(id, line_id, part_id, quantity)` is the mapping -- one of
   the two sales tables the user writes to -- quantity being per sold unit, like
-  `BomLine`. `ProductSkuPart(id, sku, part_id, quantity)` is the other: what a sold
-  SKU is made of, deliberately the **same shape as `SalesOrderLinePart`** so
-  prefill is a straight copy. Many-to-many both ways -- a SKU may name several
-  parts, several SKUs may name one part (variants share a build) -- so the key is
-  the `(sku, part_id)` pair, not the sku. An assembly is copied like any other
-  part (the line consumes one of it off the shelf); there is no BOM expansion,
-  which is what keeps the mapping honest about what the line will get. It only
+  `BomLine`. `PartSku(id, sku, part_id)` is the other: the sales SKU a part is sold
+  under. A SKU names **one** part (so the key is the sku alone) and a part may
+  carry several, which is how variants that are the same build share one recipe.
+  A product made of several things is an assembly and its BOM holds the list, so
+  there is no quantity here and no BOM expansion at prefill -- the line consumes
+  one of that assembly off the shelf, which keeps the mapping honest about what
+  the line will get. Until schema 14 this was `ProductSkuPart(id, sku, part_id,
+  quantity)`, a per-SKU part list: a second BOM mechanism beside the real one,
+  which could not express two SKUs sharing a recipe. It only
   ever *prefills*: `db._prefill_so_parts` writes ordinary `SalesOrderLinePart` rows
   on a line that has none yet -- run per order by `prefill_so_parts` (POST
   `/sales-orders/{id}/prefill`, which logs) and for every order the WooCommerce
@@ -409,7 +419,9 @@ Known ceilings, with their upgrade paths, deferred until they actually hurt
   optional `bom_lines.note` (additive, so a no-op step like 4), 7 added
   `stock_items.created_at` (additive but NOT NULL, so its step backfills from
   the order that created each row), 8 added `product_sku_parts` (additive, a
-  no-op step). See "Data versioning".
+  no-op step), and 14 replaced that table with `part_skus`, building an assembly
+  per distinct part list so the SKUs that shared one collapse onto a single
+  part. See "Data versioning".
 - Step 5 needed the mirror image of the `_DROPPED_COLUMNS` scaffold: an older
   file may hold rows that *violate* a constraint the current schema has (many
   parts sharing an empty sku), so the replay would fail before `_migrate` could

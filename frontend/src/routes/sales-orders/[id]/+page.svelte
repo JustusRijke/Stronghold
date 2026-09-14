@@ -9,7 +9,7 @@
 	import Picker from '$lib/components/Picker.svelte';
 	import type {
 		Part,
-		ProductSku,
+		PartSku,
 		SalesOrder,
 		SalesOrderLine,
 		SalesShortage,
@@ -55,7 +55,7 @@
 			api.salesOrderStock(id),
 			api.parts(),
 			api.salesOrderShortages(id),
-			api.productSkus()
+			api.partSkus()
 		]);
 		lines = ls;
 		mappings = maps;
@@ -95,8 +95,8 @@
 		if (await toast.run(() => api.ignoreLine(id, lineId))) load();
 	}
 	async function ignoreSku(sku: string) {
-		if (await toast.run(() => api.ignoreProductSku({ sku }))) {
-			mappings = await api.productSkus();
+		if (await toast.run(() => api.ignoreSku({ sku }))) {
+			mappings = await api.partSkus();
 			toast.show(`${sku} is ignored on every future order`);
 		}
 	}
@@ -114,27 +114,8 @@
 		);
 	}
 
-	// saving a line's parts as its sku's mapping. An existing mapping is named
-	// in a confirm step before being replaced -- other orders prefill from it,
-	// so a silent overwrite would change what they get with no warning.
-	let mappings = $state<ProductSku[]>([]);
-	let saveLine = $state<SalesOrderLine | null>(null);
+	let mappings = $state<PartSku[]>([]);
 	const mappingFor = (sku: string) => mappings.find((m) => m.sku === sku) ?? null;
-
-	async function saveMapping(line: SalesOrderLine) {
-		if (mappingFor(line.sku)) {
-			saveLine = line; // ask first: something already maps this sku
-			return;
-		}
-		await doSaveMapping(line);
-	}
-	async function doSaveMapping(line: SalesOrderLine) {
-		const ok = await toast.run(async () => {
-			mappings = await api.saveProductSkuFromLine({ sku: line.sku, line_id: line.id });
-		});
-		saveLine = null;
-		if (ok) toast.show(`${line.sku} now maps to ${line.parts.length} part(s)`);
-	}
 
 	// book popup
 	let dialog = $state<HTMLDialogElement | null>(null);
@@ -328,18 +309,7 @@
 									{line.quantity} &times; {money(line.unit_price)} = {money(line.line_total)}
 								</div>
 							{/if}
-							{#if line.sku && line.parts.length}
-								<button
-									class="btn ghost small"
-									title={mappingFor(line.sku)
-										? `Replace what ${line.sku} maps to with these parts`
-										: `Make ${line.sku} map to these parts, for every future order`}
-									onclick={() => saveMapping(line)}
-								>
-									{mappingFor(line.sku) ? 'Update' : 'Save as'} SKU mapping
-								</button>
-							{/if}
-						</div>
+							</div>
 						<table class="parts">
 							<thead>
 								<tr>
@@ -430,7 +400,7 @@
 								</button>
 							{/if}
 						{/if}
-						{#if line.ignored_id && line.sku && !mappingFor(line.sku)?.ignored_id}
+						{#if line.ignored_id && line.sku && !mappingFor(line.sku)?.ignored}
 							<button
 								class="btn ghost small"
 								title={`Ignore ${line.sku} on every future order too`}
@@ -505,26 +475,6 @@
 		</div>
 	</div>
 
-	{#if saveLine}
-		{@const existing = mappingFor(saveLine.sku)}
-		{@const line = saveLine}
-		<div class="modal">
-			<div class="card">
-				<h2 class="h2">Update the mapping for {line.sku}?</h2>
-				<p class="muted">
-					It already maps to {existing?.parts.length} part(s):
-					{existing?.parts.map((p) => `${p.quantity}x ${p.part_description}`).join(', ')}.
-					Saving replaces that with what this line consumes. Orders already filled in
-					keep what they have; future ones get the new list.
-				</p>
-				<div class="actions">
-					<button class="btn ghost" onclick={() => (saveLine = null)}>Cancel</button>
-					<button class="btn" onclick={() => doSaveMapping(line)}>Replace it</button>
-				</div>
-			</div>
-		</div>
-	{/if}
-
 	<dialog bind:this={dialog} class="book">
 		<h2 class="h2">{so.booked ? 'Book the added parts?' : 'Book this order?'}</h2>
 		<p class="muted">
@@ -579,28 +529,6 @@
 	}
 	dialog.book::backdrop {
 		background: rgba(0, 0, 0, 0.4);
-	}
-	.modal {
-		position: fixed;
-		inset: 0;
-		z-index: 40;
-		display: grid;
-		place-items: center;
-		background: rgba(0, 0, 0, 0.4);
-	}
-	.modal .card {
-		background: var(--card);
-		color: var(--ink);
-		border: 1px solid var(--line);
-		border-radius: 8px;
-		padding: 20px;
-		max-width: 520px;
-	}
-	.modal .actions {
-		display: flex;
-		justify-content: flex-end;
-		gap: 8px;
-		margin-top: 16px;
 	}
 	.head .actions {
 		display: flex;

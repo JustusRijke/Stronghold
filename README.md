@@ -205,15 +205,14 @@ Open-source inventory/stock tracking for small and medium businesses.
 - Import sales orders from a WooCommerce shop and book what they consumed.
   WooCommerce stays the authority on the sale itself (customer, status, prices,
   line items -- all read-only here); what it cannot know is which *parts* a sold
-  product is made of. Map a sold SKU to a list of parts on the **Product SKUs**
-  tab of the sales orders page -- the same shape as a line's own parts, copied
-  onto it verbatim, so a product may be several loose parts or one assembly taken
-  off the shelf; several SKUs may share a mapping, since a door-left and a
-  door-right variant are the same build -- and importing an order fills those
-  parts in for you; there is a **Prefill from SKUs** button on each order too,
-  and a **Save as SKU mapping** button on each line that turns the parts you just
-  linked into the mapping for its SKU. Anything unmapped you link by hand, per
-  unit sold. Parts that were thrown in with the order rather than sold -- a
+  product is made of. Point a sold SKU at the part it *is* on the **Product SKUs**
+  tab of the sales orders page -- a product made of several things is an assembly,
+  and its BOM holds that list, so two SKUs that are the same build (a door-left
+  and a door-right variant) name one part and share one recipe. Importing an
+  order fills those parts in for you; there is a **Prefill from SKUs** button on
+  each order too. The tab lists every sold SKU including the unmapped ones, so
+  what is left to do is in the same table. Anything unmapped you link by hand,
+  per unit sold. Parts that were thrown in with the order rather than sold -- a
   spare cable, a handful of bolts -- are linked to the order itself under
   **Extras**, and are consumed and costed like any other linked part. Prefilling
   only ever touches a line that has no parts yet, so it never overwrites your

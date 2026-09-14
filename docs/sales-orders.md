@@ -12,9 +12,8 @@ Stronghold only ever reads those facts, never writes them back.
 What WooCommerce cannot know is what a product is *made of*. A sold item is a
 product code; the parts behind it live here. So a sales order in Stronghold is
 the imported order plus one thing you own: **which parts each sold line
-consumes, and how many of each per unit sold.** Map a product SKU to an assembly
-once (see below) and that gets filled in for you; anything unmapped you link by
-hand.
+consumes.** Point a product SKU at the part it is (see below) and that gets
+filled in for you; anything unmapped you link by hand.
 
 Once that mapping exists you can *book* the order, and Stronghold takes those
 parts out of stock exactly the way a build order consumes its components.
@@ -54,48 +53,34 @@ the key file that decrypts them.
 
 ## Product SKUs: linking by hand once, not once per order
 
-The same products sell over and over, so mapping their parts by hand on every
+The same products sell over and over, so naming their parts by hand on every
 order would be the same work every week. The **Product SKUs** tab, next to
 Overview on the sales orders page, is where that mapping lives instead: it points
-a sold SKU at the part it is made of.
+a sold SKU at the part it *is*.
 
-A mapping is a **list of parts and quantities** -- the same shape as the parts on
-a sales order line, and copied onto it verbatim. What the mapping says is exactly
-what the line gets, with nothing expanded in between.
+A SKU names **one part**, and one sold unit consumes one of it. A product made of
+several things is an **assembly**, and its BOM holds that list -- so the line
+consumes one of that assembly, taken off the shelf where a build order put it,
+which is what selling a built product actually does. If a sale needs two of
+something, that is a BOM line with quantity 2, not a quantity on the mapping.
 
-That includes an assembly: map a SKU to one and the line consumes *one of that
-assembly*, taken off the shelf where a build order put it, which is what selling
-a built product actually does. Map loose parts instead and the line consumes
-those.
+Variants that are the same build share one part: a haybutler with the door on
+the left (`HBT-H-DL`) and one with it on the right (`HBT-H-DR`) both name it, so
+the recipe is written once and editing it reaches both. Add a second SKU to a
+part exactly the way you added the first.
 
-The **Sold SKU** box suggests the SKUs your imported orders actually use, most-
-sold first, and drops each one from the list as you map it -- so the key is
-picked rather than typed. A SKU that has not been sold yet can still be typed in
-by hand. The count in brackets is how many sold line items carry it, which is a
-fair guide to what is worth mapping first.
-
-Several SKUs may map to the same parts, which is the usual case for variants --
-a haybutler with the door on the left (`HBT-H-DL`) and one with it on the right
-(`HBT-H-DR`) are the same build.
+The tab lists **every sold SKU**, including the ones nothing maps yet -- those
+are the work left to do, so filtering the **State** column to *Not mapped* is
+how you find them. The **Sold** column counts how many sold line items carry
+each one, which is a fair guide to what is worth mapping first. A SKU that has
+not been sold yet can still be typed in by hand.
 
 With a SKU mapped, it is applied to matching line items:
 
 - automatically, whenever an order is imported, and
 - on demand, with **Prefill from SKUs** on a sales order.
 
-## Saving a mapping from an order
-
-The mapping does not have to be built on the Product SKUs tab. Link the parts on
-a sales order line until they are right, then press **Save as SKU mapping** on
-that line: its SKU is mapped to exactly those parts and quantities, ready for
-every future order that sells it.
-
-If the SKU already maps to something, the button reads **Update SKU mapping** and
-names what it currently points at before replacing it -- other orders prefill
-from that mapping, so it is never overwritten silently. Replacing is a straight
-swap, not a merge: a part the line no longer lists leaves the mapping too.
-
-Either way, it is a *starting point* -- ordinary part links are written and you
+It is a *starting point* -- ordinary part links are written and you
 are then free to edit them. Two rules keep it from ever undoing your work:
 
 - Only a line with **no parts yet** is filled in. Once you have edited a line,
@@ -104,8 +89,6 @@ are then free to edit them. Two rules keep it from ever undoing your work:
   already filled in.** Orders keep what they were costed against.
 
 A line whose SKU has no mapping is simply left for you to link by hand, as below.
-So is one mapped to an assembly whose BOM is still empty: there is nothing to
-copy yet, and linking the assembly to itself would not be what you meant.
 
 ## Linking parts to a line
 
@@ -159,9 +142,9 @@ given parts -- remove the one before setting the other.
 
 Ignoring the same shipping line on every order would be the same work every
 week, so **Always ignore \<SKU\>** saves the decision against the sold SKU. It
-then lives on the Product SKUs tab as an ignored mapping, and every future order
-carrying that SKU prefills as ignored. Remove it there (**unignore**) to go back
-to linking by hand.
+then lives on the Product SKUs tab marked *Ignored*, and every future order
+carrying that SKU prefills as ignored. Remove it there to go back to linking by
+hand.
 
 ## Extras thrown in with an order
 
