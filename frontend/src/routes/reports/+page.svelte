@@ -28,6 +28,13 @@
 			blurb:
 				'Every part against the open sales orders, shortages first, with short ' +
 				'assemblies exploded through their BOMs. Build orders are ignored.'
+		},
+		{
+			href: '/reports/inactive-part-suspects',
+			title: 'Suspected inactive parts',
+			blurb:
+				'Active parts nothing live uses: in no BOM, or only in deactivated ' +
+				'assemblies, and not mapped to any sold sku.'
 		}
 	];
 </script>

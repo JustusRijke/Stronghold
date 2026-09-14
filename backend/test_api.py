@@ -1441,6 +1441,55 @@ def test_stock_shortage_report(client):
     assert rows["PLATE"]["shortage"] == -7.0
 
 
+def test_inactive_part_suspects_report(client):
+    """Both halves of the rule, and each thing that clears a part: a live BOM
+    parent, a sold sku mapping, and a sales order line mapping."""
+
+    def part(sku, **kw):
+        return client.post(
+            "/api/parts", json={"sku": sku, "description": sku, **kw}
+        ).json()
+
+    def bom(parent, component):
+        assert (
+            client.post(
+                f"/api/parts/{parent['id']}/bom",
+                json={"component_part_id": component["id"], "quantity": 1},
+            ).status_code
+            == 201
+        )
+
+    part("ORPHAN")  # in no BOM, unsold -> suspect
+    retired = part("RETIRED")  # only in a deactivated assembly -> suspect
+    kept = part("KEPT")  # in a live assembly -> not a suspect
+    sold_sku = part("SOLDSKU")  # mapped to a sold sku -> not a suspect
+    sold_line = part("SOLDLINE")  # mapped to a sales order line -> not a suspect
+    old_assy = part("OLDASSY")
+    live_assy = part("LIVEASSY")
+    for a in (old_assy, live_assy):
+        client.patch(f"/api/parts/{a['id']}", json={"assembly": True})
+    bom(old_assy, retired)
+    bom(live_assy, kept)
+    client.patch(f"/api/parts/{old_assy['id']}", json={"active": False})
+
+    client.post("/api/part-skus", json={"sku": "WIDGET", "part_id": sold_sku["id"]})
+    so_id = _seed_sale(client)
+    line_id = client.get(f"/api/sales-orders/{so_id}/lines").json()[0]["id"]
+    client.post(
+        f"/api/sales-orders/{so_id}/lines/{line_id}/parts",
+        json={"part_id": sold_line["id"], "quantity": 1},
+    )
+
+    rows = {
+        r["sku"]: r for r in client.get("/api/reports/inactive-part-suspects").json()
+    }
+    # LIVEASSY is itself a suspect: nothing uses it and no sku sells it
+    assert set(rows) == {"ORPHAN", "RETIRED", "LIVEASSY"}
+    assert rows["ORPHAN"]["inactive_parents"] == 0
+    assert rows["RETIRED"]["inactive_parents"] == 1
+    assert rows["LIVEASSY"]["assembly"] is True
+
+
 def test_ignoring_lines_and_skus(client):
     """A line that consumes nothing (shipping, a fee) is ignored rather than
     linked, and the decision is remembered against the sku."""

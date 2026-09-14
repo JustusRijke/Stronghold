@@ -2524,6 +2524,55 @@ def stock_shortage_report() -> list[StockShortageRow]:
     ]
 
 
+class InactivePartSuspectRow(BaseModel):
+    """One active part that nothing live appears to use. inactive_parents is 0
+    when the part is in no BOM at all, and otherwise counts the inactive
+    assemblies it is still a component of -- the two halves of the rule."""
+
+    part_id: int
+    sku: str
+    description: str
+    inactive_parents: int
+    in_stock: float
+    assembly: bool
+    part_virtual: bool
+
+
+@router.get(
+    "/reports/inactive-part-suspects", response_model=list[InactivePartSuspectRow]
+)
+def inactive_part_suspects_report() -> list[InactivePartSuspectRow]:
+    """Active parts that look deactivatable: used in no live BOM and not mapped
+    to any sold sku or sales order line (see db.inactive_part_suspects, which
+    owns the rule). A suggestion list -- nothing is deactivated here."""
+    with db.session() as s:
+        rows = db.inactive_part_suspects(s)
+        ids = [pid for pid, _ in rows]
+        parts = {p.id: p for p in s.scalars(select(Part).where(Part.id.in_(ids)))}
+        stock = dict(
+            s.execute(
+                select(StockItem.part_id, func.sum(StockItem.count))
+                .where(
+                    StockItem.status == STOCK_AVAILABLE,
+                    StockItem.part_id.in_(ids),
+                )
+                .group_by(StockItem.part_id)
+            ).all()
+        )
+    return [
+        InactivePartSuspectRow(
+            part_id=part_id,
+            sku=parts[part_id].sku or "",
+            description=parts[part_id].description,
+            inactive_parents=inactive_parents,
+            in_stock=stock.get(part_id, 0.0),
+            assembly=parts[part_id].assembly,
+            part_virtual=parts[part_id].virtual,
+        )
+        for part_id, inactive_parents in rows
+    ]
+
+
 # -- activity log -----------------------------------------------------------
 
 
