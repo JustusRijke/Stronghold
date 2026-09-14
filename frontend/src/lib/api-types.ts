@@ -1214,6 +1214,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/reports/inactive-part-suspects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inactive Part Suspects Report
+         * @description Active parts that look deactivatable: used in no live BOM and not mapped
+         *     to any sold sku or sales order line (see db.inactive_part_suspects, which
+         *     owns the rule). A suggestion list -- nothing is deactivated here.
+         */
+        get: operations["inactive_part_suspects_report_api_reports_inactive_part_suspects_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/activity": {
         parameters: {
             query?: never;
@@ -1487,6 +1509,28 @@ export interface components {
             prefilled: number;
             /** Notes */
             notes: string[];
+        };
+        /**
+         * InactivePartSuspectRow
+         * @description One active part that nothing live appears to use. inactive_parents is 0
+         *     when the part is in no BOM at all, and otherwise counts the inactive
+         *     assemblies it is still a component of -- the two halves of the rule.
+         */
+        InactivePartSuspectRow: {
+            /** Part Id */
+            part_id: number;
+            /** Sku */
+            sku: string;
+            /** Description */
+            description: string;
+            /** Inactive Parents */
+            inactive_parents: number;
+            /** In Stock */
+            in_stock: number;
+            /** Assembly */
+            assembly: boolean;
+            /** Part Virtual */
+            part_virtual: boolean;
         };
         /** LinePartIn */
         LinePartIn: {
@@ -4777,6 +4821,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StockShortageRow"][];
+                };
+            };
+        };
+    };
+    inactive_part_suspects_report_api_reports_inactive_part_suspects_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InactivePartSuspectRow"][];
                 };
             };
         };

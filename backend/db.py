@@ -4055,3 +4055,39 @@ def stock_shortages(s: Session) -> list[tuple[int, float, float]]:
         elif part_id in active:
             out.append((part_id, stock.get(part_id, 0.0), need.get(part_id, 0.0)))
     return out
+
+
+def inactive_part_suspects(s: Session) -> list[tuple[int, int]]:
+    """(part_id, inactive_parents) for every active part that looks like it
+    could be deactivated: it is used in no BOM at all, or every assembly it is
+    used in is itself inactive -- and in neither case does a sold sku or a sales
+    order line map to it.
+
+    inactive_parents comes back so the user can see which of the two cases a row
+    is (0 = used nowhere). This is a suggestion, not a verdict: nothing is
+    deactivated here, and stock on hand is deliberately not considered -- a part
+    with stock left is exactly the one worth deciding about."""
+    used_in: dict[int, list[int]] = {}  # component -> [active parents, inactive]
+    for component_id, parent_active in s.execute(
+        select(BomLine.component_part_id, Part.active).join(
+            Part, BomLine.parent_part_id == Part.id
+        )
+    ):
+        counts = used_in.setdefault(component_id, [0, 0])
+        counts[0 if parent_active else 1] += 1
+    sold = set(
+        s.scalars(select(PartSku.part_id).where(PartSku.part_id.is_not(None)))
+    ) | set(
+        s.scalars(
+            select(SalesOrderLinePart.part_id).where(
+                SalesOrderLinePart.part_id.is_not(None)
+            )
+        )
+    )
+    return [
+        (part_id, used_in.get(part_id, (0, 0))[1])
+        for part_id in s.scalars(
+            select(Part.id).where(Part.active.is_(True)).order_by(Part.id)
+        )
+        if not used_in.get(part_id, (0, 0))[0] and part_id not in sold
+    ]
