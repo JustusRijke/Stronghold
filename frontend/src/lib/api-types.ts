@@ -946,7 +946,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/product-skus": {
+    "/api/part-skus": {
         parameters: {
             query?: never;
             header?: never;
@@ -954,25 +954,30 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Product Skus
-         * @description Every mapping, one entry per sku with the parts it consumes. db returns
-         *     one flat row per part, already ordered by sku, so this just groups them.
+         * List Part Skus
+         * @description Every sales sku: the ones mapped to a part, the ones marked ignored, and
+         *     the ones WooCommerce has sold that nobody has mapped yet.
+         *
+         *     The unmapped ones are included deliberately -- they are the work left to do,
+         *     and listing them here is what lets the page be one searchable table instead
+         *     of a mapped table beside a to-do list. They carry id=None: there is no row
+         *     to delete, because not having decided yet is not a decision.
          */
-        get: operations["list_product_skus_api_product_skus_get"];
+        get: operations["list_part_skus_api_part_skus_get"];
         put?: never;
         /**
-         * Add Product Sku Part
-         * @description Add a part to what a sold sku consumes. Adding one it already lists tops
-         *     up that quantity rather than failing.
+         * Add Part Sku
+         * @description Sell a part under one more sales sku. A part may carry several; a sku
+         *     already taken by another part is rejected rather than moved.
          */
-        post: operations["add_product_sku_part_api_product_skus_post"];
+        post: operations["add_part_sku_api_part_skus_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/product-skus/sold": {
+    "/api/part-skus/sold": {
         parameters: {
             query?: never;
             header?: never;
@@ -984,7 +989,7 @@ export interface paths {
          * @description The skus WooCommerce has actually sold, most-used first. What the mapping
          *     page offers to pick from, so a key is never typed in by hand.
          */
-        get: operations["list_sold_skus_api_product_skus_sold_get"];
+        get: operations["list_sold_skus_api_part_skus_sold_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -993,7 +998,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/product-skus/ignore": {
+    "/api/part-skus/ignore": {
         parameters: {
             query?: never;
             header?: never;
@@ -1003,18 +1008,18 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Ignore Product Sku
+         * Ignore Sku
          * @description Mark a sold sku as consuming nothing, so orders carrying it prefill as
          *     ignored. Undone by deleting the marker row, like any other mapping row.
          */
-        post: operations["ignore_product_sku_api_product_skus_ignore_post"];
+        post: operations["ignore_sku_api_part_skus_ignore_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/product-skus/parts/{link_id}": {
+    "/api/part-skus/{link_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1024,30 +1029,8 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Delete Product Sku Part */
-        delete: operations["delete_product_sku_part_api_product_skus_parts__link_id__delete"];
-        options?: never;
-        head?: never;
-        /** Patch Product Sku Part */
-        patch: operations["patch_product_sku_part_api_product_skus_parts__link_id__patch"];
-        trace?: never;
-    };
-    "/api/product-skus/from-line": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Put Product Sku From Line
-         * @description Save what a sales order line consumes as its sku's mapping, replacing
-         *     whatever that sku mapped to before. The button on the order page.
-         */
-        put: operations["put_product_sku_from_line_api_product_skus_from_line_put"];
-        post?: never;
-        delete?: never;
+        /** Delete Part Sku */
+        delete: operations["delete_part_sku_api_part_skus__link_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1796,6 +1779,36 @@ export interface components {
             /** Required */
             required: number;
         };
+        /** PartSkuIn */
+        PartSkuIn: {
+            /** Part Id */
+            part_id: number;
+            /** Sku */
+            sku: string;
+        };
+        /**
+         * PartSkuOut
+         * @description One sales sku: what part it is sold as, or that it is ignored, or that
+         *     nobody has decided yet (id None -- there is no row for it).
+         */
+        PartSkuOut: {
+            /** Id */
+            id: number | null;
+            /** Sku */
+            sku: string;
+            /** Part Id */
+            part_id: number | null;
+            /** Part Sku */
+            part_sku: string;
+            /** Part Description */
+            part_description: string;
+            /** Part Assembly */
+            part_assembly: boolean;
+            /** Ignored */
+            ignored: boolean;
+            /** Lines */
+            lines: number;
+        };
         /** PrefillResultOut */
         PrefillResultOut: {
             /** Filled */
@@ -1805,68 +1818,6 @@ export interface components {
         };
         /** ProduceIn */
         ProduceIn: {
-            /** Quantity */
-            quantity: number;
-        };
-        /**
-         * ProductSkuFromLineIn
-         * @description Save what one sales order line consumes as the mapping for its sku.
-         */
-        ProductSkuFromLineIn: {
-            /** Sku */
-            sku: string;
-            /** Line Id */
-            line_id: number;
-        };
-        /** ProductSkuIgnoreIn */
-        ProductSkuIgnoreIn: {
-            /** Sku */
-            sku: string;
-        };
-        /**
-         * ProductSkuOut
-         * @description A sold sku and everything it is made of.
-         */
-        ProductSkuOut: {
-            /** Sku */
-            sku: string;
-            /** Parts */
-            parts: components["schemas"]["ProductSkuPartOut"][];
-            /** Ignored Id */
-            ignored_id: number | null;
-        };
-        /** ProductSkuPartIn */
-        ProductSkuPartIn: {
-            /** Sku */
-            sku: string;
-            /** Part Id */
-            part_id: number;
-            /**
-             * Quantity
-             * @default 1
-             */
-            quantity: number;
-        };
-        /**
-         * ProductSkuPartOut
-         * @description One part a sold sku consumes, per unit sold.
-         */
-        ProductSkuPartOut: {
-            /** Id */
-            id: number;
-            /** Part Id */
-            part_id: number;
-            /** Part Sku */
-            part_sku: string;
-            /** Part Description */
-            part_description: string;
-            /** Part Assembly */
-            part_assembly: boolean;
-            /** Quantity */
-            quantity: number;
-        };
-        /** ProductSkuQtyPatch */
-        ProductSkuQtyPatch: {
             /** Quantity */
             quantity: number;
         };
@@ -2099,6 +2050,11 @@ export interface components {
             quantity: number;
             /** Item Id */
             item_id?: number | null;
+        };
+        /** SkuIn */
+        SkuIn: {
+            /** Sku */
+            sku: string;
         };
         /**
          * SoldSkuOut
@@ -4478,7 +4434,7 @@ export interface operations {
             };
         };
     };
-    list_product_skus_api_product_skus_get: {
+    list_part_skus_api_part_skus_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -4493,12 +4449,12 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductSkuOut"][];
+                    "application/json": components["schemas"]["PartSkuOut"][];
                 };
             };
         };
     };
-    add_product_sku_part_api_product_skus_post: {
+    add_part_sku_api_part_skus_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4507,7 +4463,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ProductSkuPartIn"];
+                "application/json": components["schemas"]["PartSkuIn"];
             };
         };
         responses: {
@@ -4517,7 +4473,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductSkuOut"][];
+                    "application/json": components["schemas"]["PartSkuOut"][];
                 };
             };
             /** @description Validation Error */
@@ -4531,7 +4487,7 @@ export interface operations {
             };
         };
     };
-    list_sold_skus_api_product_skus_sold_get: {
+    list_sold_skus_api_part_skus_sold_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -4551,7 +4507,7 @@ export interface operations {
             };
         };
     };
-    ignore_product_sku_api_product_skus_ignore_post: {
+    ignore_sku_api_part_skus_ignore_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4560,7 +4516,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ProductSkuIgnoreIn"];
+                "application/json": components["schemas"]["SkuIn"];
             };
         };
         responses: {
@@ -4570,7 +4526,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductSkuOut"][];
+                    "application/json": components["schemas"]["PartSkuOut"][];
                 };
             };
             /** @description Validation Error */
@@ -4584,7 +4540,7 @@ export interface operations {
             };
         };
     };
-    delete_product_sku_part_api_product_skus_parts__link_id__delete: {
+    delete_part_sku_api_part_skus__link_id__delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -4602,74 +4558,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OkOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    patch_product_sku_part_api_product_skus_parts__link_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                link_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProductSkuQtyPatch"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OkOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    put_product_sku_from_line_api_product_skus_from_line_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProductSkuFromLineIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProductSkuOut"][];
                 };
             };
             /** @description Validation Error */

@@ -38,10 +38,10 @@ from models import (
     BuildStatus,
     EnumCode,
     Part,
+    PartSku,
     POLine,
     POStatus,
     PriceBasis,
-    ProductSkuPart,
     PurchaseOrder,
     SalesOrder,
     SalesOrderLine,
@@ -227,6 +227,10 @@ def _import_sql() -> None:
             # Harmless for a current file -- the column stays empty and its
             # migration step (a no-op for that file) drops it again.
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
+        for table, ddl in _dropped_tables().items():
+            # same deal one level up: create_all no longer knows these, so they
+            # are rebuilt empty here to catch an older file's INSERTs.
+            conn.execute(f"CREATE TABLE IF NOT EXISTS {table} ({ddl})")
         if _legacy_file:
             conn.executescript(_legacy_file.read_text(encoding="utf-8"))
             _log.info(
@@ -237,8 +241,10 @@ def _import_sql() -> None:
                 _export_dir,
             )
             return
-        for table in Base.metadata.sorted_tables:
-            path = _table_path(table.name)
+        names = [t.name for t in Base.metadata.sorted_tables]
+        names += list(_dropped_tables())  # an older file may still carry these
+        for name in names:
+            path = _table_path(name)
             if path.exists():
                 conn.executescript(path.read_text(encoding="utf-8"))
     _log.info("loaded %s (working copy: %s)", _export_dir, _db_path)
@@ -262,6 +268,15 @@ def _dropped_columns() -> list[tuple[str, str, str]]:
     ]
 
 
+def _dropped_tables() -> dict[str, str]:
+    """Every {table: columns DDL} removed by a migration, newest step last."""
+    return {
+        table: ddl
+        for step in sorted(_DROPPED_TABLES)
+        for table, ddl in _DROPPED_TABLES[step].items()
+    }
+
+
 def session() -> Session:
     """Read access; writes go through the functions below."""
     return Session(_engine)
@@ -281,6 +296,20 @@ _DROPPED_COLUMNS = {
         ("build_orders", "reference", "VARCHAR"),
     ],
     11: [("sales_orders", "wc_order_id", "INTEGER")],
+}
+
+# Whole tables a migration removed, keyed by the SCHEMA_VERSION that removed
+# them. The column scaffold above is not enough for these: _import_sql replays
+# one file per *declared* table, so an undeclared table's .sql would not be read
+# at all and its data would vanish silently. Each is recreated empty before the
+# replay, read by its migration step, and dropped there. Types are permissive --
+# they only have to hold the old values long enough to be migrated out.
+_DROPPED_TABLES = {
+    14: {
+        "product_sku_parts": (
+            "id INTEGER, sku VARCHAR, part_id INTEGER, quantity FLOAT"
+        )
+    },
 }
 
 
@@ -482,6 +511,72 @@ def _to_v11(s: Session) -> None:
     s.execute(text("UPDATE stock_items SET consumed_by_so_id = NULL"))
 
 
+def _to_v14(s: Session) -> None:
+    """A sales sku became a label on a part instead of carrying its own part
+    list. A sku that named several parts (or one part more than once per sale)
+    has no home under the new shape, so it gets the assembly it always was:
+    the list moves into a BOM, and the sku points at that.
+
+    Skus with an identical list share one assembly -- that is the whole point of
+    the change, and in the dataset it was written for 21 such skus collapse onto
+    9 assemblies. The new parts are reported: they need naming by hand."""
+    rows = s.execute(
+        text("SELECT sku, part_id, quantity FROM product_sku_parts ORDER BY id")
+    ).all()
+    groups: dict[str, list[tuple[int, float]]] = {}
+    for sku, part_id, quantity in rows:
+        groups.setdefault(sku, [])
+        if part_id is not None:  # a part-less row is the ignore marker
+            groups[sku].append((part_id, quantity))
+
+    # one assembly per distinct part list, shared by every sku naming it
+    assemblies: dict[frozenset, int] = {}
+    next_part = (s.scalar(select(func.max(Part.id))) or 0) + 1
+    next_bom = (s.scalar(select(func.max(BomLine.id))) or 0) + 1
+    next_link = 1  # part_skus is new, so its ids start clean
+    for sku, parts in sorted(groups.items()):
+        if len(parts) == 1 and parts[0][1] == 1:
+            part_id = parts[0][0]  # a plain one-to-one mapping, no assembly
+        elif not parts:
+            part_id = None  # ignored, as before
+        else:
+            key = frozenset(parts)
+            if key not in assemblies:
+                s.add(
+                    Part(
+                        id=next_part,
+                        description=f"{sku} (assembly built by the schema 14 "
+                        f"migration -- rename me)",
+                        assembly=True,
+                        purchasable=False,
+                    )
+                )
+                s.flush()  # the part must land before its BOM lines point at it
+                for component, quantity in parts:
+                    s.add(
+                        BomLine(
+                            id=next_bom,
+                            parent_part_id=next_part,
+                            component_part_id=component,
+                            quantity=quantity,
+                        )
+                    )
+                    next_bom += 1
+                _log.warning(
+                    "sku %s mapped to %d part(s); built part %d to hold that "
+                    "list -- give it a proper name and sku",
+                    sku,
+                    len(parts),
+                    next_part,
+                )
+                assemblies[key] = next_part
+                next_part += 1
+            part_id = assemblies[key]
+        s.add(PartSku(id=next_link, sku=sku, part_id=part_id))
+        next_link += 1
+    s.execute(text("DROP TABLE product_sku_parts"))
+
+
 _MIGRATIONS = {
     2: lambda s: _drop_columns(s, 2),
     3: _to_v3,
@@ -505,6 +600,7 @@ _MIGRATIONS = {
     # 13 only relaxed two NOT NULLs -- create_all built the new shape and every
     # replayed row still satisfies it. See the note on step 4.
     13: lambda s: None,
+    14: _to_v14,
 }
 
 
@@ -3374,40 +3470,42 @@ def remove_line_part(s: Session, link_id: int) -> None:
     _activity(s, "remove_line_part", f"{label}: {what}", refs)
 
 
-# -- product skus -----------------------------------------------------------
+# -- part skus -------------------------------------------------------------
 #
 # The map from what WooCommerce sells to what it is made of. A sales line
-# carries a sku; a sku maps to a list of (part, quantity) -- the same shape as
-# the line's own parts, so prefill is a straight copy. Many-to-many both ways: a
-# sku may name several parts, and several skus may name one part (a door-left
-# and a door-right variant are the same build).
+# carries a sku; a sku names one part, and that part's own BOM says what it is
+# made of. So a sold product built from several components is an assembly, and
+# two skus that are the same build (a door-left and a door-right variant) both
+# point at it -- the recipe is written once.
+#
+# Before schema 14 a sku carried its own (part, quantity) list here, a second
+# BOM mechanism beside the real one that could not express that sharing.
 
 
-def product_skus(s: Session) -> list:
-    """(id, sku, part_id, part_sku, part_description, quantity, part_assembly)
-    for every mapping row, grouped by sku."""
+def part_skus(s: Session) -> list:
+    """(id, sku, part_id, part_sku, part_description, part_assembly) for every
+    mapping row."""
     return list(
         s.execute(
             select(
-                ProductSkuPart.id,
-                ProductSkuPart.sku,
+                PartSku.id,
+                PartSku.sku,
                 Part.id,
                 Part.sku,
                 Part.description,
-                ProductSkuPart.quantity,
                 Part.assembly,
             )
             # outer: an ignore row has no part and must still be listed
-            .outerjoin(Part, ProductSkuPart.part_id == Part.id)
-            .order_by(ProductSkuPart.sku, ProductSkuPart.id)
+            .outerjoin(Part, PartSku.part_id == Part.id)
+            .order_by(PartSku.sku)
         )
     )
 
 
-def next_product_sku_part_id() -> int:
+def next_part_sku_id() -> int:
     # ponytail: max+1 id generation; fine while one process owns the db
     with session() as s:
-        return (s.scalar(select(func.max(ProductSkuPart.id))) or 0) + 1
+        return (s.scalar(select(func.max(PartSku.id))) or 0) + 1
 
 
 def sold_skus(s: Session) -> list[tuple[str, str, int, bool]]:
@@ -3419,7 +3517,7 @@ def sold_skus(s: Session) -> list[tuple[str, str, int, bool]]:
     silently matches nothing. The description is whichever line's it happens to
     be -- the same sku sells under a tidied-up name sometimes, and any of them
     identifies it well enough to pick from a list."""
-    mapped = set(s.scalars(select(ProductSkuPart.sku)))
+    mapped = set(s.scalars(select(PartSku.sku)))
     rows = s.execute(
         select(
             SalesOrderLine.sku,
@@ -3433,63 +3531,47 @@ def sold_skus(s: Session) -> list[tuple[str, str, int, bool]]:
     return [(sku, desc, n, sku in mapped) for sku, desc, n in rows]
 
 
-def get_product_sku_part(s: Session, link_id: int) -> ProductSkuPart:
-    row = s.get(ProductSkuPart, link_id)
+def get_part_sku(s: Session, link_id: int) -> PartSku:
+    row = s.get(PartSku, link_id)
     if row is None:
-        raise InventoryError(f"no product sku part {link_id}")
+        raise InventoryError(f"no part sku {link_id}")
     return row
 
 
-@_write
-def add_product_sku_part(
-    s: Session, link_id: int, sku: str, part_id: int, quantity: float
-) -> None:
-    """Add a part to what a sold sku consumes, or top up the one already there.
-
-    Adding a part the sku already lists **adds to** it rather than being
-    rejected, the same way add_line_part does: one mapping holds one quantity of
-    a given part, and "two more of those" is how a correction is phrased."""
+def _claim_sku(s: Session, sku: str) -> str:
+    """Reject a blank sku, or one another part already answers to."""
     sku = sku.strip()
     if not sku:
         raise InventoryError("sku is required")
-    if quantity <= 0:
-        raise InventoryError("quantity must be positive")
+    taken = s.scalar(select(PartSku).where(PartSku.sku == sku))
+    if taken is not None:
+        if taken.part_id is None:
+            raise InventoryError(f"sku {sku} is set to be ignored; remove that first")
+        part = get_part(s, taken.part_id)
+        raise InventoryError(f"sku {sku} is already sold as {part.description}")
+    return sku
+
+
+@_write
+def add_part_sku(s: Session, link_id: int, part_id: int, sku: str) -> None:
+    """Sell a part under one more sales sku.
+
+    A part may answer to several (variants of the same build); a sku may name
+    only one part, so claiming one already taken is an error rather than a
+    silent move -- the user should see which part has it."""
     part = get_part(s, part_id)
-    if s.scalar(
-        select(ProductSkuPart).where(
-            ProductSkuPart.sku == sku, ProductSkuPart.part_id.is_(None)
-        )
-    ):
-        raise InventoryError(
-            f"sku {sku} is set to be ignored; remove that before adding parts"
-        )
-    existing = s.scalar(
-        select(ProductSkuPart).where(
-            ProductSkuPart.sku == sku, ProductSkuPart.part_id == part_id
-        )
-    )
-    if existing is not None:
-        was = existing.quantity
-        existing.quantity = was + quantity
-        _activity(
-            s,
-            "add_product_sku_part",
-            f"Product sku {sku} now uses {existing.quantity:g}x "
-            f"{part.description} (was {was:g})",
-            [("part", part_id, part.sku)],
-        )
-        return
-    s.add(ProductSkuPart(id=link_id, sku=sku, part_id=part_id, quantity=quantity))
+    sku = _claim_sku(s, sku)
+    s.add(PartSku(id=link_id, part_id=part_id, sku=sku))
     _activity(
         s,
-        "add_product_sku_part",
-        f"Product sku {sku} uses {quantity:g}x {part.description}",
+        "add_part_sku",
+        f"{part.description} is sold as {sku}",
         [("part", part_id, part.sku)],
     )
 
 
 @_write
-def ignore_product_sku(s: Session, link_id: int, sku: str) -> None:
+def ignore_sku(s: Session, link_id: int, sku: str) -> None:
     """Mark a sold sku as consuming nothing, so every order carrying it prefills
     as ignored instead of waiting to be linked by hand.
 
@@ -3498,100 +3580,31 @@ def ignore_product_sku(s: Session, link_id: int, sku: str) -> None:
     sku = sku.strip()
     if not sku:
         raise InventoryError("sku is required")
-    had = s.scalars(select(ProductSkuPart).where(ProductSkuPart.sku == sku)).all()
-    if any(r.part_id is None for r in had):
-        return  # already ignored; a no-op should not manufacture an activity row
-    if had:
+    taken = s.scalar(select(PartSku).where(PartSku.sku == sku))
+    if taken is not None:
+        if taken.part_id is None:
+            return  # already ignored; a no-op should not manufacture a row
+        part = get_part(s, taken.part_id)
         raise InventoryError(
-            f"sku {sku} already maps to {len(had)} part(s); remove them before "
-            f"ignoring it"
+            f"sku {sku} is sold as {part.description}; unlink that before ignoring it"
         )
-    s.add(ProductSkuPart(id=link_id, sku=sku, part_id=None, quantity=0))
-    _activity(
-        s,
-        "ignore_product_sku",
-        f"Product sku {sku} is ignored (consumes nothing)",
-        [],
-    )
+    s.add(PartSku(id=link_id, part_id=None, sku=sku))
+    _activity(s, "ignore_sku", f"Sku {sku} is ignored (consumes nothing)", [])
 
 
 @_write
-def edit_product_sku_part(s: Session, link_id: int, quantity: float) -> None:
-    if quantity <= 0:
-        raise InventoryError("quantity must be positive")
-    row = get_product_sku_part(s, link_id)
-    if quantity == row.quantity:
-        return  # a no-op patch should not manufacture an activity row
-    if row.part_id is None:
-        raise InventoryError("an ignored sku has no quantity to change")
-    part = get_part(s, row.part_id)
-    _activity(
-        s,
-        "edit_product_sku_part",
-        f"Product sku {row.sku}: {part.description} quantity "
-        f"{row.quantity:g} -> {quantity:g}",
-        [("part", part.id, part.sku)],
-    )
-    row.quantity = quantity
-
-
-@_write
-def remove_product_sku_part(s: Session, link_id: int) -> None:
+def remove_part_sku(s: Session, link_id: int) -> None:
     # ponytail: a prefill lookup table, plain delete (orders keep their lines)
-    row = get_product_sku_part(s, link_id)
+    row = get_part_sku(s, link_id)
     refs = []
     if row.part_id is None:
-        what = "is no longer ignored"
+        what = f"Sku {row.sku} is no longer ignored"
     else:
         part = get_part(s, row.part_id)
-        what = f"no longer uses {part.description}"
+        what = f"{part.description} is no longer sold as {row.sku}"
         refs.append(("part", part.id, part.sku))
     s.delete(row)
-    _activity(s, "remove_product_sku_part", f"Product sku {row.sku} {what}", refs)
-
-
-@_write
-def set_product_sku_from_line(s: Session, sku: str, line_id: int) -> None:
-    """Make a sold sku map to exactly what one sales order line consumes.
-
-    The button on the order page: link the parts on the line until they are
-    right, then save that list as the mapping. Replaces the sku's rows outright
-    rather than merging -- the line is the intended answer, so a part it no
-    longer lists is one the mapping should no longer carry either."""
-    sku = sku.strip()
-    if not sku:
-        raise InventoryError("sku is required")
-    line = _get_so_line(s, line_id)
-    wanted = list(
-        s.execute(
-            select(SalesOrderLinePart.part_id, SalesOrderLinePart.quantity)
-            .where(SalesOrderLinePart.line_id == line_id)
-            .order_by(SalesOrderLinePart.id)
-        )
-    )
-    if not wanted:
-        raise InventoryError(
-            f"line {line.description or line.sku} has no parts linked; there is "
-            f"nothing to save as a mapping"
-        )
-    had = s.scalars(select(ProductSkuPart).where(ProductSkuPart.sku == sku)).all()
-    before = {(r.part_id, r.quantity) for r in had}
-    if before == set(wanted):
-        return  # a no-op should not manufacture an activity row
-    for row in had:
-        s.delete(row)
-    s.flush()  # the delete must land before the unique (sku, part) rows go back
-    link_id = (s.scalar(select(func.max(ProductSkuPart.id))) or 0) + 1
-    for part_id, quantity in wanted:
-        s.add(ProductSkuPart(id=link_id, sku=sku, part_id=part_id, quantity=quantity))
-        link_id += 1
-    _activity(
-        s,
-        "set_product_sku_from_line",
-        f"Product sku {sku} {'now uses' if had else 'uses'} "
-        f"{len(wanted)} part(s), saved from {so_ref(line.so_id)}",
-        [("sales-order", line.so_id, so_ref(line.so_id))],
-    )
+    _activity(s, "remove_part_sku", what, refs)
 
 
 @_write
@@ -3637,14 +3650,14 @@ def prefill_all_so_parts(s: Session, result: dict) -> None:
 
 
 def _prefill_so_parts(s: Session, so_id: int) -> tuple[int, int]:
-    """Fill in the parts of every line whose sku has a mapping. Returns (links
+    """Fill in the parts of every line whose sku names a part. Returns (links
     written, lines filled); the caller logs.
 
-    A mapping's rows are copied verbatim -- what it lists is exactly what the
-    line gets, with no expansion in between. That includes the part-less
-    "ignore" row: a sku marked ignored prefills lines that consume nothing. An assembly is copied like any
-    other part, so a sku mapped to one consumes one of that assembly off the
-    shelf (built by a build order), which is what selling a built product does.
+    One sold unit consumes one of that part, so the link is written with
+    quantity 1 -- a sold product made of more than one thing is an assembly, and
+    the line consumes one of it off the shelf (built by a build order), which is
+    what selling a built product does. A part-less mapping row is the "ignore"
+    marker and prefills a line that consumes nothing.
 
     Only lines that have no parts yet are touched: once the user has edited a
     line, the mapping is a starting point they already moved on from. A booked
@@ -3664,23 +3677,19 @@ def _prefill_so_parts(s: Session, so_id: int) -> tuple[int, int]:
             .where(SalesOrderLinePart.line_id == line.id)
         ):
             continue
-        wanted = list(
-            s.execute(
-                select(ProductSkuPart.part_id, ProductSkuPart.quantity)
-                .where(ProductSkuPart.sku == line.sku)
-                .order_by(ProductSkuPart.id)
+        mapping = s.scalar(select(PartSku).where(PartSku.sku == line.sku))
+        if mapping is None:
+            continue  # a sku nobody has mapped yet
+        s.add(
+            SalesOrderLinePart(
+                id=link_id,
+                line_id=line.id,
+                part_id=mapping.part_id,  # None = the ignore marker
+                quantity=1.0,
             )
         )
-        if not wanted:
-            continue
-        for part_id, quantity in wanted:
-            s.add(
-                SalesOrderLinePart(
-                    id=link_id, line_id=line.id, part_id=part_id, quantity=quantity
-                )
-            )
-            link_id += 1
-            filled += 1
+        link_id += 1
+        filled += 1
         lines += 1
     return filled, lines
 

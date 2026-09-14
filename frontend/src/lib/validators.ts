@@ -73,23 +73,12 @@ export const PartPatch = v.object({
 	purchasable: v.optional(v.nullable(v.boolean())),
 	estimated_price: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
 	});
+export const PartSkuIn = v.object({
+	part_id: v.pipe(v.number(), v.integer()),
+	sku: v.string(),
+	});
 export const ProduceIn = v.object({
 	quantity: v.pipe(v.number(), v.integer(), v.gtValue(0, 'must be greater than 0')),
-	});
-export const ProductSkuFromLineIn = v.object({
-	sku: v.string(),
-	line_id: v.pipe(v.number(), v.integer()),
-	});
-export const ProductSkuIgnoreIn = v.object({
-	sku: v.string(),
-	});
-export const ProductSkuPartIn = v.object({
-	sku: v.string(),
-	part_id: v.pipe(v.number(), v.integer()),
-	quantity: v.optional(v.number()),
-	});
-export const ProductSkuQtyPatch = v.object({
-	quantity: v.number(),
 	});
 export const PurchaseOrderIn = v.object({
 	supplier_id: v.pipe(v.number(), v.integer()),
@@ -117,6 +106,9 @@ export const SettingIn = v.object({
 export const SettleDebtIn = v.object({
 	quantity: v.pipe(v.number(), v.gtValue(0, 'must be greater than 0')),
 	item_id: v.optional(v.nullable(v.pipe(v.number(), v.integer()))),
+	});
+export const SkuIn = v.object({
+	sku: v.string(),
 	});
 export const StockItemIn = v.object({
 	part_id: v.pipe(v.number(), v.integer()),

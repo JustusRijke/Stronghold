@@ -51,7 +51,13 @@ from importlib.metadata import PackageNotFoundError, version
 # only widens what is accepted, so an older file replays unchanged -- but the
 # stamp still moves, so an older Stronghold refuses a file whose ignore rows it
 # would drop on its next export.
-SCHEMA_VERSION = 13
+# 14 replaces product_sku_parts with part_skus: a sales sku is now a label on a
+# part, not a (part, quantity) list of its own. A sold product made of several
+# parts is an assembly, and its BOM holds the list -- so the two skus of a
+# left/right variant pair can finally share one recipe. The migration builds
+# those assemblies from the old multi-part mappings, deduplicated so skus with
+# an identical part list end up on one assembly.
+SCHEMA_VERSION = 14
 
 try:
     APP_VERSION = version("stronghold")

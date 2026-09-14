@@ -532,26 +532,21 @@ class ImportResultOut(BaseModel):
     notes: list[str]
 
 
-class ProductSkuPartOut(BaseModel):
-    """One part a sold sku consumes, per unit sold."""
+class PartSkuOut(BaseModel):
+    """One sales sku: what part it is sold as, or that it is ignored, or that
+    nobody has decided yet (id None -- there is no row for it)."""
 
-    id: int
-    part_id: int
+    id: int | None
+    sku: str
+    part_id: int | None
     part_sku: str
     part_description: str
     part_assembly: bool
-    quantity: float
+    ignored: bool
+    lines: int  # how many sold line items carry it
 
 
-class ProductSkuOut(BaseModel):
-    """A sold sku and everything it is made of."""
-
-    sku: str
-    parts: list[ProductSkuPartOut]
-    ignored_id: int | None  # as SalesOrderLineOut.ignored_id
-
-
-class ProductSkuIgnoreIn(BaseModel):
+class SkuIn(BaseModel):
     sku: str
 
 
@@ -564,23 +559,9 @@ class SoldSkuOut(BaseModel):
     mapped: bool
 
 
-# quantity is unconstrained here for the same reason LinePartIn's is: the db
-# write rejects a non-positive one with a message worth reading.
-class ProductSkuPartIn(BaseModel):
-    sku: str
+class PartSkuIn(BaseModel):
     part_id: int
-    quantity: float = 1.0
-
-
-class ProductSkuQtyPatch(BaseModel):
-    quantity: float
-
-
-class ProductSkuFromLineIn(BaseModel):
-    """Save what one sales order line consumes as the mapping for its sku."""
-
     sku: str
-    line_id: int
 
 
 class SettingOut(BaseModel):
@@ -2211,32 +2192,50 @@ def prefill_sales_order_parts(so_id: int) -> list[SalesOrderLineOut]:
     return list_sales_order_lines(so_id)
 
 
-@router.get("/product-skus", response_model=list[ProductSkuOut])
-def list_product_skus() -> list[ProductSkuOut]:
-    """Every mapping, one entry per sku with the parts it consumes. db returns
-    one flat row per part, already ordered by sku, so this just groups them."""
-    out: list[ProductSkuOut] = []
+@router.get("/part-skus", response_model=list[PartSkuOut])
+def list_part_skus() -> list[PartSkuOut]:
+    """Every sales sku: the ones mapped to a part, the ones marked ignored, and
+    the ones WooCommerce has sold that nobody has mapped yet.
+
+    The unmapped ones are included deliberately -- they are the work left to do,
+    and listing them here is what lets the page be one searchable table instead
+    of a mapped table beside a to-do list. They carry id=None: there is no row
+    to delete, because not having decided yet is not a decision."""
     with db.session() as s:
-        for link_id, sku, part_id, part_sku, desc, qty, assembly in db.product_skus(s):
-            if not out or out[-1].sku != sku:
-                out.append(ProductSkuOut(sku=sku, parts=[], ignored_id=None))
-            if part_id is None:  # the ignore marker, not a part
-                out[-1].ignored_id = link_id
-                continue
-            out[-1].parts.append(
-                ProductSkuPartOut(
-                    id=link_id,
-                    part_id=part_id,
-                    part_sku=part_sku or "",
-                    part_description=desc,
-                    part_assembly=assembly,
-                    quantity=qty,
-                )
+        out = [
+            PartSkuOut(
+                id=link_id,
+                sku=sku,
+                part_id=part_id,
+                part_sku=part_sku or "",
+                part_description=desc or "",
+                part_assembly=bool(assembly),
+                ignored=part_id is None,
+                lines=0,
             )
-    return out
+            for link_id, sku, part_id, part_sku, desc, assembly in db.part_skus(s)
+        ]
+        sold = {sku: (desc, n) for sku, desc, n, _ in db.sold_skus(s)}
+        for row in out:
+            row.lines = sold.get(row.sku, ("", 0))[1]
+        out += [
+            PartSkuOut(
+                id=None,
+                sku=sku,
+                part_id=None,
+                part_sku="",
+                part_description=desc,
+                part_assembly=False,
+                ignored=False,
+                lines=n,
+            )
+            for sku, (desc, n) in sold.items()
+            if sku not in {r.sku for r in out}
+        ]
+    return sorted(out, key=lambda r: r.sku)
 
 
-@router.get("/product-skus/sold", response_model=list[SoldSkuOut])
+@router.get("/part-skus/sold", response_model=list[SoldSkuOut])
 def list_sold_skus() -> list[SoldSkuOut]:
     """The skus WooCommerce has actually sold, most-used first. What the mapping
     page offers to pick from, so a key is never typed in by hand."""
@@ -2247,48 +2246,26 @@ def list_sold_skus() -> list[SoldSkuOut]:
         ]
 
 
-@router.post("/product-skus", response_model=list[ProductSkuOut], status_code=201)
-def add_product_sku_part(body: ProductSkuPartIn) -> list[ProductSkuOut]:
-    """Add a part to what a sold sku consumes. Adding one it already lists tops
-    up that quantity rather than failing."""
-    _guard(
-        db.add_product_sku_part,
-        db.next_product_sku_part_id(),
-        body.sku,
-        body.part_id,
-        body.quantity,
-    )
-    return list_product_skus()
+@router.post("/part-skus", response_model=list[PartSkuOut], status_code=201)
+def add_part_sku(body: PartSkuIn) -> list[PartSkuOut]:
+    """Sell a part under one more sales sku. A part may carry several; a sku
+    already taken by another part is rejected rather than moved."""
+    _guard(db.add_part_sku, db.next_part_sku_id(), body.part_id, body.sku)
+    return list_part_skus()
 
 
-@router.post(
-    "/product-skus/ignore", response_model=list[ProductSkuOut], status_code=201
-)
-def ignore_product_sku(body: ProductSkuIgnoreIn) -> list[ProductSkuOut]:
+@router.post("/part-skus/ignore", response_model=list[PartSkuOut], status_code=201)
+def ignore_sku(body: SkuIn) -> list[PartSkuOut]:
     """Mark a sold sku as consuming nothing, so orders carrying it prefill as
     ignored. Undone by deleting the marker row, like any other mapping row."""
-    _guard(db.ignore_product_sku, db.next_product_sku_part_id(), body.sku)
-    return list_product_skus()
+    _guard(db.ignore_sku, db.next_part_sku_id(), body.sku)
+    return list_part_skus()
 
 
-@router.patch("/product-skus/parts/{link_id}", response_model=OkOut)
-def patch_product_sku_part(link_id: int, body: ProductSkuQtyPatch) -> OkOut:
-    _guard(db.edit_product_sku_part, link_id, body.quantity)
+@router.delete("/part-skus/{link_id}", response_model=OkOut)
+def delete_part_sku(link_id: int) -> OkOut:
+    _guard(db.remove_part_sku, link_id)
     return OkOut(ok=True)
-
-
-@router.delete("/product-skus/parts/{link_id}", response_model=OkOut)
-def delete_product_sku_part(link_id: int) -> OkOut:
-    _guard(db.remove_product_sku_part, link_id)
-    return OkOut(ok=True)
-
-
-@router.put("/product-skus/from-line", response_model=list[ProductSkuOut])
-def put_product_sku_from_line(body: ProductSkuFromLineIn) -> list[ProductSkuOut]:
-    """Save what a sales order line consumes as its sku's mapping, replacing
-    whatever that sku mapped to before. The button on the order page."""
-    _guard(db.set_product_sku_from_line, body.sku, body.line_id)
-    return list_product_skus()
 
 
 @router.post("/sales-orders/import", response_model=ImportResultOut)
