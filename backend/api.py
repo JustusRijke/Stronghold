@@ -1229,6 +1229,13 @@ def settle_debt(item_id: int, body: SettleDebtIn) -> PartOut:
     return get_part(part_id)
 
 
+@router.post("/parts/{part_id}/consolidate-stock", response_model=PartOut)
+def consolidate_stock(part_id: int) -> PartOut:
+    """Clear every outstanding shortfall for a part out of its available stock."""
+    _guard(db.consolidate_part_stock, part_id)
+    return get_part(part_id)
+
+
 # registered after /stock/stocktake so the literal path is not read as an id
 @router.get("/stock/{item_id}", response_model=StockItemOut)
 def get_stock(item_id: int) -> StockItemOut:

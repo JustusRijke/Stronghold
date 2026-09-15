@@ -2088,65 +2088,53 @@ def add_negative_stock(
     )
 
 
-@_write
-def settle_debt_from_stock(
-    s: Session, debt_id: int, quantity: float, item_id: int | None = None
-) -> None:
-    """Pay off a build or sales-order shortfall out of stock already on the
-    shelf.
-
-    The receipt path (_settle_stock_debt) does the same when parts arrive on a
-    PO; this is the manual version for a part that ended up with both a debt row
-    and available stock. The debt shrinks, the sources are drawn down FIFO (or
-    off one named item) and the placeholder consumption is repriced to what that
-    stock actually cost, so the order stops being costed at a guess."""
-    debt = get_item(s, debt_id)
-    if debt.status != STOCK_AVAILABLE or debt.count >= 0:
-        raise InventoryError(f"stock item {debt_id} is not an outstanding debt")
-    if quantity <= 0:
-        raise InventoryError("quantity must be positive")
-    if quantity > -debt.count + 1e-9:
-        raise InventoryError(f"stock item {debt_id} only owes {-debt.count:g}")
-    build_id = debt.consumed_by_build_id
-    so_id = debt.consumed_by_so_id
-    if build_id is None and so_id is None:
-        raise InventoryError(f"stock item {debt_id} is not linked to an order")
-    # the debt's immediate predecessor, same pairing contract _consume_fifo and
-    # add_negative_stock write and _settle_stock_debt relies on
-    placeholder = s.get(StockItem, debt_id - 1)
-    if (
-        placeholder is None
-        or placeholder.status != STOCK_CONSUMED
-        or placeholder.consumed_by_build_id != build_id
-        or placeholder.consumed_by_so_id != so_id
-        or placeholder.part_id != debt.part_id
-    ):
-        raise InventoryError(f"stock item {debt_id} has no consumption to settle")
-    if item_id is None:
-        sources = s.scalars(
+def _debt_rows(s: Session, part_id: int) -> list[StockItem]:
+    """Outstanding shortfalls for a part, oldest first: negative Available rows
+    an order owes. Same predicate _settle_stock_debt uses on the receipt side."""
+    return list(
+        s.scalars(
             select(StockItem)
             .where(
-                StockItem.part_id == debt.part_id,
+                StockItem.part_id == part_id,
                 StockItem.status == STOCK_AVAILABLE,
-                StockItem.count > 0,  # never settle a debt out of another debt
+                StockItem.count < 0,
+                or_(
+                    StockItem.consumed_by_build_id.is_not(None),
+                    StockItem.consumed_by_so_id.is_not(None),
+                ),
             )
             .order_by(StockItem.id)
         ).all()
-    else:
-        named = get_item(s, item_id)
-        if (
-            named.part_id != debt.part_id
-            or named.status != STOCK_AVAILABLE
-            or named.count <= 0
-        ):
-            raise InventoryError(
-                f"stock item {item_id} is not available stock of part {debt.part_id}"
-            )
-        sources = [named]
-    available = sum(i.count for i in sources)
-    if quantity > available + 1e-9:
-        raise InventoryError(f"only {available:g} in stock, cannot settle {quantity:g}")
+    )
 
+
+def _paired_placeholder(s: Session, debt: StockItem) -> StockItem | None:
+    """The consumed row a debt was written with: its immediate predecessor, the
+    pairing contract _consume_fifo and add_negative_stock emit. Matching on
+    order+part instead would pick up the rows consumed from real stock."""
+    placeholder = s.get(StockItem, debt.id - 1)
+    if (
+        placeholder is None
+        or placeholder.status != STOCK_CONSUMED
+        or placeholder.consumed_by_build_id != debt.consumed_by_build_id
+        or placeholder.consumed_by_so_id != debt.consumed_by_so_id
+        or placeholder.part_id != debt.part_id
+    ):
+        return None
+    return placeholder
+
+
+def _settle_from_shelf(
+    s: Session,
+    debt: StockItem,
+    placeholder: StockItem,
+    quantity: float,
+    sources: list[StockItem],
+) -> None:
+    """Pay `quantity` of one debt out of `sources`, oldest first. The debt
+    shrinks, the sources are drawn down and the placeholder consumption is
+    repriced to what that stock actually cost, so the order stops being costed
+    at a guess. Shared by the manual settle and the bulk consolidate."""
     next_id = (s.scalar(select(func.max(StockItem.id))) or 0) + 1
     need = quantity
     for source in sources:
@@ -2166,8 +2154,8 @@ def settle_debt_from_stock(
                 part_id=debt.part_id,
                 po_id=source.po_id,
                 build_id=source.build_id,
-                consumed_by_build_id=build_id,
-                consumed_by_so_id=so_id,
+                consumed_by_build_id=debt.consumed_by_build_id,
+                consumed_by_so_id=debt.consumed_by_so_id,
                 status=STOCK_CONSUMED,
                 unit_price=source.unit_price,
                 price_basis=source.price_basis,
@@ -2178,21 +2166,84 @@ def settle_debt_from_stock(
     s.flush()
     # the assembly was costed off the estimate; its inputs are real now. A sale
     # produces nothing, so there is nothing to reprice for one.
-    if build_id is not None:
+    if debt.consumed_by_build_id is not None:
         for produced in s.scalars(
             select(StockItem).where(
-                StockItem.build_id == build_id, StockItem.status == STOCK_AVAILABLE
+                StockItem.build_id == debt.consumed_by_build_id,
+                StockItem.status == STOCK_AVAILABLE,
             )
         ):
             refresh_stock_price(s, produced)
-    part = get_part(s, debt.part_id)
-    if build_id is not None:
-        get_build(s, build_id)  # exists check
-        kind, order_id, label = "build", build_id, build_ref(build_id)
+
+
+def _debt_order(s: Session, debt: StockItem) -> tuple[str, int, str]:
+    """(kind, id, label) of the order a debt is owed to, checking it exists."""
+    if debt.consumed_by_build_id is not None:
+        get_build(s, debt.consumed_by_build_id)  # exists check
+        return "build", debt.consumed_by_build_id, build_ref(debt.consumed_by_build_id)
+    if debt.consumed_by_so_id is None:
+        raise InventoryError(f"stock item {debt.id} is not linked to an order")
+    get_so(s, debt.consumed_by_so_id)  # exists check
+    return "sales-order", debt.consumed_by_so_id, so_ref(debt.consumed_by_so_id)
+
+
+def _shelf_stock(s: Session, part_id: int) -> list[StockItem]:
+    """Available stock of a part that can settle a debt, oldest first."""
+    return list(
+        s.scalars(
+            select(StockItem)
+            .where(
+                StockItem.part_id == part_id,
+                StockItem.status == STOCK_AVAILABLE,
+                StockItem.count > 0,  # never settle a debt out of another debt
+            )
+            .order_by(StockItem.id)
+        ).all()
+    )
+
+
+@_write
+def settle_debt_from_stock(
+    s: Session, debt_id: int, quantity: float, item_id: int | None = None
+) -> None:
+    """Pay off a build or sales-order shortfall out of stock already on the
+    shelf.
+
+    The receipt path (_settle_stock_debt) does the same when parts arrive on a
+    PO; this is the manual version for a part that ended up with both a debt row
+    and available stock. The debt shrinks, the sources are drawn down FIFO (or
+    off one named item) and the placeholder consumption is repriced to what that
+    stock actually cost, so the order stops being costed at a guess."""
+    debt = get_item(s, debt_id)
+    if debt.status != STOCK_AVAILABLE or debt.count >= 0:
+        raise InventoryError(f"stock item {debt_id} is not an outstanding debt")
+    if quantity <= 0:
+        raise InventoryError("quantity must be positive")
+    if quantity > -debt.count + 1e-9:
+        raise InventoryError(f"stock item {debt_id} only owes {-debt.count:g}")
+    kind, order_id, label = _debt_order(s, debt)
+    placeholder = _paired_placeholder(s, debt)
+    if placeholder is None:
+        raise InventoryError(f"stock item {debt_id} has no consumption to settle")
+    if item_id is None:
+        sources = _shelf_stock(s, debt.part_id)
     else:
-        # not-null: checked above, one of build_id/so_id is always set
-        get_so(s, so_id)  # ty: ignore[invalid-argument-type]  # exists check
-        kind, order_id, label = "sales-order", so_id, so_ref(so_id)  # ty: ignore[invalid-argument-type]
+        named = get_item(s, item_id)
+        if (
+            named.part_id != debt.part_id
+            or named.status != STOCK_AVAILABLE
+            or named.count <= 0
+        ):
+            raise InventoryError(
+                f"stock item {item_id} is not available stock of part {debt.part_id}"
+            )
+        sources = [named]
+    available = sum(i.count for i in sources)
+    if quantity > available + 1e-9:
+        raise InventoryError(f"only {available:g} in stock, cannot settle {quantity:g}")
+
+    _settle_from_shelf(s, debt, placeholder, quantity, sources)
+    part = get_part(s, debt.part_id)
     _activity(
         s,
         "settle_debt_from_stock",
@@ -2202,6 +2253,47 @@ def settle_debt_from_stock(
             (kind, order_id, label),
             ("part", part.id, part.sku),
         ],
+    )
+
+
+@_write
+def consolidate_part_stock(s: Session, part_id: int) -> None:
+    """Clear every outstanding shortfall for a part out of its available stock,
+    oldest debt first until the shelf runs out. The bulk version of
+    settle_debt_from_stock, for a part that ended up holding both."""
+    part = get_part(s, part_id)
+    debts = _debt_rows(s, part_id)
+    if not debts:
+        raise InventoryError(f"part {part_id} has no outstanding shortfall")
+    sources = _shelf_stock(s, part_id)
+    left = sum(i.count for i in sources)
+    if left <= 1e-9:
+        raise InventoryError(f"part {part_id} has no available stock to consolidate")
+
+    total = 0.0
+    refs: list[tuple[str, int, str | None]] = [("part", part.id, part.sku)]
+    for debt in debts:
+        if left <= 1e-9:
+            break
+        placeholder = _paired_placeholder(s, debt)
+        if placeholder is None:
+            continue  # hand-edited data: no consumption to reprice, leave it
+        pay = min(-debt.count, left, placeholder.count)
+        if pay <= 1e-9:
+            continue
+        kind, order_id, label = _debt_order(s, debt)
+        _settle_from_shelf(s, debt, placeholder, pay, _shelf_stock(s, part_id))
+        total += pay
+        left -= pay
+        refs.append((kind, order_id, label))
+    if total <= 1e-9:
+        raise InventoryError(f"part {part_id} has no shortfall that can be settled")
+    _activity(
+        s,
+        "consolidate_part_stock",
+        f"{total:g}x {part.description} consolidated from stock, "
+        f"settling {len(refs) - 1} shortfall(s)",
+        refs,
     )
 
 
@@ -2705,35 +2797,14 @@ def _settle_stock_debt(s: Session, item: StockItem) -> dict[tuple[str, int], flo
     Both builds and sales can owe stock, so the result is keyed by which:
     {("build"|"sales-order", id): quantity settled}. Only a build has output to
     reprice afterwards -- a sale produces nothing."""
-    debts = s.scalars(
-        select(StockItem)
-        .where(
-            StockItem.part_id == item.part_id,
-            StockItem.status == STOCK_AVAILABLE,
-            StockItem.count < 0,
-            or_(
-                StockItem.consumed_by_build_id.is_not(None),
-                StockItem.consumed_by_so_id.is_not(None),
-            ),
-        )
-        .order_by(StockItem.id)
-    ).all()
+    debts = _debt_rows(s, item.part_id)
     next_id = (s.scalar(select(func.max(StockItem.id))) or 0) + 1
     settled: dict[tuple[str, int], float] = {}
     for debt in debts:
         if item.count <= 1e-9:
             break
-        # the consuming write emits the pair together, consumed row first, so
-        # the placeholder is the debt's immediate predecessor. Matching on
-        # order+part instead would pick up the rows consumed from real stock.
-        placeholder = s.get(StockItem, debt.id - 1)
-        if (
-            placeholder is None
-            or placeholder.status != STOCK_CONSUMED
-            or placeholder.consumed_by_build_id != debt.consumed_by_build_id
-            or placeholder.consumed_by_so_id != debt.consumed_by_so_id
-            or placeholder.part_id != debt.part_id
-        ):
+        placeholder = _paired_placeholder(s, debt)
+        if placeholder is None:
             continue  # hand-edited data: no consumption to reprice, leave it
         pay = min(-debt.count, item.count, placeholder.count)
         if pay <= 1e-9:
@@ -2810,11 +2881,11 @@ def _settle_activity(
     s: Session,
     settled: dict[tuple[str, int], float],
     part: Part,
-    po_id: int,
-    po_label: str,
+    origin: tuple[str, int, str],
 ) -> None:
-    """One activity row per order a receipt paid off, so receiving tells the user
-    what it settled instead of silently zeroing rows."""
+    """One activity row per order the new stock paid off, so receiving (or
+    producing) tells the user what it settled instead of silently zeroing rows.
+    `origin` is the (kind, id, label) of the order the stock came in on."""
     for (kind, order_id), qty in settled.items():
         if kind == "build":
             get_build(s, order_id)  # exists check
@@ -2827,7 +2898,7 @@ def _settle_activity(
             "settle_stock_debt",
             f"{qty:g}x {part.description} settled a shortfall on {label}",
             [
-                ("po", po_id, po_label),
+                origin,
                 (kind, order_id, label),
                 ("part", part.id, part.description),
             ],
@@ -2864,7 +2935,7 @@ def book_po_line(s: Session, line_id: int, stock_item_id: int, quantity: float) 
             ("stock", stock_item_id, f"{count:g}x {part.description}"),
         ],
     )
-    _settle_activity(s, settled, part, po.id, po_label)
+    _settle_activity(s, settled, part, ("po", po.id, po_label))
     _complete_po_if_fully_received(s, line.po_id)
 
 
@@ -2903,7 +2974,7 @@ def book_po(s: Session, po_id: int) -> None:
     if len(refs) > 1:
         _activity(s, "book_po", f"Received {po_label} into stock", refs)
     for settled, part in all_settled:
-        _settle_activity(s, settled, part, po_id, po_label)
+        _settle_activity(s, settled, part, ("po", po_id, po_label))
     _complete_po_if_fully_received(s, po_id)
 
 
@@ -3170,16 +3241,21 @@ def produce_build(s: Session, build_id: int, quantity: int) -> None:
             s, component_id, qty * quantity, next_id, consumed_by_build_id=build_id
         )
 
-    s.add(
-        StockItem(
-            id=next_id,
-            count=quantity,
-            part_id=build.part_id,
-            build_id=build_id,
-            status=STOCK_AVAILABLE,
-        )
+    output = StockItem(
+        id=next_id,
+        count=quantity,
+        part_id=build.part_id,
+        build_id=build_id,
+        status=STOCK_AVAILABLE,
     )
+    s.add(output)
     s.flush()
+    part = get_part(s, build.part_id)
+    label = build_ref(build_id)
+    # an earlier order may already owe this assembly. Settle it out of the fresh
+    # output, exactly as receiving a PO does -- settled units never reach the
+    # shelf, so this must run before the reprice below reads their counts.
+    settled = _settle_stock_debt(s, output)
     # consumed rows already carry the price they were worth going in. Reprice
     # every Available row of this build (not just the new one): each batch is
     # costed from the build's cumulative consumption, so earlier output moves
@@ -3190,8 +3266,6 @@ def produce_build(s: Session, build_id: int, quantity: int) -> None:
         )
     ):
         refresh_stock_price(s, item)
-    part = get_part(s, build.part_id)
-    label = build_ref(build_id)
     _activity(
         s,
         "produce_build",
@@ -3201,6 +3275,7 @@ def produce_build(s: Session, build_id: int, quantity: int) -> None:
             ("stock", next_id, f"{quantity}x {part.description}"),
         ],
     )
+    _settle_activity(s, settled, part, ("build", build_id, label))
     if quantity >= remaining:
         build.status = BuildStatus.COMPLETE
 
