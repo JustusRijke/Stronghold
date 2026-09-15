@@ -123,6 +123,7 @@ export const api = {
 		patch<StockItem>(`/stock/${id}`, b),
 	settleDebt: (id: number, b: { quantity: number; item_id?: number | null }) =>
 		post<Part>(`/stock/${id}/settle`, b),
+	consolidateStock: (partId: number) => post<Part>(`/parts/${partId}/consolidate-stock`, {}),
 	stocktakeReasons: () =>
 		get<{ add: string[]; subtract: string[] }>('/settings/stocktake-reasons'),
 	stocktake: (b: {

@@ -473,6 +473,112 @@ def test_shortfall_settled_from_stock(database):
         assert settled.price_basis == "po"
 
 
+def test_consolidate_clears_every_shortfall_for_a_part(database):
+    """One click on the part page settles all its outstanding shortfalls out of
+    the stock on the shelf, oldest debt first."""
+    db.create_part(1, "ASM", "an assembly")
+    db.create_part(2, "COMP", "a component")
+    db.set_part_assembly(1, True)
+    db.add_bomline(db.next_bomline_id(), 1, 2, 1.0)
+    db.create_supplier(1, "Acme")
+    db.create_supplier_part(1, 1, "C-1", 2, pack_qty=1)
+    db.create_po(1, 1)
+    line_id = db.next_line_id()
+    db.add_po_line(line_id, 1, 1, 10, 2.0)
+
+    build_id = db.next_build_id()
+    db.create_build(build_id, 1, 1)
+    db.produce_build(build_id, 1)  # empty shelf: 1 on credit
+    db.add_negative_stock(2, 2.0, build_id)  # a second shortfall, 3 owed total
+    db.book_po_line(line_id, db.next_item_id(), 10)  # receipt settles both
+
+    # a third shortfall, now with stock already on the shelf beside it
+    db.add_negative_stock(2, 4.0, build_id)
+    with db.session() as s:
+        debt_id = (
+            s.scalars(
+                select(StockItem).where(StockItem.part_id == 2, StockItem.count < 0)
+            )
+            .one()
+            .id
+        )
+        shelf_before = db.on_hand(s, 2)
+
+    db.consolidate_part_stock(2)
+    with db.session() as s:
+        assert s.get(StockItem, debt_id).count == 0
+        assert db.on_hand(s, 2) == shelf_before  # the debt netted out already
+        settled = s.scalars(
+            select(StockItem).where(
+                StockItem.consumed_by_build_id == build_id,
+                StockItem.count == 4.0,
+                StockItem.status == db.STOCK_CONSUMED,
+            )
+        ).one()
+        assert (settled.unit_price, settled.price_basis) == (2.0, "po")
+        act = s.scalars(
+            select(Activity).where(Activity.action == "consolidate_part_stock")
+        ).one()
+        assert "consolidated from stock" in act.message
+
+
+def test_producing_settles_a_shortfall_on_the_assembly(database):
+    """Build output pays off an order that already owed the assembly, the same
+    way a PO receipt does -- the settled units never reach the shelf."""
+    db.create_part(1, "ASM", "an assembly")
+    db.create_part(2, "COMP", "a component")
+    db.set_part_assembly(1, True)
+    db.add_bomline(db.next_bomline_id(), 1, 2, 1.0)
+    db.create_supplier(1, "Acme")
+    db.create_supplier_part(1, 1, "C-1", 2, pack_qty=1)
+    db.create_po(1, 1)
+    line_id = db.next_line_id()
+    db.add_po_line(line_id, 1, 1, 10, 2.0)
+    db.book_po_line(line_id, db.next_item_id(), 10)
+
+    build_id = db.next_build_id()
+    db.create_build(build_id, 1, 2)
+    # someone already owes 1 of the assembly itself
+    db.add_negative_stock(1, 1.0, build_id)
+    with db.session() as s:
+        debt_id = (
+            s.scalars(
+                select(StockItem).where(StockItem.part_id == 1, StockItem.count < 0)
+            )
+            .one()
+            .id
+        )
+
+    db.produce_build(build_id, 2)
+    with db.session() as s:
+        assert s.get(StockItem, debt_id).count == 0  # settled by the output
+        output = s.scalars(
+            select(StockItem).where(
+                StockItem.build_id == build_id,
+                StockItem.status == db.STOCK_AVAILABLE,
+            )
+        ).one()
+        assert output.count == 1  # 2 produced, 1 went straight to the debt
+        # the settled unit never reached the shelf, but it was still produced:
+        # it stays stamped build_id, so the build does not read as never run
+        assert db.produced_qty(s, build_id) == 2
+        assert db.get_build(s, build_id).status == "Complete"
+        # and the sale/build that owed it is costed off the real build cost,
+        # not the estimate it was booked at
+        settled = s.scalars(
+            select(StockItem).where(
+                StockItem.part_id == 1,
+                StockItem.status == db.STOCK_CONSUMED,
+                StockItem.consumed_by_build_id == build_id,
+            )
+        ).one()
+        assert settled.price_basis != "estimate"
+        act = s.scalars(
+            select(Activity).where(Activity.action == "settle_stock_debt")
+        ).one()
+        assert "settled a shortfall" in act.message
+
+
 def test_shortfall_settled_by_whole_po_receipt(database):
     """Receiving a whole PO settles shortfalls exactly like booking its lines
     one at a time -- the two receive paths must not drift apart."""
