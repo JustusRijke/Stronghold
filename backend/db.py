@@ -2823,7 +2823,13 @@ def _settle_stock_debt(s: Session, item: StockItem) -> dict[tuple[str, int], flo
             )
             s.add(placeholder)
             next_id += 1
+        # provenance follows the units, whichever way they arrived: po_id for a
+        # receipt, build_id when build output settles a debt. build_id also
+        # keeps the settled units inside produced_qty, which sums the counts of
+        # the rows a build produced -- without it, output that went straight to
+        # a debt would read as never produced.
         placeholder.po_id = item.po_id
+        placeholder.build_id = item.build_id
         s.flush()
         refresh_stock_price(s, placeholder)
         debt.count += pay

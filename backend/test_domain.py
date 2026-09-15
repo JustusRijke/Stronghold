@@ -559,6 +559,20 @@ def test_producing_settles_a_shortfall_on_the_assembly(database):
             )
         ).one()
         assert output.count == 1  # 2 produced, 1 went straight to the debt
+        # the settled unit never reached the shelf, but it was still produced:
+        # it stays stamped build_id, so the build does not read as never run
+        assert db.produced_qty(s, build_id) == 2
+        assert db.get_build(s, build_id).status == "Complete"
+        # and the sale/build that owed it is costed off the real build cost,
+        # not the estimate it was booked at
+        settled = s.scalars(
+            select(StockItem).where(
+                StockItem.part_id == 1,
+                StockItem.status == db.STOCK_CONSUMED,
+                StockItem.consumed_by_build_id == build_id,
+            )
+        ).one()
+        assert settled.price_basis != "estimate"
         act = s.scalars(
             select(Activity).where(Activity.action == "settle_stock_debt")
         ).one()
