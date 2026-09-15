@@ -132,17 +132,22 @@ anyway is your decision, deliberately.
 ### Settling a shortfall
 
 A debt is settled, never deleted -- it shrinks to zero and stays as a record.
-Two ways:
+Three ways:
 
 - **Receiving the missing parts on a purchase order.** This happens
   automatically: the debt shrinks and the consumption is repriced from what you
   actually paid (for a build, the assembly's value is recalculated too). The
   settled units go straight to the order that owed them -- they never land on
-  the shelf.
-- **Settling from stock you already have.** If a part somehow ended up with both
-  a debt and stock on the shelf, the stock item page offers **Settle from
-  stock**. It draws the stock down oldest-first (or off one item you name) and
-  reprices the consumption off what that stock really cost.
+  the shelf. **Producing build output does the same** for the assembly it
+  builds, in case an earlier order was already short of it.
+- **Consolidating the part.** If a part ends up holding both debts and stock on
+  the shelf, the part page shows a **Consolidate stock** button (only while
+  there is something to consolidate). One click clears every outstanding
+  shortfall for that part, oldest debt first, until the shelf runs out.
+- **Settling one item by hand.** The stock item page offers **Settle from
+  stock** for a single debt: it asks how many and lets you take them off one
+  named item instead of oldest-first. Use it when you want the precision;
+  Consolidate is the bulk version.
 
 Either way the point is the same: replace the estimated cost with the real one.
 
