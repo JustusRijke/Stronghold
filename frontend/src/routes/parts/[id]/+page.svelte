@@ -19,6 +19,7 @@
 		stockOrderLabel,
 		stockOrderUrl,
 		CREATED_COLUMN,
+		STOCK_AVAILABLE,
 		STOCK_CONSUMED,
 		stockStatusLabel,
 		STOCK_STATUS_OPTIONS,
@@ -207,6 +208,19 @@
 	$effect(() => {
 		if (!Number.isNaN(id)) load();
 	});
+
+	// a shortfall left a negative Available row (part.owed, negative). When the
+	// part also holds real stock the two can be netted off in one go.
+	const owed = $derived(-(part?.owed ?? 0));
+	const onShelf = $derived(
+		stock
+			.filter((s) => s.status === STOCK_AVAILABLE && s.count > 0)
+			.reduce((t, s) => t + s.count, 0)
+	);
+	async function consolidate() {
+		if (!confirm(`Settle ${owed} owed out of the ${onShelf} in stock?`)) return;
+		if (await toast.run(() => api.consolidateStock(id), 'Stock consolidated')) load();
+	}
 
 	// sidebar sections, in document order; BOM only when the part is an assembly,
 	// build orders last (history, and the longest table).
@@ -543,6 +557,9 @@
 						<button class="btn ghost" type="button" onclick={() => (negStockOpen = true)}>
 							Add negative stock item
 						</button>
+						{#if owed > 0 && onShelf > 0}
+							<button class="btn" type="button" onclick={consolidate}>Consolidate stock</button>
+						{/if}
 					</p>
 				{/if}
 				{#if part.virtual}
